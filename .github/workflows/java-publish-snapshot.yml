@@ -3,9 +3,11 @@ name: Java Publish Snapshot to Maven Central
 env:
   HUSKY: 0
 
+# Fork note: automatic weekday publishing is disabled in this fork because
+# Maven Central publishing requires credentials and publication ownership that
+# are specific to the upstream project. Manual dispatch remains available for
+# intentional fork-specific publishing after configuration.
 on:
-  schedule:
-    - cron: "0 7 * * 1-5" # Mon-Fri at 07:00 UTC
   workflow_dispatch:
 
 permissions:
