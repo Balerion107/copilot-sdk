@@ -53,7 +53,20 @@ func (r RawSessionEventData) Type() SessionEventType {
 type SessionEventType string
 
 const (
-	SessionEventTypeAbort                       SessionEventType = "abort"
+	SessionEventTypeAbort            SessionEventType = "abort"
+	SessionEventTypeAgentInterrupted SessionEventType = "agent.interrupted"
+	// Experimental: SessionEventTypeAssistantFusionPhaseActivity identifies an experimental
+	// event that may change or be removed.
+	SessionEventTypeAssistantFusionPhaseActivity SessionEventType = "assistant.fusion_phase_activity"
+	// Experimental: SessionEventTypeAssistantFusionPhaseCompleted identifies an experimental
+	// event that may change or be removed.
+	SessionEventTypeAssistantFusionPhaseCompleted SessionEventType = "assistant.fusion_phase_completed"
+	// Experimental: SessionEventTypeAssistantFusionPhaseFailed identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypeAssistantFusionPhaseFailed SessionEventType = "assistant.fusion_phase_failed"
+	// Experimental: SessionEventTypeAssistantFusionPhaseStarted identifies an experimental
+	// event that may change or be removed.
+	SessionEventTypeAssistantFusionPhaseStarted SessionEventType = "assistant.fusion_phase_started"
 	SessionEventTypeAssistantIdle               SessionEventType = "assistant.idle"
 	SessionEventTypeAssistantIntent             SessionEventType = "assistant.intent"
 	SessionEventTypeAssistantMessage            SessionEventType = "assistant.message"
@@ -65,6 +78,7 @@ const (
 	SessionEventTypeAssistantStreamingDelta     SessionEventType = "assistant.streaming_delta"
 	SessionEventTypeAssistantToolCallDelta      SessionEventType = "assistant.tool_call_delta"
 	SessionEventTypeAssistantTurnEnd            SessionEventType = "assistant.turn_end"
+	SessionEventTypeAssistantTurnRetry          SessionEventType = "assistant.turn_retry"
 	SessionEventTypeAssistantTurnStart          SessionEventType = "assistant.turn_start"
 	SessionEventTypeAssistantUsage              SessionEventType = "assistant.usage"
 	SessionEventTypeAutoModeSwitchCompleted     SessionEventType = "auto_mode_switch.completed"
@@ -80,28 +94,63 @@ const (
 	SessionEventTypeExitPlanModeRequested       SessionEventType = "exit_plan_mode.requested"
 	SessionEventTypeExternalToolCompleted       SessionEventType = "external_tool.completed"
 	SessionEventTypeExternalToolRequested       SessionEventType = "external_tool.requested"
-	SessionEventTypeHookEnd                     SessionEventType = "hook.end"
-	SessionEventTypeHookProgress                SessionEventType = "hook.progress"
-	SessionEventTypeHookStart                   SessionEventType = "hook.start"
-	SessionEventTypeMCPAppToolCallComplete      SessionEventType = "mcp_app.tool_call_complete"
-	SessionEventTypeMCPHeadersRefreshCompleted  SessionEventType = "mcp.headers_refresh_completed"
-	SessionEventTypeMCPHeadersRefreshRequired   SessionEventType = "mcp.headers_refresh_required"
-	SessionEventTypeMCPOauthCompleted           SessionEventType = "mcp.oauth_completed"
-	SessionEventTypeMCPOauthRequired            SessionEventType = "mcp.oauth_required"
-	SessionEventTypeMCPPromptsListChanged       SessionEventType = "mcp.prompts.list_changed"
-	SessionEventTypeMCPResourcesListChanged     SessionEventType = "mcp.resources.list_changed"
-	SessionEventTypeMCPToolsListChanged         SessionEventType = "mcp.tools.list_changed"
-	SessionEventTypeModelCallFailure            SessionEventType = "model.call_failure"
-	SessionEventTypePendingMessagesModified     SessionEventType = "pending_messages.modified"
-	SessionEventTypePermissionCompleted         SessionEventType = "permission.completed"
-	SessionEventTypePermissionRequested         SessionEventType = "permission.requested"
-	SessionEventTypeSamplingCompleted           SessionEventType = "sampling.completed"
-	SessionEventTypeSamplingRequested           SessionEventType = "sampling.requested"
+	// Experimental: SessionEventTypeFactoryRunSettled identifies an experimental event that may
+	// change or be removed.
+	SessionEventTypeFactoryRunSettled SessionEventType = "factory.run_settled"
+	// Experimental: SessionEventTypeFactoryRunStarted identifies an experimental event that may
+	// change or be removed.
+	SessionEventTypeFactoryRunStarted SessionEventType = "factory.run_started"
+	// Experimental: SessionEventTypeFactoryRunUpdated identifies an experimental event that may
+	// change or be removed.
+	SessionEventTypeFactoryRunUpdated          SessionEventType = "factory.run_updated"
+	SessionEventTypeHookEnd                    SessionEventType = "hook.end"
+	SessionEventTypeHookProgress               SessionEventType = "hook.progress"
+	SessionEventTypeHookStart                  SessionEventType = "hook.start"
+	SessionEventTypeMCPAppToolCallComplete     SessionEventType = "mcp_app.tool_call_complete"
+	SessionEventTypeMCPHeadersRefreshCompleted SessionEventType = "mcp.headers_refresh_completed"
+	SessionEventTypeMCPHeadersRefreshRequired  SessionEventType = "mcp.headers_refresh_required"
+	SessionEventTypeMCPOauthCompleted          SessionEventType = "mcp.oauth_completed"
+	SessionEventTypeMCPOauthRequired           SessionEventType = "mcp.oauth_required"
+	SessionEventTypeMCPPromptsListChanged      SessionEventType = "mcp.prompts.list_changed"
+	SessionEventTypeMCPResourcesListChanged    SessionEventType = "mcp.resources.list_changed"
+	SessionEventTypeMCPToolsListChanged        SessionEventType = "mcp.tools.list_changed"
+	SessionEventTypeModelCallFailure           SessionEventType = "model.call_failure"
+	SessionEventTypeModelCallFinished          SessionEventType = "model.call_finished"
+	SessionEventTypeModelCallStart             SessionEventType = "model.call_start"
+	SessionEventTypePendingMessagesModified    SessionEventType = "pending_messages.modified"
+	// Experimental: SessionEventTypePermissionAssentDetected identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypePermissionAssentDetected SessionEventType = "permission.assentDetected"
+	// Experimental: SessionEventTypePermissionCarriedForward identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypePermissionCarriedForward SessionEventType = "permission.carriedForward"
+	SessionEventTypePermissionCompleted      SessionEventType = "permission.completed"
+	// Experimental: SessionEventTypePermissionContextualAuthorization identifies an
+	// experimental event that may change or be removed.
+	SessionEventTypePermissionContextualAuthorization SessionEventType = "permission.contextualAuthorization"
+	// Experimental: SessionEventTypePermissionMessageAuthorization identifies an experimental
+	// event that may change or be removed.
+	SessionEventTypePermissionMessageAuthorization SessionEventType = "permission.messageAuthorization"
+	// Experimental: SessionEventTypePermissionMessageAuthorizationDegraded identifies an
+	// experimental event that may change or be removed.
+	SessionEventTypePermissionMessageAuthorizationDegraded SessionEventType = "permission.messageAuthorizationDegraded"
+	// Experimental: SessionEventTypePermissionMessageAuthorizationRead identifies an
+	// experimental event that may change or be removed.
+	SessionEventTypePermissionMessageAuthorizationRead SessionEventType = "permission.messageAuthorizationRead"
+	SessionEventTypePermissionRequested                SessionEventType = "permission.requested"
+	SessionEventTypePromptCacheBreak                   SessionEventType = "prompt_cache_break"
+	SessionEventTypeSamplingCompleted                  SessionEventType = "sampling.completed"
+	SessionEventTypeSamplingRequested                  SessionEventType = "sampling.requested"
+	SessionEventTypeSandboxDecision                    SessionEventType = "sandbox.decision"
 	// Experimental: SessionEventTypeSessionAutoModeResolved identifies an experimental event
 	// that may change or be removed.
 	SessionEventTypeSessionAutoModeResolved          SessionEventType = "session.auto_mode_resolved"
 	SessionEventTypeSessionAutopilotObjectiveChanged SessionEventType = "session.autopilot_objective_changed"
-	SessionEventTypeSessionBackgroundTasksChanged    SessionEventType = "session.background_tasks_changed"
+	// Experimental: SessionEventTypeSessionAutoTierRecommendation identifies an experimental
+	// event that may change or be removed.
+	SessionEventTypeSessionAutoTierRecommendation SessionEventType = "session.auto_tier_recommendation"
+	SessionEventTypeSessionAutoTierSwitchFailed   SessionEventType = "session.auto_tier_switch_failed"
+	SessionEventTypeSessionBackgroundTasksChanged SessionEventType = "session.background_tasks_changed"
 	// Experimental: SessionEventTypeSessionBinaryAsset identifies an experimental event that
 	// may change or be removed.
 	SessionEventTypeSessionBinaryAsset SessionEventType = "session.binary_asset"
@@ -122,65 +171,188 @@ const (
 	SessionEventTypeSessionCanvasRemoved SessionEventType = "session.canvas.removed"
 	// Experimental: SessionEventTypeSessionCanvasUnavailable identifies an experimental event
 	// that may change or be removed.
-	SessionEventTypeSessionCanvasUnavailable           SessionEventType = "session.canvas.unavailable"
-	SessionEventTypeSessionCompactionComplete          SessionEventType = "session.compaction_complete"
-	SessionEventTypeSessionCompactionStart             SessionEventType = "session.compaction_start"
+	SessionEventTypeSessionCanvasUnavailable  SessionEventType = "session.canvas.unavailable"
+	SessionEventTypeSessionCompactionComplete SessionEventType = "session.compaction_complete"
+	SessionEventTypeSessionCompactionStart    SessionEventType = "session.compaction_start"
+	// Experimental: SessionEventTypeSessionCompletionReceipt identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypeSessionCompletionReceipt           SessionEventType = "session.completion_receipt"
 	SessionEventTypeSessionContextChanged              SessionEventType = "session.context_changed"
+	SessionEventTypeSessionContextCleared              SessionEventType = "session.context_cleared"
 	SessionEventTypeSessionCustomAgentsUpdated         SessionEventType = "session.custom_agents_updated"
 	SessionEventTypeSessionCustomNotification          SessionEventType = "session.custom_notification"
 	SessionEventTypeSessionError                       SessionEventType = "session.error"
 	SessionEventTypeSessionExtensionsAttachmentsPushed SessionEventType = "session.extensions.attachments_pushed"
 	SessionEventTypeSessionExtensionsLoaded            SessionEventType = "session.extensions_loaded"
-	SessionEventTypeSessionHandoff                     SessionEventType = "session.handoff"
-	SessionEventTypeSessionIdle                        SessionEventType = "session.idle"
-	SessionEventTypeSessionInfo                        SessionEventType = "session.info"
-	SessionEventTypeSessionLimitsExhaustedCompleted    SessionEventType = "session_limits_exhausted.completed"
-	SessionEventTypeSessionLimitsExhaustedRequested    SessionEventType = "session_limits_exhausted.requested"
+	// Experimental: SessionEventTypeSessionFusionCompleted identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypeSessionFusionCompleted SessionEventType = "session.fusion_completed"
+	// Experimental: SessionEventTypeSessionFusionResolved identifies an experimental event that
+	// may change or be removed.
+	SessionEventTypeSessionFusionResolved SessionEventType = "session.fusion_resolved"
+	// Experimental: SessionEventTypeSessionFusionRouteFailed identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypeSessionFusionRouteFailed SessionEventType = "session.fusion_route_failed"
+	// Experimental: SessionEventTypeSessionFusionRouteStarted identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypeSessionFusionRouteStarted       SessionEventType = "session.fusion_route_started"
+	SessionEventTypeSessionHandoff                  SessionEventType = "session.handoff"
+	SessionEventTypeSessionIdle                     SessionEventType = "session.idle"
+	SessionEventTypeSessionInfo                     SessionEventType = "session.info"
+	SessionEventTypeSessionLimitsExhaustedCompleted SessionEventType = "session_limits_exhausted.completed"
+	SessionEventTypeSessionLimitsExhaustedRequested SessionEventType = "session_limits_exhausted.requested"
+	// Experimental: SessionEventTypeSessionManagedSettingsEnforced identifies an experimental
+	// event that may change or be removed.
+	SessionEventTypeSessionManagedSettingsEnforced SessionEventType = "session.managed_settings_enforced"
 	// Experimental: SessionEventTypeSessionManagedSettingsResolved identifies an experimental
 	// event that may change or be removed.
 	SessionEventTypeSessionManagedSettingsResolved SessionEventType = "session.managed_settings_resolved"
+	SessionEventTypeSessionMCPServerNeedsReconnect SessionEventType = "session.mcp_server_needs_reconnect"
+	SessionEventTypeSessionMCPServerRemoved        SessionEventType = "session.mcp_server_removed"
 	SessionEventTypeSessionMCPServersLoaded        SessionEventType = "session.mcp_servers_loaded"
 	SessionEventTypeSessionMCPServerStatusChanged  SessionEventType = "session.mcp_server_status_changed"
 	SessionEventTypeSessionModeChanged             SessionEventType = "session.mode_changed"
 	SessionEventTypeSessionModelChange             SessionEventType = "session.model_change"
-	SessionEventTypeSessionPermissionsChanged      SessionEventType = "session.permissions_changed"
-	SessionEventTypeSessionPlanChanged             SessionEventType = "session.plan_changed"
-	SessionEventTypeSessionRemoteSteerableChanged  SessionEventType = "session.remote_steerable_changed"
-	SessionEventTypeSessionResume                  SessionEventType = "session.resume"
-	SessionEventTypeSessionScheduleCancelled       SessionEventType = "session.schedule_cancelled"
-	SessionEventTypeSessionScheduleCreated         SessionEventType = "session.schedule_created"
-	SessionEventTypeSessionScheduleRearmed         SessionEventType = "session.schedule_rearmed"
-	SessionEventTypeSessionSessionLimitsChanged    SessionEventType = "session.session_limits_changed"
-	SessionEventTypeSessionShutdown                SessionEventType = "session.shutdown"
-	SessionEventTypeSessionSkillsLoaded            SessionEventType = "session.skills_loaded"
-	SessionEventTypeSessionSnapshotRewind          SessionEventType = "session.snapshot_rewind"
-	SessionEventTypeSessionStart                   SessionEventType = "session.start"
-	SessionEventTypeSessionTaskComplete            SessionEventType = "session.task_complete"
-	SessionEventTypeSessionTitleChanged            SessionEventType = "session.title_changed"
-	SessionEventTypeSessionTodosChanged            SessionEventType = "session.todos_changed"
-	SessionEventTypeSessionToolsUpdated            SessionEventType = "session.tools_updated"
-	SessionEventTypeSessionTruncation              SessionEventType = "session.truncation"
-	SessionEventTypeSessionUsageCheckpoint         SessionEventType = "session.usage_checkpoint"
-	SessionEventTypeSessionUsageInfo               SessionEventType = "session.usage_info"
-	SessionEventTypeSessionWarning                 SessionEventType = "session.warning"
-	SessionEventTypeSessionWorkspaceFileChanged    SessionEventType = "session.workspace_file_changed"
-	SessionEventTypeSkillInvoked                   SessionEventType = "skill.invoked"
-	SessionEventTypeSubagentCompleted              SessionEventType = "subagent.completed"
-	SessionEventTypeSubagentDeselected             SessionEventType = "subagent.deselected"
-	SessionEventTypeSubagentFailed                 SessionEventType = "subagent.failed"
-	SessionEventTypeSubagentSelected               SessionEventType = "subagent.selected"
-	SessionEventTypeSubagentStarted                SessionEventType = "subagent.started"
-	SessionEventTypeSystemMessage                  SessionEventType = "system.message"
-	SessionEventTypeSystemNotification             SessionEventType = "system.notification"
-	SessionEventTypeToolExecutionComplete          SessionEventType = "tool.execution_complete"
-	SessionEventTypeToolExecutionPartialResult     SessionEventType = "tool.execution_partial_result"
-	SessionEventTypeToolExecutionProgress          SessionEventType = "tool.execution_progress"
-	SessionEventTypeToolExecutionStart             SessionEventType = "tool.execution_start"
-	SessionEventTypeToolUserRequested              SessionEventType = "tool.user_requested"
-	SessionEventTypeUserInputCompleted             SessionEventType = "user_input.completed"
-	SessionEventTypeUserInputRequested             SessionEventType = "user_input.requested"
-	SessionEventTypeUserMessage                    SessionEventType = "user.message"
+	SessionEventTypeSessionModeNoticeDelivered     SessionEventType = "session.mode_notice_delivered"
+	// Experimental: SessionEventTypeSessionPermissionsChanged identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypeSessionPermissionsChanged     SessionEventType = "session.permissions_changed"
+	SessionEventTypeSessionPlanChanged            SessionEventType = "session.plan_changed"
+	SessionEventTypeSessionRemoteSteerableChanged SessionEventType = "session.remote_steerable_changed"
+	SessionEventTypeSessionResume                 SessionEventType = "session.resume"
+	SessionEventTypeSessionScheduleCancelled      SessionEventType = "session.schedule_cancelled"
+	SessionEventTypeSessionScheduleCreated        SessionEventType = "session.schedule_created"
+	SessionEventTypeSessionScheduleRearmed        SessionEventType = "session.schedule_rearmed"
+	SessionEventTypeSessionSessionLimitsChanged   SessionEventType = "session.session_limits_changed"
+	SessionEventTypeSessionShutdown               SessionEventType = "session.shutdown"
+	SessionEventTypeSessionSkillsLoaded           SessionEventType = "session.skills_loaded"
+	SessionEventTypeSessionSnapshotRewind         SessionEventType = "session.snapshot_rewind"
+	SessionEventTypeSessionStart                  SessionEventType = "session.start"
+	SessionEventTypeSessionTaskComplete           SessionEventType = "session.task_complete"
+	SessionEventTypeSessionTitleChanged           SessionEventType = "session.title_changed"
+	SessionEventTypeSessionTodosChanged           SessionEventType = "session.todos_changed"
+	SessionEventTypeSessionToolsUpdated           SessionEventType = "session.tools_updated"
+	SessionEventTypeSessionTruncation             SessionEventType = "session.truncation"
+	SessionEventTypeSessionUsageCheckpoint        SessionEventType = "session.usage_checkpoint"
+	SessionEventTypeSessionUsageInfo              SessionEventType = "session.usage_info"
+	SessionEventTypeSessionWarning                SessionEventType = "session.warning"
+	SessionEventTypeSessionWorkspaceFileChanged   SessionEventType = "session.workspace_file_changed"
+	// Experimental: SessionEventTypeSkillContextDelivered identifies an experimental event that
+	// may change or be removed.
+	SessionEventTypeSkillContextDelivered SessionEventType = "skill.context_delivered"
+	// Experimental: SessionEventTypeSkillContextDeliveredRef identifies an experimental event
+	// that may change or be removed.
+	SessionEventTypeSkillContextDeliveredRef SessionEventType = "skill.context_delivered_ref"
+	SessionEventTypeSkillInvoked             SessionEventType = "skill.invoked"
+	// Experimental: SessionEventTypeSkillInvokedRef identifies an experimental event that may
+	// change or be removed.
+	SessionEventTypeSkillInvokedRef            SessionEventType = "skill.invoked_ref"
+	SessionEventTypeSubagentCompleted          SessionEventType = "subagent.completed"
+	SessionEventTypeSubagentConfigured         SessionEventType = "subagent.configured"
+	SessionEventTypeSubagentDeselected         SessionEventType = "subagent.deselected"
+	SessionEventTypeSubagentFailed             SessionEventType = "subagent.failed"
+	SessionEventTypeSubagentSelected           SessionEventType = "subagent.selected"
+	SessionEventTypeSubagentStarted            SessionEventType = "subagent.started"
+	SessionEventTypeSystemMessage              SessionEventType = "system.message"
+	SessionEventTypeSystemNotification         SessionEventType = "system.notification"
+	SessionEventTypeToolExecutionComplete      SessionEventType = "tool.execution_complete"
+	SessionEventTypeToolExecutionPartialResult SessionEventType = "tool.execution_partial_result"
+	SessionEventTypeToolExecutionProgress      SessionEventType = "tool.execution_progress"
+	SessionEventTypeToolExecutionStart         SessionEventType = "tool.execution_start"
+	SessionEventTypeToolSearchActivated        SessionEventType = "tool_search.activated"
+	SessionEventTypeToolUserRequested          SessionEventType = "tool.user_requested"
+	// Experimental: SessionEventTypeUIEphemeralQuery identifies an experimental event that may
+	// change or be removed.
+	SessionEventTypeUIEphemeralQuery   SessionEventType = "ui.ephemeral_query"
+	SessionEventTypeUserInputCompleted SessionEventType = "user_input.completed"
+	SessionEventTypeUserInputRequested SessionEventType = "user_input.requested"
+	SessionEventTypeUserMessage        SessionEventType = "user.message"
 )
+
+// A detected loss of a previously cached prompt prefix
+type PromptCacheBreakData struct {
+	// Request state whose cached prefix fell short
+	// Internal: AfterRequest is part of the SDK's internal API surface and is not intended for external use.
+	AfterRequest any `json:"afterRequest,omitempty"`
+	// Name of the sub-agent whose conversation broke, stamped by the parent bridge
+	// Internal: AgentName is part of the SDK's internal API surface and is not intended for external use.
+	AgentName *string `json:"agentName,omitempty"`
+	// Request state that established the prior cache frontier
+	// Internal: BeforeRequest is part of the SDK's internal API surface and is not intended for external use.
+	BeforeRequest any `json:"beforeRequest,omitempty"`
+	// Names of the cache-configuration fields that changed
+	// Internal: CacheConfigChangedFields is part of the SDK's internal API surface and is not intended for external use.
+	CacheConfigChangedFields []string `json:"cacheConfigChangedFields,omitzero"`
+	// All reasons that contributed to the cache break, ordered by precedence
+	ContributingReasons []string `json:"contributingReasons"`
+	// Prior cached prompt frontier in tokens
+	FrontierTokens int64 `json:"frontierTokens"`
+	// Model that held the prior cache frontier, when the call changed models
+	// Internal: ModelFrom is part of the SDK's internal API surface and is not intended for external use.
+	ModelFrom *string `json:"modelFrom,omitempty"`
+	// Model this call targeted, when the call changed models
+	// Internal: ModelTo is part of the SDK's internal API surface and is not intended for external use.
+	ModelTo *string `json:"modelTo,omitempty"`
+	// The highest-precedence reason for the cache break
+	PrimaryReason string `json:"primaryReason"`
+	// Fraction of the prior cache frontier that survived
+	RetentionRatio float64 `json:"retentionRatio"`
+	// Index of the first conversation message whose content changed
+	// Internal: RewriteMessageIndex is part of the SDK's internal API surface and is not intended for external use.
+	RewriteMessageIndex *int64 `json:"rewriteMessageIndex,omitempty"`
+	// Shape of the history rewrite, for example whether the history grew or shrank
+	// Internal: RewriteShape is part of the SDK's internal API surface and is not intended for external use.
+	RewriteShape *string `json:"rewriteShape,omitempty"`
+	// Subsystems that announced a history rewrite before this call, for example compaction or truncation
+	// Internal: RewriteSource is part of the SDK's internal API surface and is not intended for external use.
+	RewriteSource []string `json:"rewriteSource,omitzero"`
+	// Cached prefix tokens lost since the prior call
+	ShortfallTokens int64 `json:"shortfallTokens"`
+	// Number of cached prefix tokens that survived
+	SurvivedTokens int64 `json:"survivedTokens"`
+	// Names of the system-prompt segments whose content changed
+	// Internal: SystemSegmentsChanged is part of the SDK's internal API surface and is not intended for external use.
+	SystemSegmentsChanged []string `json:"systemSegmentsChanged,omitzero"`
+	// Telemetry-safe names of tools added since the prior call
+	// Internal: ToolsAdded is part of the SDK's internal API surface and is not intended for external use.
+	ToolsAdded []string `json:"toolsAdded,omitzero"`
+	// Raw names of tools added since the prior call, restricted because a tool name can be user-authored
+	// Internal: ToolsAddedRaw is part of the SDK's internal API surface and is not intended for external use.
+	ToolsAddedRaw []string `json:"toolsAddedRaw,omitzero"`
+	// Telemetry-safe names of tools whose definition changed since the prior call
+	// Internal: ToolsRedefined is part of the SDK's internal API surface and is not intended for external use.
+	ToolsRedefined []string `json:"toolsRedefined,omitzero"`
+	// Raw names of tools redefined since the prior call, restricted because a tool name can be user-authored
+	// Internal: ToolsRedefinedRaw is part of the SDK's internal API surface and is not intended for external use.
+	ToolsRedefinedRaw []string `json:"toolsRedefinedRaw,omitzero"`
+	// Telemetry-safe names of tools removed since the prior call
+	// Internal: ToolsRemoved is part of the SDK's internal API surface and is not intended for external use.
+	ToolsRemoved []string `json:"toolsRemoved,omitzero"`
+	// Raw names of tools removed since the prior call, restricted because a tool name can be user-authored
+	// Internal: ToolsRemovedRaw is part of the SDK's internal API surface and is not intended for external use.
+	ToolsRemovedRaw []string `json:"toolsRemovedRaw,omitzero"`
+	// Whether the tool list kept its members but changed their order
+	// Internal: ToolsReordered is part of the SDK's internal API surface and is not intended for external use.
+	ToolsReordered *bool `json:"toolsReordered,omitempty"`
+}
+
+func (*PromptCacheBreakData) sessionEventData()      {}
+func (*PromptCacheBreakData) Type() SessionEventType { return SessionEventTypePromptCacheBreak }
+
+// A transient Auto preference failure emitted when the runtime cannot mint or accept a usable model and token pair. The previously effective preference remains active, so SDK clients can surface a non-blocking failure without changing their committed-tier state. This event is ephemeral and is not persisted or replayed on resume.
+type SessionAutoTierSwitchFailedData struct {
+	// Auto preference that remains effective after the failed request.
+	EffectiveAutoTier *AutoTier `json:"effectiveAutoTier,omitempty"`
+	// Low-cardinality failure outcome reported by Auto resolution.
+	Reason AutoTierSwitchFailureReason `json:"reason"`
+	// Auto preference that failed to activate, or null when returning to provider-default routing failed.
+	RequestedAutoTier *AutoTier `json:"requestedAutoTier"`
+}
+
+func (*SessionAutoTierSwitchFailedData) sessionEventData() {}
+func (*SessionAutoTierSwitchFailedData) Type() SessionEventType {
+	return SessionEventTypeSessionAutoTierSwitchFailed
+}
 
 // Agent intent description for current activity or plan
 type AssistantIntentData struct {
@@ -208,6 +380,8 @@ type AssistantReasoningData struct {
 	Content string `json:"content"`
 	// Unique identifier for this reasoning block
 	ReasoningID string `json:"reasoningId"`
+	// Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
+	Rte *bool `json:"rte,omitempty"`
 }
 
 func (*AssistantReasoningData) sessionEventData()      {}
@@ -217,6 +391,10 @@ func (*AssistantReasoningData) Type() SessionEventType { return SessionEventType
 type AssistantMessageData struct {
 	// Provider's completion / response identifier; shared across all chunks of a single API call. Used to group multi-chunk assistant utterances.
 	APICallID *string `json:"apiCallId,omitempty"`
+	// Total messages the model call's response was split into, one per reasoning boundary. Absent for a single-message response; the last chunk is the one where chunkIndex is chunkCount - 1.
+	ChunkCount *int64 `json:"chunkCount,omitempty"`
+	// Zero-based position of this message within its model call's response. Absent when the response was not split into chunks.
+	ChunkIndex *int64 `json:"chunkIndex,omitempty"`
 	// Provider-agnostic citations linking spans of this message's content to the sources that support them. Experimental; only populated when citation emission is enabled.
 	// Experimental: Citations is part of an experimental API and may change or be removed.
 	Citations *Citations `json:"citations,omitempty"`
@@ -226,12 +404,17 @@ type AssistantMessageData struct {
 	Content string `json:"content"`
 	// Encrypted reasoning content from OpenAI models. Session-bound and stripped on resume.
 	EncryptedContent *string `json:"encryptedContent,omitempty"`
+	// Experimental HydraFusion source attribution for this ordinary authoritative assistant message.
+	// Experimental: Fusion is part of an experimental API and may change or be removed.
+	Fusion *FusionAttribution `json:"fusion,omitempty"`
 	// CAPI interaction ID for correlating this message with upstream telemetry
 	InteractionID *string `json:"interactionId,omitempty"`
 	// Unique identifier for this assistant message
 	MessageID string `json:"messageId"`
 	// Model that produced this assistant message, if known
 	Model *string `json:"model,omitempty"`
+	// Logical ID of the primary user message that initiated this run, matching the messageId returned by session.send (or the last messageId of session.sendMessages). Stable across model/tool iterations, steering messages, and stop-hook corrections. Subagent runs use their own initiating message ID, not the parent's. Absent for runs without an associated initiating message, such as empty batches.
+	OriginatingMessageID *string `json:"originatingMessageId,omitempty"`
 	// Actual output token count from the API response (completion_tokens), used for accurate token accounting
 	OutputTokens *int64 `json:"outputTokens,omitempty"`
 	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
@@ -239,6 +422,8 @@ type AssistantMessageData struct {
 	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 	// Generation phase for phased-output models (e.g., thinking vs. response phases)
 	Phase *string `json:"phase,omitempty"`
+	// Neutral provider-tagged reasoning content blocks preserved verbatim for round-tripping. `reasoningText` and `reasoningOpaque` are a lossy derived view of these blocks, retained for display.
+	ReasoningBlocks *AssistantMessageReasoningBlocks `json:"reasoningBlocks,omitempty"`
 	// Opaque/encrypted extended thinking data from Anthropic models. Session-bound and stripped on resume.
 	ReasoningOpaque *string `json:"reasoningOpaque,omitempty"`
 	// Readable reasoning text from the model's extended thinking
@@ -247,6 +432,8 @@ type AssistantMessageData struct {
 	ReasoningWireField *string `json:"reasoningWireField,omitempty"`
 	// GitHub request tracing ID (x-github-request-id header) for correlating with server-side logs
 	RequestID *string `json:"requestId,omitempty"`
+	// Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
+	Rte *bool `json:"rte,omitempty"`
 	// Neutral provider-tagged server-side tool-use payload (tool search, advisor) for verbatim round-tripping
 	ServerTools *AssistantMessageServerTools `json:"serverTools,omitempty"`
 	// Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
@@ -263,18 +450,36 @@ func (*AssistantMessageData) Type() SessionEventType { return SessionEventTypeAs
 // Auto Intent resolution: the concrete model the session settled on for the first prompt of an auto-mode session, and why. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
 // Experimental: SessionAutoModeResolvedData is part of an experimental API and may change or be removed.
 type SessionAutoModeResolvedData struct {
+	// Models offered to the router for this resolution
+	AvailableModels []string `json:"availableModels,omitzero"`
 	// Ordered candidate model list the router returned, when not a fallback
 	CandidateModels []string `json:"candidateModels,omitzero"`
 	// Per-category classifier scores (0-1) behind the bucket: the granular HYDRA capability scores (reasoning, code_gen, debugging, tool_use), or the binary needs_reasoning/no_reasoning scores when HYDRA didn't run. Lets clients show a breakdown rather than just the bucket.
 	CategoryScores map[string]float64 `json:"categoryScores,omitzero"`
 	// The concrete model the session will use after any intent refinement
 	ChosenModel string `json:"chosenModel"`
+	// The chosen model's score shortfall relative to the top candidate
+	ChosenShortfall *float64 `json:"chosenShortfall,omitempty"`
 	// Classifier confidence for the predicted label, when available
 	Confidence *float64 `json:"confidence,omitempty"`
+	// End-to-end client wait time for the router request in milliseconds
+	EndToEndLatencyMs *float64 `json:"endToEndLatencyMs,omitempty"`
+	// Whether the router fell back to the standard Auto selection
+	Fallback *bool `json:"fallback,omitempty"`
+	// Server-provided reason for falling back, when available
+	FallbackReason *string `json:"fallbackReason,omitempty"`
+	// Whether the routed prompt contained an image
+	HasImage *bool `json:"hasImage,omitempty"`
 	// The predicted classifier label (e.g. `needs_reasoning`), when available
 	PredictedLabel *string `json:"predictedLabel,omitempty"`
 	// Coarse request-difficulty bucket, for explaining why a model was chosen ("picked X because this looks like high-reasoning work")
 	ReasoningBucket *AutoModeResolvedReasoningBucket `json:"reasoningBucket,omitempty"`
+	// Server-reported router processing time in milliseconds
+	RouterLatencyMs *float64 `json:"routerLatencyMs,omitempty"`
+	// The routing method the server applied, when Auto Intent ran
+	RoutingMethod *string `json:"routingMethod,omitempty"`
+	// Whether a sticky model choice overrode the router result
+	StickyOverride *bool `json:"stickyOverride,omitempty"`
 }
 
 func (*SessionAutoModeResolvedData) sessionEventData() {}
@@ -325,6 +530,32 @@ func (*SessionAutopilotObjectiveChangedData) Type() SessionEventType {
 	return SessionEventTypeSessionAutopilotObjectiveChanged
 }
 
+// Behavior-neutral record of structured runtime facts present when an agent completion decision is accepted.
+// Experimental: SessionCompletionReceiptData is part of an experimental API and may change or be removed.
+type SessionCompletionReceiptData struct {
+	// One-based accepted completion receipt ordinal in the durable session history.
+	Attempt int64 `json:"attempt"`
+	// Inclusive durable event range summarized by this receipt.
+	EventRange CompletionReceiptEventRange `json:"eventRange"`
+	// Number of failed structured tool completions in the covered range.
+	FailedToolCount int64 `json:"failedToolCount"`
+	// Final structured tool completion in the covered range, when one exists.
+	FinalTool *CompletionReceiptFinalTool `json:"finalTool,omitempty"`
+	// Version of the completion receipt payload.
+	SchemaVersion int64 `json:"schemaVersion"`
+	// Identifier of the assistant turn-end event that supplied the accepted completion boundary. This is the receipt's idempotency key, and always equals eventRange.endEventId.
+	SourceEventID string `json:"sourceEventId"`
+	// Runtime reason the completion decision was accepted.
+	StopReason CompletionReceiptStopReason `json:"stopReason"`
+	// Number of successful structured tool completions in the covered range.
+	SuccessfulToolCount int64 `json:"successfulToolCount"`
+}
+
+func (*SessionCompletionReceiptData) sessionEventData() {}
+func (*SessionCompletionReceiptData) Type() SessionEventType {
+	return SessionEventTypeSessionCompletionReceipt
+}
+
 // Canonical bytes for a content-addressed binary asset shared by reference across events
 type SessionBinaryAssetData struct {
 	// Content-addressed id for this binary asset (e.g. "sha256:...").
@@ -350,12 +581,18 @@ func (*SessionBinaryAssetData) Type() SessionEventType { return SessionEventType
 type SessionCompactionStartData struct {
 	// Token count from non-system messages (user, assistant, tool) at compaction start
 	ConversationTokens *int64 `json:"conversationTokens,omitempty"`
+	// Total context tokens (system + conversation + tool definitions) at compaction start, when known
+	CurrentTokens *int64 `json:"currentTokens,omitempty"`
 	// Model identifier used for compaction, when known
 	Model *string `json:"model,omitempty"`
 	// Token count from system message(s) at compaction start
 	SystemTokens *int64 `json:"systemTokens,omitempty"`
+	// Model context window token limit the compaction is targeting, when known
+	TokenLimit *int64 `json:"tokenLimit,omitempty"`
 	// Token count from tool definitions at compaction start
 	ToolDefinitionsTokens *int64 `json:"toolDefinitionsTokens,omitempty"`
+	// What initiated this compaction, when known
+	Trigger *CompactionTrigger `json:"trigger,omitempty"`
 }
 
 func (*SessionCompactionStartData) sessionEventData() {}
@@ -363,8 +600,26 @@ func (*SessionCompactionStartData) Type() SessionEventType {
 	return SessionEventTypeSessionCompactionStart
 }
 
+// Context-cleared details emitted when the host clears the conversation (the session.history.clearContext RPC / Session.clearContextMessages)
+type SessionContextClearedData struct {
+	// Optional initial message set after clearing
+	InitialMessage *string `json:"initialMessage,omitempty"`
+	// Number of conversation messages that were cleared
+	MessagesCleared int64 `json:"messagesCleared"`
+}
+
+func (*SessionContextClearedData) sessionEventData() {}
+func (*SessionContextClearedData) Type() SessionEventType {
+	return SessionEventTypeSessionContextCleared
+}
+
 // Conversation compaction results including success status, metrics, and optional error details
 type SessionCompactionCompleteData struct {
+	// Authoritative active-factory reminder appended to the compacted context
+	// Internal: ActiveFactorySummary is part of the SDK's internal API surface and is not intended for external use.
+	ActiveFactorySummary *string `json:"activeFactorySummary,omitempty"`
+	// Canonical model identifier used for model-specific behavior when replaying compaction
+	BehaviorModelID *string `json:"behaviorModelId,omitempty"`
 	// Checkpoint snapshot number created for recovery
 	CheckpointNumber *int64 `json:"checkpointNumber,omitempty"`
 	// File path where the checkpoint was stored
@@ -397,10 +652,14 @@ type SessionCompactionCompleteData struct {
 	SummaryContent *string `json:"summaryContent,omitempty"`
 	// Token count from system message(s) after compaction
 	SystemTokens *int64 `json:"systemTokens,omitempty"`
+	// Model context window token limit the compaction was targeting, when known
+	TokenLimit *int64 `json:"tokenLimit,omitempty"`
 	// Number of tokens removed during compaction
 	TokensRemoved *int64 `json:"tokensRemoved,omitempty"`
 	// Token count from tool definitions after compaction
 	ToolDefinitionsTokens *int64 `json:"toolDefinitionsTokens,omitempty"`
+	// What initiated this compaction, when known
+	Trigger *CompactionTrigger `json:"trigger,omitempty"`
 }
 
 func (*SessionCompactionCompleteData) sessionEventData() {}
@@ -501,6 +760,12 @@ func (*SessionCanvasRemovedData) Type() SessionEventType { return SessionEventTy
 
 // Durable session usage checkpoint for reconstructing aggregate accounting on resume
 type SessionUsageCheckpointData struct {
+	// Internal per-model prompt-cache state used to restore expiration tracking on resume
+	// Internal: ModelCacheState is part of the SDK's internal API surface and is not intended for external use.
+	ModelCacheState []UsageCheckpointModelCacheState `json:"modelCacheState,omitzero"`
+	// Internal per-conversation prompt-cache-break detector baselines restored on resume
+	// Internal: PromptCacheBreakState is part of the SDK's internal API surface and is not intended for external use.
+	PromptCacheBreakState []any `json:"promptCacheBreakState,omitzero"`
 	// Session-wide accumulated nano-AI units cost at checkpoint time
 	TotalNanoAiu float64 `json:"totalNanoAiu"`
 	// Total number of premium API requests used at checkpoint time
@@ -589,22 +854,30 @@ func (*PendingMessagesModifiedData) Type() SessionEventType {
 	return SessionEventTypePendingMessagesModified
 }
 
-// Enterprise managed-settings resolution: the effective managed settings the session applied and where they came from, so SDK clients can show users what is enterprise-managed and by which authority. Fires whenever managed policy is (re)applied — at session start, on resume, and on account switch. This is an ephemeral live snapshot (delivered to subscribers but not persisted to the session event log), because at session start it resolves before `session.start` is emitted; for a session-independent pull, use the SDK `getManagedSettings()` API, which returns the identical payload. Managed settings have a single authoritative source, so the highest-authority present layer (server > device) wins wholesale; `bypassPermissionsDisabled` is deny-wins across layers. Marked experimental while the managed-settings surface stabilizes.
+// Enterprise managed-settings resolution: the effective managed settings the session applied and which channels contributed, so SDK clients can show users what is enterprise-managed. Fires whenever managed policy is (re)applied — at session start, on resume, and on account switch. This is an ephemeral live snapshot (delivered to subscribers but not persisted to the session event log), because at session start it resolves before `session.start` is emitted. Device values take precedence over server values, then the policy helper, per ordinary key, while permissions compose restrictively across device, server, policy-helper, and SDK-client layers. The account-scoped `getManagedSettings()` API does not include session-local client injection. Marked experimental while the managed-settings surface stabilizes.
 // Experimental: SessionManagedSettingsResolvedData is part of an experimental API and may change or be removed.
 type SessionManagedSettingsResolvedData struct {
 	// Whether enterprise policy disables bypass-permissions ("yolo") mode for this session. Deny-wins across layers, and forced on when `failClosed` is true.
 	BypassPermissionsDisabled bool `json:"bypassPermissionsDisabled"`
-	// Whether the device (MDM/plist/registry/file) managed-settings layer was present
+	// Whether a session-local permissions layer injected by the SDK host was present
+	ClientManaged *bool `json:"clientManaged,omitempty"`
+	// Whether an actual device MDM/plist/registry/file managed-settings layer was present
 	DeviceManaged bool `json:"deviceManaged"`
 	// Whether managed policy could not be determined (e.g. a failed server fetch) and the session fell back to the fail-closed restriction. When true, restrictions such as disabling bypass-permissions are enforced even though `settings` may be absent.
 	FailClosed bool `json:"failClosed"`
 	// The setting keys under enterprise management in the effective managed settings (e.g. `model`, `enabledPlugins`, `permissions`). Empty when no managed settings are in force.
 	ManagedKeys []string `json:"managedKeys"`
+	// Whether at least two managed sources supplied permission allowlists, so enforcement intersects them and the flattened settings payload omits `permissions.allow`.
+	PermissionsAllowIntersected *bool `json:"permissionsAllowIntersected,omitempty"`
+	// Whether the policy-helper managed-settings layer was present. The policy helper is the weakest channel: it fills keys no enterprise source set and can never replace one.
+	PolicyHelperManaged *bool `json:"policyHelperManaged,omitempty"`
+	// Whether the effective sandbox policy forces the sandbox on *only* because managed policy could not be determined, rather than because the policy requires it. Lets clients tell a user whose `--no-sandbox` was overridden that the sandbox stayed on as a fail-closed fallback, instead of attributing it to an administrator who set no such policy.
+	SandboxEnabledByUndeterminedPolicy *bool `json:"sandboxEnabledByUndeterminedPolicy,omitempty"`
 	// Whether the server (account/org) managed-settings layer was present
 	ServerManaged bool `json:"serverManaged"`
 	// The effective (resolved) managed settings values, so clients can render exactly what is enforced. Absent when no managed policy is in force.
 	Settings any `json:"settings,omitempty"`
-	// Which channel supplied the effective managed settings (the winning layer), or `none` when no policy is in force
+	// Channel summary: `server`, `device`, `client`, or `policyHelper` when exactly one channel contributed; `mixed` when multiple channels contributed; otherwise `none`. Consult the per-channel booleans for exact provenance.
 	Source ManagedSettingsResolvedSource `json:"source"`
 }
 
@@ -612,6 +885,18 @@ func (*SessionManagedSettingsResolvedData) sessionEventData() {}
 func (*SessionManagedSettingsResolvedData) Type() SessionEventType {
 	return SessionEventTypeSessionManagedSettingsResolved
 }
+
+// Ephemeral invalidation signal for a changed factory run.
+// Experimental: FactoryRunUpdatedData is part of an experimental API and may change or be removed.
+type FactoryRunUpdatedData struct {
+	// Monotonic revision now available for the run.
+	Revision int64 `json:"revision"`
+	// Factory run identifier.
+	RunID string `json:"runId"`
+}
+
+func (*FactoryRunUpdatedData) sessionEventData()      {}
+func (*FactoryRunUpdatedData) Type() SessionEventType { return SessionEventTypeFactoryRunUpdated }
 
 // Ephemeral progress update from a running hook process
 type HookProgressData struct {
@@ -623,6 +908,40 @@ type HookProgressData struct {
 
 func (*HookProgressData) sessionEventData()      {}
 func (*HookProgressData) Type() SessionEventType { return SessionEventTypeHookProgress }
+
+// Ephemeral signal that a factory run attempt began executing.
+// Experimental: FactoryRunStartedData is part of an experimental API and may change or be removed.
+type FactoryRunStartedData struct {
+	// Attempt number this start committed; a resumed run increments it.
+	Attempt int64 `json:"attempt"`
+	// Name of the factory this run executes. Low cardinality by construction.
+	FactoryName string `json:"factoryName"`
+	// Identifier of the factory run that started.
+	RunID string `json:"runId"`
+}
+
+func (*FactoryRunStartedData) sessionEventData()      {}
+func (*FactoryRunStartedData) Type() SessionEventType { return SessionEventTypeFactoryRunStarted }
+
+// Ephemeral signal that a factory run reached a terminal status.
+// Experimental: FactoryRunSettledData is part of an experimental API and may change or be removed.
+type FactoryRunSettledData struct {
+	// AI credits this run consumed, in nano-AIU.
+	ConsumedNanoAiu int64 `json:"consumedNanoAiu"`
+	// Subagents this run consumed against its limits.
+	ConsumedSubagents int64 `json:"consumedSubagents"`
+	// Active milliseconds accumulated across every attempt of this run.
+	ElapsedMs int64 `json:"elapsedMs"`
+	// Typed failure class recorded on the run, when it failed with one (e.g. `factory_limit_reached`).
+	FailureType *string `json:"failureType,omitempty"`
+	// Identifier of the factory run that settled.
+	RunID string `json:"runId"`
+	// Terminal status the run committed.
+	Status FactoryRunSettledStatus `json:"status"`
+}
+
+func (*FactoryRunSettledData) sessionEventData()      {}
+func (*FactoryRunSettledData) Type() SessionEventType { return SessionEventTypeFactoryRunSettled }
 
 // Error details for timeline display including message and optional diagnostic information
 type SessionErrorData struct {
@@ -636,6 +955,8 @@ type SessionErrorData struct {
 	Message string `json:"message"`
 	// GitHub request tracing ID (x-github-request-id header) for correlating with server-side logs
 	ProviderCallID *string `json:"providerCallId,omitempty"`
+	// What the user must do to recover, when the runtime knows of an action. The `message` never names a client affordance, so a client that offers one — a slash command, a settings pane, a link — renders it from this value.
+	Remediation *RemediationAction `json:"remediation,omitempty"`
 	// Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
 	ServiceRequestID *string `json:"serviceRequestId,omitempty"`
 	// Error stack trace, when available
@@ -648,6 +969,289 @@ type SessionErrorData struct {
 
 func (*SessionErrorData) sessionEventData()      {}
 func (*SessionErrorData) Type() SessionEventType { return SessionEventTypeSessionError }
+
+// Exact skill context delivered to the model during a tool phase. This is not a user submission or another skill invocation.
+type SkillContextDeliveredData struct {
+	// Exact model-facing skill wrapper, including its invocation-time file context
+	Content string `json:"content"`
+	// Interaction that delivered this context, when known
+	InteractionID *string `json:"interactionId,omitempty"`
+	// Unmodified injection provenance, in the form skill-<invocation-name>
+	Source string `json:"source"`
+}
+
+func (*SkillContextDeliveredData) sessionEventData() {}
+func (*SkillContextDeliveredData) Type() SessionEventType {
+	return SessionEventTypeSkillContextDelivered
+}
+
+// Experimental content-safe activity signal for a running HydraFusion phase.
+// Experimental: AssistantFusionPhaseActivityData is part of an experimental API and may change or be removed.
+type AssistantFusionPhaseActivityData struct {
+	// Kind of real activity observed.
+	Activity FusionPhaseActivityKind `json:"activity"`
+	// Conversation scope in which the phase executes.
+	ConversationScope FusionConversationScope `json:"conversationScope"`
+	// Identifier of the HydraFusion turn containing the phase.
+	FusionID string `json:"fusionId"`
+	// HydraFusion orchestration pattern containing the phase.
+	Pattern FusionPattern `json:"pattern"`
+	// Stable identifier for the concrete phase.
+	PhaseID string `json:"phaseId"`
+	// Kind of phase currently executing.
+	PhaseKind FusionPhaseKind `json:"phaseKind"`
+	// Semantic role assigned to the phase.
+	Role string `json:"role"`
+	// Opaque hashed correlation token for matching tool-started and tool-completed activity within this Fusion activity stream. It is not the tool call identifier exposed by tool lifecycle events.
+	ToolCallID *string `json:"toolCallId,omitempty"`
+	// Cumulative private response bytes observed for this model call. The event never includes response text.
+	TotalResponseSizeBytes *int64 `json:"totalResponseSizeBytes,omitempty"`
+}
+
+func (*AssistantFusionPhaseActivityData) sessionEventData() {}
+func (*AssistantFusionPhaseActivityData) Type() SessionEventType {
+	return SessionEventTypeAssistantFusionPhaseActivity
+}
+
+// Experimental durable HydraFusion phase output and lossless replay checkpoint.
+// Experimental: AssistantFusionPhaseCompletedData is part of an experimental API and may change or be removed.
+type AssistantFusionPhaseCompletedData struct {
+	// Provider-normalized textual output produced by the phase.
+	Content string `json:"content"`
+	// Conversation scope in which the phase executed.
+	ConversationScope FusionConversationScope `json:"conversationScope"`
+	// Elapsed execution time for the phase in milliseconds.
+	DurationMs float64 `json:"durationMs"`
+	// Identifier of the HydraFusion turn containing the phase.
+	FusionID string `json:"fusionId"`
+	// Concrete model that executed the phase.
+	Model string `json:"model"`
+	// Stable identifier for the completed phase.
+	PhaseID string `json:"phaseId"`
+	// Kind of phase that completed.
+	PhaseKind FusionPhaseKind `json:"phaseKind"`
+	// Exact provider-normalized message used to reconstruct canonical model history.
+	// Internal: ProjectionMessage is part of the SDK's internal API surface and is not intended for external use.
+	ProjectionMessage any `json:"projectionMessage,omitempty"`
+	// Projection action for the exact internal message.
+	// Internal: ProjectionMode is part of the SDK's internal API surface and is not intended for external use.
+	ProjectionMode *FusionProjectionMode `json:"projectionMode,omitempty"`
+	// Semantic role assigned to the completed phase.
+	Role string `json:"role"`
+	// Terminal request held outside canonical state until selected by the final commit.
+	// Internal: StagedTerminal is part of the SDK's internal API surface and is not intended for external use.
+	StagedTerminal *FusionStagedTerminal `json:"stagedTerminal,omitempty"`
+	// Durable outcome status of the phase.
+	Status FusionPhaseStatus `json:"status"`
+	// Aggregate concrete-model usage consumed by the phase.
+	Usage FusionPhaseUsage `json:"usage"`
+	// Structured judge or critic verdict, when the phase produces one.
+	Verdict *string `json:"verdict"`
+}
+
+func (*AssistantFusionPhaseCompletedData) sessionEventData() {}
+func (*AssistantFusionPhaseCompletedData) Type() SessionEventType {
+	return SessionEventTypeAssistantFusionPhaseCompleted
+}
+
+// Experimental durable HydraFusion routing failure and the deterministic concrete fallback selected for the turn.
+// Experimental: SessionFusionRouteFailedData is part of an experimental API and may change or be removed.
+type SessionFusionRouteFailedData struct {
+	// Identifier of the routing attempt that failed.
+	AttemptID string `json:"attemptId"`
+	// Provider or validation error detail, when available.
+	ErrorMessage *string `json:"errorMessage,omitempty"`
+	// Concrete model selected as the deterministic fallback.
+	FallbackModel string `json:"fallbackModel"`
+	// HydraFusion routing policy requested for the turn.
+	Policy string `json:"policy"`
+	// Stable machine-readable reason for the routing failure.
+	Reason string `json:"reason"`
+	// Elapsed routing time in milliseconds before the failure.
+	RoutingLatencyMs *float64 `json:"routingLatencyMs,omitempty"`
+	// Synthetic HydraFusion model selected for the session.
+	SyntheticModel string `json:"syntheticModel"`
+}
+
+func (*SessionFusionRouteFailedData) sessionEventData() {}
+func (*SessionFusionRouteFailedData) Type() SessionEventType {
+	return SessionEventTypeSessionFusionRouteFailed
+}
+
+// Experimental durable aggregate outcome of a HydraFusion turn.
+// Experimental: SessionFusionCompletedData is part of an experimental API and may change or be removed.
+type SessionFusionCompletedData struct {
+	// Total cached input tokens reported across all phases.
+	CachedTokens int64 `json:"cachedTokens"`
+	// Total tokens written to prompt cache across all phases.
+	CacheWriteTokens *int64 `json:"cacheWriteTokens,omitempty"`
+	// Idempotency identifier for the authoritative final commit.
+	CommitID string `json:"commitId"`
+	// Reason the turn used a degraded route, when applicable.
+	DegradedReason *string `json:"degradedReason"`
+	// Total elapsed execution time for the HydraFusion turn in milliseconds.
+	DurationMs float64 `json:"durationMs"`
+	// Concrete model that supplied the authoritative final content.
+	FinalSourceModel *string `json:"finalSourceModel"`
+	// Phase whose output supplied the authoritative final content.
+	FinalSourcePhaseID *string `json:"finalSourcePhaseId"`
+	// Concrete model recommended for eligible follow-up turns.
+	FollowUpModel string `json:"followUpModel"`
+	// Stable identifier for the completed HydraFusion turn.
+	FusionID string `json:"fusionId"`
+	// Total input tokens consumed across all phases.
+	InputTokens int64 `json:"inputTokens"`
+	// Stable aggregate outcome of the HydraFusion turn.
+	Outcome string `json:"outcome"`
+	// Total output tokens produced across all phases.
+	OutputTokens int64 `json:"outputTokens"`
+	// HydraFusion orchestration pattern executed for the turn.
+	Pattern FusionPattern `json:"pattern"`
+	// Number of concrete phases attempted by the turn.
+	PhaseCount int64 `json:"phaseCount"`
+	// Total concrete model requests made across all phases.
+	RequestCount int64 `json:"requestCount"`
+	// Synthetic HydraFusion model selected for the session.
+	SyntheticModel string `json:"syntheticModel"`
+	// Total normalized AI-unit cost reported across all phases, in nano-AIU.
+	TotalNanoAiu float64 `json:"totalNanoAiu"`
+	// Identifier of the session turn associated with the completion.
+	TurnID string `json:"turnId"`
+}
+
+func (*SessionFusionCompletedData) sessionEventData() {}
+func (*SessionFusionCompletedData) Type() SessionEventType {
+	return SessionEventTypeSessionFusionCompleted
+}
+
+// Experimental durable typed HydraFusion phase failure and degradation transition.
+// Experimental: AssistantFusionPhaseFailedData is part of an experimental API and may change or be removed.
+type AssistantFusionPhaseFailedData struct {
+	// Conversation scope in which the phase executed.
+	ConversationScope FusionConversationScope `json:"conversationScope"`
+	// Identifier of the fallback phase used to continue the turn after degradation.
+	DegradedToPhaseID *string `json:"degradedToPhaseId,omitempty"`
+	// Elapsed execution time before the phase failed, in milliseconds.
+	DurationMs float64 `json:"durationMs"`
+	// Provider or execution error detail, when available.
+	ErrorMessage *string `json:"errorMessage,omitempty"`
+	// Identifier of the HydraFusion turn containing the phase.
+	FusionID string `json:"fusionId"`
+	// Concrete model that attempted the phase.
+	Model string `json:"model"`
+	// Stable identifier for the failed phase.
+	PhaseID string `json:"phaseId"`
+	// Kind of phase that failed.
+	PhaseKind FusionPhaseKind `json:"phaseKind"`
+	// Stable machine-readable reason for the phase failure.
+	Reason string `json:"reason"`
+	// Semantic role assigned to the failed phase.
+	Role string `json:"role"`
+	// Durable outcome status of the phase.
+	Status FusionPhaseStatus `json:"status"`
+	// Aggregate concrete-model usage consumed before the failure.
+	Usage FusionPhaseUsage `json:"usage"`
+}
+
+func (*AssistantFusionPhaseFailedData) sessionEventData() {}
+func (*AssistantFusionPhaseFailedData) Type() SessionEventType {
+	return SessionEventTypeAssistantFusionPhaseFailed
+}
+
+// Experimental durable validated HydraFusion route and turn policy.
+// Experimental: SessionFusionResolvedData is part of an experimental API and may change or be removed.
+type SessionFusionResolvedData struct {
+	// Version of the validated HydraFusion event contract.
+	ContractVersion int64 `json:"contractVersion"`
+	// Concrete model used when the planned primary model cannot execute.
+	FallbackModel string `json:"fallbackModel"`
+	// Router recommendation controlling reuse or rerouting on later turns.
+	FollowUp *FusionFollowUpRecommendation `json:"followUp,omitempty"`
+	// Concrete model recommended for eligible follow-up turns.
+	FollowUpModel string `json:"followUpModel"`
+	// Stable identifier for the resolved HydraFusion turn.
+	FusionID string `json:"fusionId"`
+	// Version of the executable model universe used for selection.
+	ModelUniverseVersion *string `json:"modelUniverseVersion,omitempty"`
+	// Validated orchestration pattern selected for the turn.
+	Pattern FusionPattern `json:"pattern"`
+	// Presentation-neutral phase plan for clients that render workflow progress.
+	// Experimental: PhasePlan is part of an experimental API and may change or be removed.
+	PhasePlan []FusionPhasePlanStep `json:"phasePlan,omitzero"`
+	// Version of the validated execution-plan format.
+	PlanVersion *string `json:"planVersion,omitempty"`
+	// HydraFusion routing policy used to resolve the plan.
+	Policy string `json:"policy"`
+	// Version of the local routing policy.
+	PolicyVersion *string `json:"policyVersion,omitempty"`
+	// Concrete model selected for the primary solver phase.
+	PrimaryModel string `json:"primaryModel"`
+	// Router implementation that supplied the plan.
+	RouteSource *string `json:"routeSource,omitempty"`
+	// Elapsed time in milliseconds required to resolve and validate the route.
+	RoutingLatencyMs *float64 `json:"routingLatencyMs,omitempty"`
+	// Identifier of the local policy rule that matched.
+	RuleID *string `json:"ruleId,omitempty"`
+	// Zero-based index of the local policy rule that matched.
+	RuleIndex *int64 `json:"ruleIndex,omitempty"`
+	// Human-readable name of the local policy rule that matched.
+	RuleName *string `json:"ruleName,omitempty"`
+	// Validated capability scores used to select the route.
+	Scores *FusionScores `json:"scores,omitempty"`
+	// Concrete model selected for the review or judge phase, when required.
+	SecondaryModel *string `json:"secondaryModel"`
+	// Synthetic HydraFusion model selected for the session.
+	SyntheticModel string `json:"syntheticModel"`
+	// Identifier of the session turn associated with the route.
+	TurnID string `json:"turnId"`
+}
+
+func (*SessionFusionResolvedData) sessionEventData() {}
+func (*SessionFusionResolvedData) Type() SessionEventType {
+	return SessionEventTypeSessionFusionResolved
+}
+
+// Experimental transient HydraFusion phase/model/role signal.
+// Experimental: AssistantFusionPhaseStartedData is part of an experimental API and may change or be removed.
+type AssistantFusionPhaseStartedData struct {
+	// Conversation scope in which the phase executes.
+	ConversationScope FusionConversationScope `json:"conversationScope"`
+	// Identifier of the HydraFusion turn containing the phase.
+	FusionID string `json:"fusionId"`
+	// Concrete model executing the phase.
+	Model string `json:"model"`
+	// HydraFusion orchestration pattern containing the phase.
+	Pattern FusionPattern `json:"pattern"`
+	// Stable identifier for the concrete phase.
+	PhaseID string `json:"phaseId"`
+	// Kind of phase being executed.
+	PhaseKind FusionPhaseKind `json:"phaseKind"`
+	// Semantic role assigned to the phase.
+	Role string `json:"role"`
+}
+
+func (*AssistantFusionPhaseStartedData) sessionEventData() {}
+func (*AssistantFusionPhaseStartedData) Type() SessionEventType {
+	return SessionEventTypeAssistantFusionPhaseStarted
+}
+
+// Experimental transient signal that HydraFusion routing has started for an eligible turn.
+// Experimental: SessionFusionRouteStartedData is part of an experimental API and may change or be removed.
+type SessionFusionRouteStartedData struct {
+	// Identifier for this routing attempt before a durable Fusion turn exists.
+	AttemptID string `json:"attemptId"`
+	// HydraFusion routing policy requested for the turn.
+	Policy *string `json:"policy,omitempty"`
+	// Synthetic HydraFusion model selected for the session.
+	SyntheticModel *string `json:"syntheticModel,omitempty"`
+	// Kind of turn being routed.
+	TurnKind FusionTurnKind `json:"turnKind"`
+}
+
+func (*SessionFusionRouteStartedData) sessionEventData() {}
+func (*SessionFusionRouteStartedData) Type() SessionEventType {
+	return SessionEventTypeSessionFusionRouteStarted
+}
 
 // External tool completion notification signaling UI dismissal
 type ExternalToolCompletedData struct {
@@ -664,6 +1268,8 @@ func (*ExternalToolCompletedData) Type() SessionEventType {
 type ExternalToolRequestedData struct {
 	// Arguments to pass to the external tool
 	Arguments any `json:"arguments,omitempty"`
+	// Stable provider identity captured with an extension-owned tool definition; hosts use it to route the request to the same provider that was offered to the model
+	ProviderID *string `json:"providerId,omitempty"`
 	// Unique identifier for this request; used to respond via session.respondToExternalTool()
 	RequestID string `json:"requestId"`
 	// Session ID that this external tool request belongs to
@@ -689,6 +1295,8 @@ func (*ExternalToolRequestedData) Type() SessionEventType {
 type ModelCallFailureData struct {
 	// Completion ID from the model provider (e.g., chatcmpl-abc123)
 	APICallID *string `json:"apiCallId,omitempty"`
+	// API endpoint used for this model call, matching CAPI supported_endpoints vocabulary
+	APIEndpoint *AssistantUsageAPIEndpoint `json:"apiEndpoint,omitempty"`
 	// For HTTP 400 failures only: whether the response carried a structured CAPI error envelope (structured_error, a deterministic validation failure) or no error body (bodyless, the transient gateway/proxy signature). Absent for non-400 failures.
 	BadRequestKind *ModelCallFailureBadRequestKind `json:"badRequestKind,omitempty"`
 	// Duration of the failed API call in milliseconds
@@ -699,8 +1307,23 @@ type ModelCallFailureData struct {
 	ErrorMessage *string `json:"errorMessage,omitempty"`
 	// For HTTP 400 failures only: the `type` from the CAPI error envelope (e.g. 'websocket_error'), a coarser companion to errorCode for envelopes that carry no code. Raw server-controlled string, emitted only through restricted telemetry. Absent for bodyless or non-400 failures.
 	ErrorType *string `json:"errorType,omitempty"`
+	// Whether the failure originated from an API response or the request transport
+	FailureKind *ModelCallFailureKind `json:"failureKind,omitempty"`
+	// Experimental HydraFusion attribution for this failed concrete model call.
+	// Experimental: Fusion is part of an experimental API and may change or be removed.
+	Fusion *FusionAttribution `json:"fusion,omitempty"`
 	// What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls
 	Initiator *string `json:"initiator,omitempty"`
+	// Authoritative interaction classification for the failed call, matching `assistant.usage.interactionType` (for example `conversation-agent`, `conversation-subagent`, or `conversation-sampling`). Absent when the producer cannot classify the interaction.
+	InteractionType *string `json:"interactionType,omitempty"`
+	// Whether the session selected Auto mode for the failed call
+	IsAuto *bool `json:"isAuto,omitempty"`
+	// Whether the failed call used a bring-your-own-key provider
+	IsByok *bool `json:"isByok,omitempty"`
+	// Effective maximum output-token limit for the failed call
+	MaxOutputTokens *int64 `json:"maxOutputTokens,omitempty"`
+	// Effective maximum prompt-token limit for the failed call
+	MaxPromptTokens *int64 `json:"maxPromptTokens,omitempty"`
 	// Model identifier used for the failed API call
 	Model *string `json:"model,omitempty"`
 	// GitHub request tracing ID (x-github-request-id header) for server-side log correlation
@@ -708,18 +1331,108 @@ type ModelCallFailureData struct {
 	// Per-quota usage snapshots parsed from the failed response's quota headers, keyed by quota identifier. Present when the error response carried quota headers (e.g. a 402 once the additional spend limit is reached) so the UI can refresh the quota display on failure.
 	// Internal: QuotaSnapshots is part of the SDK's internal API surface and is not intended for external use.
 	QuotaSnapshots map[string]AssistantUsageQuotaSnapshot `json:"quotaSnapshots,omitzero"`
+	// Reasoning effort level used for the failed model call, if applicable
+	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	// Content-free structural summary of the failing request. Contains only counts and shape flags (no prompt content), so it is safe for unrestricted telemetry. Populated only for client-error (4xx) failures.
 	RequestFingerprint *ModelCallFailureRequestFingerprint `json:"requestFingerprint,omitempty"`
+	// Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
+	Rte *bool `json:"rte,omitempty"`
 	// Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
 	ServiceRequestID *string `json:"serviceRequestId,omitempty"`
 	// Where the failed model call originated
 	Source ModelCallFailureSource `json:"source"`
 	// HTTP status code from the failed request
 	StatusCode *int32 `json:"statusCode,omitempty"`
+	// Transport used for the failed model call (http or websocket)
+	Transport *ModelCallFailureTransport `json:"transport,omitempty"`
 }
 
 func (*ModelCallFailureData) sessionEventData()      {}
 func (*ModelCallFailureData) Type() SessionEventType { return SessionEventTypeModelCallFailure }
+
+// Final lifecycle outcome for one logical model dispatch. A logical dispatch may include internal reconnect or fallback work, so event count is not provider HTTP-request count.
+type ModelCallFinishedData struct {
+	// Whether an accepted successful response requested the exact name and command semantics of a built-in file edit tool, including an external tool explicitly replacing that built-in name. Absent when the logical dispatch did not produce an accepted response.
+	ContainsBuiltInFileEditRequest *bool `json:"containsBuiltInFileEditRequest,omitempty"`
+	// Monotonic elapsed time spent in the logical model dispatch, including any internal transport reconnect or fallback and excluding orchestrator retry backoff, tool execution, confirmations, and post-response processing
+	DispatchDurationMs float64 `json:"dispatchDurationMs"`
+	// Version of the built-in file-edit semantic classifier used for this event
+	EditClassifierVersion int64 `json:"editClassifierVersion"`
+	// Identifier of the user interaction that owns the model dispatch, matching assistant.turn_start.interactionId when available
+	InteractionID *string `json:"interactionId,omitempty"`
+	// Final outcome after post-response acceptance processing
+	Outcome ModelCallFinishedOutcome `json:"outcome"`
+	// Agent-loop iteration within the interaction that initiated the model dispatch
+	TurnID string `json:"turnId"`
+}
+
+func (*ModelCallFinishedData) sessionEventData()      {}
+func (*ModelCallFinishedData) Type() SessionEventType { return SessionEventTypeModelCallFinished }
+
+// Freezes a blinded contextual authorization proposal whose verbatim human span was deterministically bound to the immediately preceding blocked permission request. The event carries no action fields; replay re-derives the exact action from the earlier permission request and mints a one-shot message grant only when the binding and span still verify.
+// Experimental: PermissionContextualAuthorizationData is part of an experimental API and may change or be removed.
+type PermissionContextualAuthorizationData struct {
+	// Whether the contextual human span granted or denied authority.
+	// Experimental: Polarity is part of an experimental API and may change or be removed.
+	Polarity PermissionMessageAuthorizationPolarity `json:"polarity"`
+	// Deterministic identity of the contextual message grant.
+	// Experimental: RecordID is part of an experimental API and may change or be removed.
+	RecordID string `json:"recordId"`
+	// Original blocked permission request selected by deterministic event ordering, never by the extraction model.
+	// Experimental: RequestID is part of an experimental API and may change or be removed.
+	RequestID string `json:"requestId"`
+	// End byte offset of the contextual decision span within the turn.
+	// Experimental: SpanEnd is part of an experimental API and may change or be removed.
+	SpanEnd int64 `json:"spanEnd"`
+	// Start byte offset of the contextual decision span within the turn.
+	// Experimental: SpanStart is part of an experimental API and may change or be removed.
+	SpanStart int64 `json:"spanStart"`
+	// Human turn containing the contextual decision.
+	// Experimental: TurnIndex is part of an experimental API and may change or be removed.
+	TurnIndex int64 `json:"turnIndex"`
+}
+
+func (*PermissionContextualAuthorizationData) sessionEventData() {}
+func (*PermissionContextualAuthorizationData) Type() SessionEventType {
+	return SessionEventTypePermissionContextualAuthorization
+}
+
+// Freezes one blinded, verbatim-verified authorization claim the runtime minted from a human user message, so a resumed session re-establishes the same grant deterministically instead of re-running the extraction model. This mints no authority on its own: it records what a blinded proposer pointed at and the trusted discriminator the runtime established, and deterministic establishment runs on replay. Persisted so recorded authority survives compaction and process resume.
+// Experimental: PermissionMessageAuthorizationData is part of an experimental API and may change or be removed.
+type PermissionMessageAuthorizationData struct {
+	// The kind of effect authorized, as an action-class identifier.
+	// Experimental: ActionClass is part of an experimental API and may change or be removed.
+	ActionClass string `json:"actionClass"`
+	// Whether the claim granted or denied authority.
+	// Experimental: Polarity is part of an experimental API and may change or be removed.
+	Polarity PermissionMessageAuthorizationPolarity `json:"polarity"`
+	// Deterministic identity of the record, derived from the turn and span offsets so re-extracting the same span mints nothing new.
+	// Experimental: RecordID is part of an experimental API and may change or be removed.
+	RecordID string `json:"recordId"`
+	// End byte offset of the authorizing span within the turn.
+	// Experimental: SpanEnd is part of an experimental API and may change or be removed.
+	SpanEnd int64 `json:"spanEnd"`
+	// Start byte offset of the authorizing span within the turn.
+	// Experimental: SpanStart is part of an experimental API and may change or be removed.
+	SpanStart int64 `json:"spanStart"`
+	// Concrete named targets that appear verbatim inside the span.
+	// Experimental: TargetMembers is part of an experimental API and may change or be removed.
+	TargetMembers []string `json:"targetMembers,omitzero"`
+	// The task the permission is scoped to, when the human named one.
+	// Experimental: Task is part of an experimental API and may change or be removed.
+	Task *string `json:"task,omitempty"`
+	// The human turn the quoted span was read from.
+	// Experimental: TurnIndex is part of an experimental API and may change or be removed.
+	TurnIndex int64 `json:"turnIndex"`
+	// The trusted version discriminator, when one exists. Exact shell-command grants carry the byte-identical commands grounded in the human span; world-derived classes carry a file object, remote tip, or runner only when that state was captured safely. An opaque object mirroring the runtime's adjacently-tagged resolution.
+	// Experimental: World is part of an experimental API and may change or be removed.
+	World any `json:"world,omitempty"`
+}
+
+func (*PermissionMessageAuthorizationData) sessionEventData() {}
+func (*PermissionMessageAuthorizationData) Type() SessionEventType {
+	return SessionEventTypePermissionMessageAuthorization
+}
 
 // Hook invocation completion details including output, success status, and error information
 type HookEndData struct {
@@ -729,8 +1442,10 @@ type HookEndData struct {
 	HookInvocationID string `json:"hookInvocationId"`
 	// Type of hook that was invoked (e.g., "preToolUse", "postToolUse", "sessionStart")
 	HookType string `json:"hookType"`
-	// Output data produced by the hook
+	// Output data produced by the hook. Durable and resumed postToolUse receipts may omit messages owned by a successful skill invocation and replace an unchanged skill sessionLog copy with an elision marker; hook-modified or re-sourced values are preserved, and the authoritative body remains in the skill invocation event.
 	Output any `json:"output,omitempty"`
+	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
+	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 	// Whether the hook completed successfully
 	Success bool `json:"success"`
 }
@@ -744,8 +1459,10 @@ type HookStartData struct {
 	HookInvocationID string `json:"hookInvocationId"`
 	// Type of hook being invoked (e.g., "preToolUse", "postToolUse", "sessionStart")
 	HookType string `json:"hookType"`
-	// Input data passed to the hook
+	// Input data passed to the hook. For postToolUse hooks the retained copy served by session.eventLog.read (and by a resumed session) drops the tool result's inline `contents`/`uiResource`/`skillInvocation` and replaces duplicated text result fields with a `[copilot:elided ...]` marker; the live subscription stream still delivers the full value. Canonical tool output remains in the adjacent tool.execution_complete event, while an invoked skill's authoritative body remains in its skill invocation event.
 	Input any `json:"input,omitempty"`
+	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
+	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 }
 
 func (*HookStartData) sessionEventData()      {}
@@ -766,14 +1483,77 @@ type SessionInfoData struct {
 func (*SessionInfoData) sessionEventData()      {}
 func (*SessionInfoData) Type() SessionEventType { return SessionEventTypeSessionInfo }
 
+// Internal durable receipt that reconstructs exact model-visible skill context from earlier session content.
+type SkillContextDeliveredRefData struct {
+	// Content identifier of an earlier inline skill event in this session, in the prefixed form `sha256:<lowercase hex digest>` over the UTF-8 bytes of that event's `content`
+	ContentID string `json:"contentId"`
+	// Interaction that delivered this context, when known
+	InteractionID *string `json:"interactionId,omitempty"`
+	// Exact text preceding the referenced content in the delivered wrapper
+	Prefix *string `json:"prefix,omitempty"`
+	// Unmodified injection provenance, in the form skill-<invocation-name>
+	Source string `json:"source"`
+	// Exact text following the referenced content in the delivered wrapper
+	Suffix *string `json:"suffix,omitempty"`
+}
+
+func (*SkillContextDeliveredRefData) sessionEventData() {}
+func (*SkillContextDeliveredRefData) Type() SessionEventType {
+	return SessionEventTypeSkillContextDeliveredRef
+}
+
+// Internal durable skill invocation receipt whose content resolves from an earlier inline skill event in the same session.
+type SkillInvokedRefData struct {
+	// Tool names that should be auto-approved when this skill is active
+	AllowedTools []string `json:"allowedTools,omitzero"`
+	// Content identifier of an earlier inline skill event in this session, in the prefixed form `sha256:<lowercase hex digest>` over the UTF-8 bytes of that event's `content`
+	ContentID string `json:"contentId"`
+	// UTF-16 code unit length of the referenced skill content. Derived from the referenced body and validated against it when the reference is expanded; a reference whose length disagrees with the body it names is rejected instead of expanded
+	ContentLength int64 `json:"contentLength"`
+	// Description of the skill from its SKILL.md frontmatter
+	Description *string `json:"description,omitempty"`
+	// Whether model invocation is disabled for this skill
+	DisableModelInvocation *bool `json:"disableModelInvocation,omitempty"`
+	// Model identifier active when the skill was invoked, when known
+	Model *string `json:"model,omitempty"`
+	// Name of the invoked skill
+	Name string `json:"name"`
+	// File path to the SKILL.md definition, or an empty string for an SDK-provided skill without a filesystem identity
+	Path string `json:"path"`
+	// Name of the plugin this skill originated from, when applicable
+	PluginName *string `json:"pluginName,omitempty"`
+	// Version of the plugin this skill originated from, when applicable
+	PluginVersion *string `json:"pluginVersion,omitempty"`
+	// Source identifier for where the skill was discovered
+	Source *string `json:"source,omitempty"`
+	// What triggered the skill invocation
+	Trigger *SkillInvokedTrigger `json:"trigger,omitempty"`
+}
+
+func (*SkillInvokedRefData) sessionEventData()      {}
+func (*SkillInvokedRefData) Type() SessionEventType { return SessionEventTypeSkillInvokedRef }
+
 // LLM API call usage metrics including tokens, costs, quotas, and billing information
 type AssistantUsageData struct {
+	// Number of accepted speculative prediction tokens
+	AcceptedPredictionTokens *int64 `json:"acceptedPredictionTokens,omitempty"`
 	// Completion ID from the model provider (e.g., chatcmpl-abc123)
 	APICallID *string `json:"apiCallId,omitempty"`
 	// API endpoint used for this model call, matching CAPI supported_endpoints vocabulary
 	APIEndpoint *AssistantUsageAPIEndpoint `json:"apiEndpoint,omitempty"`
+	// Number of tools available to the model for this call
+	// Internal: AvailableToolCount is part of the SDK's internal API surface and is not intended for external use.
+	AvailableToolCount *int64 `json:"availableToolCount,omitempty"`
+	// Whether the provider reported prompt-cache usage details for this call
+	// Internal: CacheDetailsReported is part of the SDK's internal API surface and is not intended for external use.
+	CacheDetailsReported *bool `json:"cacheDetailsReported,omitempty"`
+	// Updated prompt-cache expiration for this model call. Present only when the call establishes or refreshes known cache state.
+	CacheExpiresAt *time.Time `json:"cacheExpiresAt,omitempty"`
 	// Number of tokens read from prompt cache
 	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
+	// Effective prompt-cache lifetime in seconds for this call
+	// Internal: CacheTtlSeconds is part of the SDK's internal API surface and is not intended for external use.
+	CacheTtlSeconds *int64 `json:"cacheTtlSeconds,omitempty"`
 	// Number of tokens written to prompt cache
 	CacheWriteTokens *int64 `json:"cacheWriteTokens,omitempty"`
 	// Whether the model response was blocked or truncated by content filtering (finish_reason === 'content_filter'). For Anthropic models this corresponds to a 'refusal' stop reason.
@@ -787,16 +1567,37 @@ type AssistantUsageData struct {
 	Duration *int64 `json:"duration,omitempty"`
 	// Finish reason reported by the model for this API call (e.g. "stop", "length", "tool_calls", "content_filter"). Normalized to OpenAI vocabulary; for Anthropic models a "refusal" stop reason maps to "content_filter".
 	FinishReason *string `json:"finishReason,omitempty"`
+	// How the prompt-cache frontier was determined for this call
+	// Internal: FrontierSource is part of the SDK's internal API surface and is not intended for external use.
+	FrontierSource *string `json:"frontierSource,omitempty"`
+	// Experimental HydraFusion attribution for this concrete model call's usage.
+	// Experimental: Fusion is part of an experimental API and may change or be removed.
+	Fusion *FusionAttribution `json:"fusion,omitempty"`
 	// What initiated this API call (e.g., "sub-agent", "mcp-sampling"); absent for user-initiated calls
 	Initiator *string `json:"initiator,omitempty"`
 	// Number of input tokens consumed
 	InputTokens *int64 `json:"inputTokens,omitempty"`
+	// Coarse classification of the interaction that produced this call, mirroring the session's per-request agent context (e.g. `conversation-agent`, `conversation-subagent`, `conversation-sampling`, `conversation-background`, `conversation-compaction`, `conversation-user`). Non-billing; lets consumers attribute a model call to a call class (e.g. sub-agent/sidekick) independently of the billing initiator. Absent when the runtime did not classify the request.
+	InteractionType *string `json:"interactionType,omitempty"`
 	// Average inter-token latency in milliseconds. Only available for streaming requests
 	InterTokenLatencyMs *float64 `json:"interTokenLatencyMs,omitempty"`
+	// Whether Auto mode was selected for this model call
+	IsAuto *bool `json:"isAuto,omitempty"`
+	// Whether this model call used a bring-your-own-key provider
+	IsByok *bool `json:"isByok,omitempty"`
+	// Requested maximum output tokens used for this model call
+	MaxOutputTokens *int64 `json:"maxOutputTokens,omitempty"`
+	// Effective maximum prompt-token limit used for this model call
+	MaxPromptTokens *int64 `json:"maxPromptTokens,omitempty"`
 	// Model identifier used for this API call
 	Model string `json:"model"`
+	// Number of tool calls returned by the model
+	// Internal: NumToolCalls is part of the SDK's internal API surface and is not intended for external use.
+	NumToolCalls *int64 `json:"numToolCalls,omitempty"`
 	// Number of output tokens produced
 	OutputTokens *int64 `json:"outputTokens,omitempty"`
+	// Time to first observable model output in milliseconds. Includes text, reasoning, and tool-call output; only available for streaming requests that produce observable output.
+	OutputTtftMs *float64 `json:"outputTtftMs,omitempty"`
 	// Parent tool call ID when this usage originates from a sub-agent
 	// Deprecated: ParentToolCallID is deprecated.
 	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
@@ -807,12 +1608,26 @@ type AssistantUsageData struct {
 	QuotaSnapshots map[string]AssistantUsageQuotaSnapshot `json:"quotaSnapshots,omitzero"`
 	// Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
+	// Reasoning summary mode used for this model call, if applicable
+	ReasoningSummary *ReasoningSummary `json:"reasoningSummary,omitempty"`
 	// Number of output tokens used for reasoning (e.g., chain-of-thought)
 	ReasoningTokens *int64 `json:"reasoningTokens,omitempty"`
+	// Number of rejected speculative prediction tokens
+	RejectedPredictionTokens *int64 `json:"rejectedPredictionTokens,omitempty"`
+	// Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
+	Rte *bool `json:"rte,omitempty"`
 	// Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
 	ServiceRequestID *string `json:"serviceRequestId,omitempty"`
 	// Time to first token in milliseconds. Only available for streaming requests
 	TimeToFirstTokenMs *float64 `json:"timeToFirstTokenMs,omitempty"`
+	// Tool-call counts keyed by tool name
+	// Internal: ToolCounts is part of the SDK's internal API surface and is not intended for external use.
+	ToolCounts map[string]int64 `json:"toolCounts,omitzero"`
+	// Number of tokens used by tool definitions for this call
+	// Internal: ToolTokenCount is part of the SDK's internal API surface and is not intended for external use.
+	ToolTokenCount *int64 `json:"toolTokenCount,omitempty"`
+	// Transport used for this model call (http or websocket)
+	Transport *AssistantUsageTransport `json:"transport,omitempty"`
 }
 
 func (*AssistantUsageData) sessionEventData()      {}
@@ -831,6 +1646,18 @@ type AssistantServerToolProgressData struct {
 func (*AssistantServerToolProgressData) sessionEventData() {}
 func (*AssistantServerToolProgressData) Type() SessionEventType {
 	return SessionEventTypeAssistantServerToolProgress
+}
+
+// Live-only Auto preference recommendation from Copilot API after a successful Auto model call.
+// Experimental: SessionAutoTierRecommendationData is part of an experimental API and may change or be removed.
+type SessionAutoTierRecommendationData struct {
+	// Recommended Auto preference.
+	RecommendedAutoTier RecommendedAutoTier `json:"recommendedAutoTier"`
+}
+
+func (*SessionAutoTierRecommendationData) sessionEventData() {}
+func (*SessionAutoTierRecommendationData) Type() SessionEventType {
+	return SessionEventTypeSessionAutoTierRecommendation
 }
 
 // MCP App view called a tool on a connected MCP server (SEP-1865)
@@ -882,14 +1709,81 @@ func (*MCPHeadersRefreshCompletedData) Type() SessionEventType {
 	return SessionEventTypeMCPHeadersRefreshCompleted
 }
 
+// Metadata for an additional model inference attempt within an existing assistant turn
+type AssistantTurnRetryData struct {
+	// Model identifier used for this retry, when known
+	Model *string `json:"model,omitempty"`
+	// Provider or runtime classification that caused the retry, when known
+	Reason *string `json:"reason,omitempty"`
+	// Identifier of the turn whose model inference is being retried
+	TurnID string `json:"turnId"`
+}
+
+func (*AssistantTurnRetryData) sessionEventData()      {}
+func (*AssistantTurnRetryData) Type() SessionEventType { return SessionEventTypeAssistantTurnRetry }
+
+// Metadata for work the user interrupted while the agent was running
+type AgentInterruptedData struct {
+	// What the agent was doing when the user interrupted it
+	Activity AgentInterruptedActivity `json:"activity"`
+	// For an interrupted model call: the provider endpoint the request targeted
+	APIEndpoint *string `json:"apiEndpoint,omitempty"`
+	// For an interrupted model call: whether the user interrupted before any token arrived or while the response was streaming
+	CancelPhase *AgentInterruptedCancelPhase `json:"cancelPhase,omitempty"`
+	// How long the interrupted work had been running, in milliseconds
+	ElapsedMs float64 `json:"elapsedMs"`
+	// For an interrupted background-agent batch: how many background sub-agents the stop swept. Counts accepted cancellations, so an agent cancelled as a cascade of its interrupted parent is covered by that parent rather than counted again.
+	InterruptedAgentCount *int64 `json:"interruptedAgentCount,omitempty"`
+	// For an interrupted model call: the model the request targeted
+	Model *string `json:"model,omitempty"`
+	// For a mid-stream interrupt: the observed time to first observable output, in milliseconds. Deliberately distinct from the `ttftMs` reported on a successful model call, which measures time to first stream event.
+	OutputTtftMs *float64 `json:"outputTtftMs,omitempty"`
+	// For an interrupted model call: the reasoning effort the request asked for
+	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
+	// Subset of `toolNames` whose tool metadata marks the tool name as safe to record unhashed in telemetry.
+	SafeToolNames []string `json:"safeToolNames,omitzero"`
+	// Tool call identifiers that were still running
+	ToolCallIDs []string `json:"toolCallIds,omitzero"`
+	// Names of the tools that were still running. More than one when the model requested a parallel fan-out.
+	ToolNames []string `json:"toolNames,omitzero"`
+	// For an interrupted model call: the transport the request used
+	Transport *ModelCallFailureTransport `json:"transport,omitempty"`
+	// Zero-based agentic-loop iteration the interrupt landed in
+	Turn int64 `json:"turn"`
+}
+
+func (*AgentInterruptedData) sessionEventData()      {}
+func (*AgentInterruptedData) Type() SessionEventType { return SessionEventTypeAgentInterrupted }
+
+// Model API dispatch metadata for internal telemetry
+type ModelCallStartData struct {
+	// Experimental HydraFusion attribution for this concrete model call.
+	// Experimental: Fusion is part of an experimental API and may change or be removed.
+	Fusion *FusionAttribution `json:"fusion,omitempty"`
+	// Model identifier used for this API call, when known
+	Model *string `json:"model,omitempty"`
+	// Previous response or interaction identifier included in the model request, when present
+	// Internal: PreviousResponseID is part of the SDK's internal API surface and is not intended for external use.
+	PreviousResponseID *string `json:"previousResponseId,omitempty"`
+	// Identifier of the assistant turn that initiated the model call
+	TurnID string `json:"turnId"`
+}
+
+func (*ModelCallStartData) sessionEventData()      {}
+func (*ModelCallStartData) Type() SessionEventType { return SessionEventTypeModelCallStart }
+
 // Model change details including previous and new model identifiers
 type SessionModelChangeData struct {
-	// Reason the change happened, when not user-initiated. Currently `"rate_limit_auto_switch"` for changes triggered by the auto-mode-switch rate-limit recovery path. UI clients can use this to render contextual copy.
+	// Committed Auto preference after the model configuration change, when applicable.
+	AutoTier *AutoTier `json:"autoTier,omitempty"`
+	// Reason the change happened, when not user-initiated. `"rate_limit_auto_switch"` for changes triggered by the auto-mode-switch rate-limit recovery path, or `"refusal_fallback"` when the active model declined a request (content refusal) and the runtime switched to the configured refusal-fallback model. UI clients can use this to render contextual copy.
 	Cause *string `json:"cause,omitempty"`
 	// Context tier after the model change; null explicitly clears a previously selected tier
 	ContextTier *ContextTier `json:"contextTier,omitempty"`
 	// Newly selected model identifier
 	NewModel string `json:"newModel"`
+	// Previously committed Auto preference, when one was explicitly selected.
+	PreviousAutoTier *AutoTier `json:"previousAutoTier,omitempty"`
 	// Model that was previously selected, if any
 	PreviousModel *string `json:"previousModel,omitempty"`
 	// Reasoning effort level before the model change, if applicable
@@ -902,6 +1796,8 @@ type SessionModelChangeData struct {
 	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
 	// Reasoning summary mode after the model change, if applicable
 	ReasoningSummary *ReasoningSummary `json:"reasoningSummary,omitempty"`
+	// Origin of the effective model change, when known.
+	Source *ModelChangeSource `json:"source,omitempty"`
 	// Output verbosity level after the model change, if applicable
 	Verbosity *Verbosity `json:"verbosity,omitempty"`
 }
@@ -962,6 +1858,24 @@ func (*SessionCustomNotificationData) Type() SessionEventType {
 	return SessionEventTypeSessionCustomNotification
 }
 
+// Ordered output and terminal state for a transient query that does not modify conversation history.
+// Experimental: UIEphemeralQueryData is part of an experimental API and may change or be removed.
+type UIEphemeralQueryData struct {
+	// Full response text, present for the `completed` phase.
+	Answer *string `json:"answer,omitempty"`
+	// Ordered text delta, present for the `chunk` phase.
+	Chunk *string `json:"chunk,omitempty"`
+	// Model or transport failure message, present for the `failed` phase.
+	Error *string `json:"error,omitempty"`
+	// Current query lifecycle phase.
+	Phase UIEphemeralQueryPhase `json:"phase"`
+	// Runtime-minted query identifier.
+	RequestID string `json:"requestId"`
+}
+
+func (*UIEphemeralQueryData) sessionEventData()      {}
+func (*UIEphemeralQueryData) Type() SessionEventType { return SessionEventTypeUIEphemeralQuery }
+
 // Payload emitted whenever the main agent's processing loop goes idle, including while related background work (running agents or in-flight attached shell commands) is still pending and the session-level idle event is therefore deferred
 type AssistantIdleData struct {
 	// True when the preceding agentic loop was cancelled via abort signal
@@ -1006,10 +1920,19 @@ func (*MCPToolsListChangedData) Type() SessionEventType { return SessionEventTyp
 type SessionIdleData struct {
 	// True when the preceding agentic loop was cancelled via abort signal
 	Aborted *bool `json:"aborted,omitempty"`
+	// The session mode the agent was operating in when it went idle, when the mode is known. Lets turn-scoped consumers distinguish an autopilot continuation boundary (where the agent keeps working after this idle) from a genuine turn completion.
+	Mode *SessionMode `json:"mode,omitempty"`
 }
 
 func (*SessionIdleData) sessionEventData()      {}
 func (*SessionIdleData) Type() SessionEventType { return SessionEventTypeSessionIdle }
+
+// Payload of `sandbox.decision`, a bounded governance record of what the process sandbox was configured to do and whether it took effect. Discriminated by `kind`.
+type SandboxDecisionData struct {
+}
+
+func (*SandboxDecisionData) sessionEventData()      {}
+func (*SandboxDecisionData) Type() SessionEventType { return SessionEventTypeSandboxDecision }
 
 // Payload of `session.canvas.closed` with the closed canvas instance ID, provider ID, and canvas ID.
 // Experimental: SessionCanvasClosedData is part of an experimental API and may change or be removed.
@@ -1100,13 +2023,35 @@ func (*SessionExtensionsLoadedData) Type() SessionEventType {
 	return SessionEventTypeSessionExtensionsLoaded
 }
 
+// Payload of `session.mcp_server_needs_reconnect` identifying an MCP server whose connection must be re-established.
+type SessionMCPServerNeedsReconnectData struct {
+	// Name of the MCP server that needs to reconnect
+	ServerName string `json:"serverName"`
+}
+
+func (*SessionMCPServerNeedsReconnectData) sessionEventData() {}
+func (*SessionMCPServerNeedsReconnectData) Type() SessionEventType {
+	return SessionEventTypeSessionMCPServerNeedsReconnect
+}
+
+// Payload of `session.mcp_server_removed` identifying an MCP server the graph no longer runs.
+type SessionMCPServerRemovedData struct {
+	// Name of the MCP server that was removed from the graph
+	ServerName string `json:"serverName"`
+}
+
+func (*SessionMCPServerRemovedData) sessionEventData() {}
+func (*SessionMCPServerRemovedData) Type() SessionEventType {
+	return SessionEventTypeSessionMCPServerRemoved
+}
+
 // Payload of `session.mcp_server_status_changed` for one MCP server's status and optional failure error.
 type SessionMCPServerStatusChangedData struct {
 	// Error message if the server entered a failed state
 	Error *string `json:"error,omitempty"`
 	// Name of the MCP server whose status changed
 	ServerName string `json:"serverName"`
-	// Connection status: connected, failed, needs-auth, pending, disabled, or not_configured
+	// Connection status: connected, failed, needs-auth, pending, disabled, stopped, or not_configured
 	Status MCPServerStatus `json:"status"`
 }
 
@@ -1158,16 +2103,20 @@ type UserMessageData struct {
 	InteractionID *string `json:"interactionId,omitempty"`
 	// True when this user message was auto-injected by autopilot's continuation loop rather than typed by the user; used to distinguish autopilot-driven turns in telemetry.
 	IsAutopilotContinuation *bool `json:"isAutopilotContinuation,omitempty"`
+	// Stable identity of the logical user message, matching the ID returned by send and retained by pending queue snapshots
+	MessageID *string `json:"messageId,omitempty"`
 	// Path-backed native document attachments that stayed on the tagged_files path flow because native upload could not read them or would exceed the request size limit
 	NativeDocumentPathFallbackPaths []string `json:"nativeDocumentPathFallbackPaths,omitzero"`
 	// Parent agent task ID for background telemetry correlated to this user turn
 	ParentAgentTaskID *string `json:"parentAgentTaskId,omitempty"`
-	// Origin of this message, used for timeline filtering (e.g., "skill-pdf" for skill-injected messages that should be hidden from the user)
+	// Origin of this message, used for timeline filtering and attribution (e.g., `skill-pdf` for hidden skill injection or `agent-<agent-id>` for an inter-agent prompt)
 	Source *string `json:"source,omitempty"`
 	// Normalized document MIME types that were sent natively instead of through tagged_files XML
 	SupportedNativeDocumentMIMETypes []string `json:"supportedNativeDocumentMimeTypes,omitzero"`
 	// Transformed version of the message sent to the model, with XML wrapping, timestamps, and other augmentations for prompt caching
 	TransformedContent *string `json:"transformedContent,omitempty"`
+	// The agent-loop turn ID that consumed this message; absent when no agent-loop turn consumed it
+	TurnID *string `json:"turnId,omitempty"`
 }
 
 func (*UserMessageData) sessionEventData()      {}
@@ -1175,6 +2124,9 @@ func (*UserMessageData) Type() SessionEventType { return SessionEventTypeUserMes
 
 // Permission request completion notification signaling UI dismissal
 type PermissionCompletedData struct {
+	// Who decided this permission request. Absent on completions recorded before this field existed, which consumers must treat as "not a human decision" rather than assuming one. Authorization records are minted only for `human_response`; an assisted-approval verdict, a host policy, an unattended fallback, and a hook resolution all produce the same `result` a person does, so this is the only field that distinguishes them.
+	// Experimental: DecisionSource is part of an experimental API and may change or be removed.
+	DecisionSource *PermissionDecisionSource `json:"decisionSource,omitempty"`
 	// Request ID of the resolved permission request; clients should dismiss any UI for this request
 	RequestID string `json:"requestId"`
 	// The result of the permission request
@@ -1188,6 +2140,8 @@ func (*PermissionCompletedData) Type() SessionEventType { return SessionEventTyp
 
 // Permission request notification requiring client approval with request details
 type PermissionRequestedData struct {
+	// Agent mode captured from the owning turn when permission evaluation began.
+	AgentMode *SessionMode `json:"agentMode,omitempty"`
 	// Details of the permission being requested
 	PermissionRequest PermissionRequest `json:"permissionRequest"`
 	// Derived user-facing permission prompt details for UI consumers
@@ -1196,23 +2150,25 @@ type PermissionRequestedData struct {
 	RequestID string `json:"requestId"`
 	// When true, this permission was already resolved by a permissionRequest hook and requires no client action
 	ResolvedByHook *bool `json:"resolvedByHook,omitempty"`
+	// Neutral risk metadata supplied by the tool host. Consumers may display this value but must not use it to bypass the permission decision.
+	RiskAssessment any `json:"riskAssessment,omitempty"`
 }
 
 func (*PermissionRequestedData) sessionEventData()      {}
 func (*PermissionRequestedData) Type() SessionEventType { return SessionEventTypePermissionRequested }
 
-// Permissions change details carrying the aggregate allow-all transition.
+// Permission-mode transition details.
+// Experimental: SessionPermissionsChangedData is part of an experimental API and may change or be removed.
 type SessionPermissionsChangedData struct {
-	// Allow-all mode after the change
-	// Experimental: AllowAllPermissionMode is part of an experimental API and may change or be removed.
-	AllowAllPermissionMode *PermissionAllowAllMode `json:"allowAllPermissionMode,omitempty"`
-	// Aggregate allow-all flag after the change
-	AllowAllPermissions bool `json:"allowAllPermissions"`
-	// Allow-all mode before the change
-	// Experimental: PreviousAllowAllPermissionMode is part of an experimental API and may change or be removed.
-	PreviousAllowAllPermissionMode *PermissionAllowAllMode `json:"previousAllowAllPermissionMode,omitempty"`
-	// Aggregate allow-all flag before the change
-	PreviousAllowAllPermissions bool `json:"previousAllowAllPermissions"`
+	// Explicit LLM judge model override used by assisted mode; omitted when the provider default applies
+	// Experimental: AssistedApprovalModel is part of an experimental API and may change or be removed.
+	AssistedApprovalModel *string `json:"assistedApprovalModel,omitempty"`
+	// Permission mode after the change
+	// Experimental: Mode is part of an experimental API and may change or be removed.
+	Mode *PermissionMode `json:"mode,omitempty"`
+	// Permission mode before the change
+	// Experimental: PreviousMode is part of an experimental API and may change or be removed.
+	PreviousMode *PermissionMode `json:"previousMode,omitempty"`
 }
 
 func (*SessionPermissionsChangedData) sessionEventData() {}
@@ -1220,10 +2176,23 @@ func (*SessionPermissionsChangedData) Type() SessionEventType {
 	return SessionEventTypeSessionPermissionsChanged
 }
 
+// Persisted generic client-side tool activations restored when a session resumes.
+type ToolSearchActivatedData struct {
+	// Tool-search strategy that activated the definitions.
+	Strategy string `json:"strategy"`
+	// Names of tool definitions activated by this search invocation.
+	ToolNames []string `json:"toolNames"`
+}
+
+func (*ToolSearchActivatedData) sessionEventData()      {}
+func (*ToolSearchActivatedData) Type() SessionEventType { return SessionEventTypeToolSearchActivated }
+
 // Plan approval request with plan content and available user actions
 type ExitPlanModeRequestedData struct {
 	// Available actions the user can take
 	Actions []ExitPlanModeAction `json:"actions"`
+	// Model the session had selected when the plan was authored, when one is known
+	Model *string `json:"model,omitempty"`
 	// Full content of the plan file
 	PlanContent string `json:"planContent"`
 	// Recommended action to preselect for the user
@@ -1287,6 +2256,86 @@ type CommandQueuedData struct {
 func (*CommandQueuedData) sessionEventData()      {}
 func (*CommandQueuedData) Type() SessionEventType { return SessionEventTypeCommandQueued }
 
+// Records that a live authorization record from an earlier human decision in this session contained a permission proposal, so it ran without another prompt. This mints no authority: it accounts for one more effect against the prior grant, which is what lets a replayed session agree with the live one about how much of that grant is left.
+// Experimental: PermissionCarriedForwardData is part of an experimental API and may change or be removed.
+type PermissionCarriedForwardData struct {
+	// Always `authorization_carry_forward`. Stated explicitly so a consumer reading this event cannot mistake it for a human, host-policy, or assisted-approval decision.
+	// Experimental: DecisionSource is part of an experimental API and may change or be removed.
+	DecisionSource PermissionDecisionSource `json:"decisionSource"`
+	// Identity of the prior authorization record that contained the proposal.
+	// Experimental: RecordID is part of an experimental API and may change or be removed.
+	RecordID string `json:"recordId"`
+	// Authorization edge minted for this admission. Not a prompt id: no prompt was raised, so no client should expect a request with this id.
+	// Experimental: RequestID is part of an experimental API and may change or be removed.
+	RequestID string `json:"requestId"`
+	// Tool call this admission authorizes. Its execution receipts the prior grant, which is how a single-effect approval is spent rather than carried forward again.
+	// Experimental: ToolCallID is part of an experimental API and may change or be removed.
+	ToolCallID string `json:"toolCallId"`
+}
+
+func (*PermissionCarriedForwardData) sessionEventData() {}
+func (*PermissionCarriedForwardData) Type() SessionEventType {
+	return SessionEventTypePermissionCarriedForward
+}
+
+// Records that a mode transition notice reached the model so cache-stable mode tools can remain offered across resume.
+type SessionModeNoticeDeliveredData struct {
+	// Model-visible transition notice persisted for a mid-turn delivery
+	Content *string `json:"content,omitempty"`
+	// Mode established by the delivered transition notice
+	Mode SessionMode `json:"mode"`
+}
+
+func (*SessionModeNoticeDeliveredData) sessionEventData() {}
+func (*SessionModeNoticeDeliveredData) Type() SessionEventType {
+	return SessionEventTypeSessionModeNoticeDelivered
+}
+
+// Records that deterministic text recognition found likely assent in the human turn immediately following a root Autopilot permission request that was blocked because no interactive response was available. This event grants no authority; its model-facing projection only suggests retrying the unchanged operation.
+// Experimental: PermissionAssentDetectedData is part of an experimental API and may change or be removed.
+type PermissionAssentDetectedData struct {
+	// Permission request the likely assent may refer to. The runtime derives this from the preceding durable blocker; the human message and extraction model do not choose it.
+	// Experimental: RequestID is part of an experimental API and may change or be removed.
+	RequestID string `json:"requestId"`
+	// Human turn whose text triggered the deterministic assent recognizer.
+	// Experimental: TurnIndex is part of an experimental API and may change or be removed.
+	TurnIndex int64 `json:"turnIndex"`
+}
+
+func (*PermissionAssentDetectedData) sessionEventData() {}
+func (*PermissionAssentDetectedData) Type() SessionEventType {
+	return SessionEventTypePermissionAssentDetected
+}
+
+// Records that message-backed authorization could not safely represent one human turn before compaction. The runtime may compact the original message after this marker is durable, but message-derived carry-forward and assisted auto-approval remain disabled for the rest of the session so subsequent commands continue through the ordinary permission prompt.
+// Experimental: PermissionMessageAuthorizationDegradedData is part of an experimental API and may change or be removed.
+type PermissionMessageAuthorizationDegradedData struct {
+	// The human turn that could not be represented safely.
+	// Experimental: TurnIndex is part of an experimental API and may change or be removed.
+	TurnIndex int64 `json:"turnIndex"`
+}
+
+func (*PermissionMessageAuthorizationDegradedData) sessionEventData() {}
+func (*PermissionMessageAuthorizationDegradedData) Type() SessionEventType {
+	return SessionEventTypePermissionMessageAuthorizationDegraded
+}
+
+// Records that one human turn has been read by the blinded authorization proposer, whether or not it minted anything, so a resumed session does not re-run the extraction model on a turn the live session already read. Also records whether that pass activates ongoing extraction; contextual-assent-only passes do not, so unrelated future messages remain outside extraction.
+// Experimental: PermissionMessageAuthorizationReadData is part of an experimental API and may change or be removed.
+type PermissionMessageAuthorizationReadData struct {
+	// Whether this read activates ongoing message-backed extraction. False for a contextual-assent-only pass while auto-approval is off, so unrelated future messages remain outside extraction.
+	// Experimental: ActivatesExtraction is part of an experimental API and may change or be removed.
+	ActivatesExtraction *bool `json:"activatesExtraction,omitempty"`
+	// The human turn that was read by the proposer.
+	// Experimental: TurnIndex is part of an experimental API and may change or be removed.
+	TurnIndex int64 `json:"turnIndex"`
+}
+
+func (*PermissionMessageAuthorizationReadData) sessionEventData() {}
+func (*PermissionMessageAuthorizationReadData) Type() SessionEventType {
+	return SessionEventTypePermissionMessageAuthorizationRead
+}
+
 // Registered command dispatch request routed to the owning client
 type CommandExecuteData struct {
 	// Raw argument string after the command name
@@ -1301,6 +2350,41 @@ type CommandExecuteData struct {
 
 func (*CommandExecuteData) sessionEventData()      {}
 func (*CommandExecuteData) Type() SessionEventType { return SessionEventTypeCommandExecute }
+
+// Resolved runtime configuration for a configured sub-agent
+type SubagentConfiguredData struct {
+	// Resolved context tier, when configured for the model
+	ContextTier *string `json:"contextTier,omitempty"`
+	// Resolved model the sub-agent will run with
+	Model string `json:"model"`
+	// Whether the sub-agent accepts follow-up turns
+	MultiTurn bool `json:"multiTurn"`
+	// Resolved reasoning effort, when configured for the model
+	ReasoningEffort *string `json:"reasoningEffort,omitempty"`
+}
+
+func (*SubagentConfiguredData) sessionEventData()      {}
+func (*SubagentConfiguredData) Type() SessionEventType { return SessionEventTypeSubagentConfigured }
+
+// Runtime enforcement of enterprise managed settings: fires when the session blocks or caps a runtime action because enterprise policy governs it, so SDK clients can explain *why* an action was governed. Unlike `session.managed_settings_resolved` (which reports *what* is managed), this reports a concrete governed action — e.g. a user or host tried to turn on a bypass-permissions escalation while policy disables it. Emitted live (not persisted to the session event log) on user/host-initiated attempts only, never for silent policy application. Marked experimental while the managed-settings surface stabilizes.
+// Experimental: SessionManagedSettingsEnforcedData is part of an experimental API and may change or be removed.
+type SessionManagedSettingsEnforcedData struct {
+	// The category of runtime action that managed policy governed.
+	Action ManagedSettingsEnforcedAction `json:"action"`
+	// For a `bypass_permissions_blocked` action, which permission-escalation primitive was refused. Absent for actions without a specific escalation primitive.
+	Escalation *ManagedSettingsEnforcedEscalation `json:"escalation,omitempty"`
+	// Whether the enforcement was forced by fail-closed handling (managed policy could not be determined) rather than an explicit managed setting. When true, `setting` still names the restriction that was applied.
+	FailClosed bool `json:"failClosed"`
+	// A human-readable explanation of why the action was governed, suitable for surfacing to the user.
+	Message string `json:"message"`
+	// The managed setting key responsible for the enforcement (e.g. `permissions.disableBypassPermissionsMode`).
+	Setting string `json:"setting"`
+}
+
+func (*SessionManagedSettingsEnforcedData) sessionEventData() {}
+func (*SessionManagedSettingsEnforcedData) Type() SessionEventType {
+	return SessionEventTypeSessionManagedSettingsEnforced
+}
 
 // SDK command registration change notification
 type CommandsChangedData struct {
@@ -1356,6 +2440,8 @@ type SessionScheduleCreatedData struct {
 	ID int64 `json:"id"`
 	// Interval between ticks in milliseconds (relative-interval schedules)
 	IntervalMs *int64 `json:"intervalMs,omitempty"`
+	// Who created the schedule (`user` or `model`). Persisted so a resumed session keeps gating non-user schedules from firing skills that opted out of model invocation. Absent on entries created before this field existed; a missing origin fails closed (treated the same as a non-user origin), so such a schedule may not resolve a `disable-model-invocation` skill.
+	Origin *ScheduleOrigin `json:"origin,omitempty"`
 	// Prompt text that gets enqueued on every tick
 	Prompt string `json:"prompt"`
 	// Whether the schedule re-arms after each tick (`/every`) or fires once (`/after`)
@@ -1418,6 +2504,8 @@ func (*SessionHandoffData) Type() SessionEventType { return SessionEventTypeSess
 type SessionStartData struct {
 	// Whether the session was already in use by another client at start time
 	AlreadyInUse *bool `json:"alreadyInUse,omitempty"`
+	// Auto routing preference selected at session creation time
+	AutoTier *AutoTier `json:"autoTier,omitempty"`
 	// Working directory and git context at session start
 	Context *WorkingDirectoryContext `json:"context,omitempty"`
 	// Context tier selected at session creation time for models with tiered context pricing; null when no tier is selected (e.g., non-tiered model)
@@ -1426,6 +2514,8 @@ type SessionStartData struct {
 	CopilotVersion string `json:"copilotVersion"`
 	// When set, identifies a parent session whose context this session continues — e.g., a detached headless rem-agent run launched on the parent's interactive shutdown. Telemetry from this session is reported under the parent's session_id.
 	DetachedFromSpawningParentSessionID *string `json:"detachedFromSpawningParentSessionId,omitempty"`
+	// Per-session GitHub MCP override persisted for cold resume
+	GitHubMCPToolConfig *GitHubMCPToolConfig `json:"githubMcpToolConfig,omitempty"`
 	// Identifier of the software producing the events (e.g., "copilot-agent")
 	Producer string `json:"producer"`
 	// Reasoning effort level used for model calls, if applicable (e.g. "none", "low", "medium", "high", "xhigh", "max")
@@ -1494,11 +2584,13 @@ func (*SessionSessionLimitsChangedData) Type() SessionEventType {
 type SessionResumeData struct {
 	// Whether the session was already in use by another client at resume time
 	AlreadyInUse *bool `json:"alreadyInUse,omitempty"`
+	// Auto routing preference active at resume time
+	AutoTier *AutoTier `json:"autoTier,omitempty"`
 	// Updated working directory and git context at resume time
 	Context *WorkingDirectoryContext `json:"context,omitempty"`
 	// Context tier currently selected at resume time; null when no tier is active
 	ContextTier *ContextTier `json:"contextTier,omitempty"`
-	// When true, tool calls and permission requests left in flight by the previous session lifetime remain pending after resume and the agentic loop awaits their results. User sends are queued behind the pending work until all such requests reach a terminal state. When false (the default), any such tool calls and permission requests are immediately marked as interrupted on resume.
+	// When true, tool calls and permission requests left in flight by the previous session lifetime remain pending after resume and the agentic loop awaits their results. User sends are queued behind the pending work until all such requests reach a terminal state. When false or omitted, pending work is normally marked as interrupted unless the resume passively joined live work owned by another client; sessionWasActive distinguishes that case.
 	ContinuePendingWork *bool `json:"continuePendingWork,omitempty"`
 	// Total number of persisted events in the session at the time of resume
 	EventCount int64 `json:"eventCount"`
@@ -1516,7 +2608,7 @@ type SessionResumeData struct {
 	SelectedModel *string `json:"selectedModel,omitempty"`
 	// Session limits currently configured at resume time; null when no limits are active
 	SessionLimits *SessionLimitsConfig `json:"sessionLimits,omitempty"`
-	// True when this resume attached to a session that the runtime already had running in-memory (for example, an extension joining a session another client was actively driving). False (or omitted) for cold resumes — the runtime had to reconstitute the session from its persisted event log.
+	// True when this resume passively joined a session that already had live work running in the runtime - an agent turn, a native queue run, a queued resume continuation, or an in-flight send (for example, an extension joining a session another client was actively driving). False (or omitted) when the session had no live work or when the resume explicitly abandoned pending work, including cold resumes and suspended sessions that remain resident in memory.
 	SessionWasActive *bool `json:"sessionWasActive,omitempty"`
 	// Output verbosity level used for model calls, if applicable (e.g. "low", "medium", "high")
 	Verbosity *Verbosity `json:"verbosity,omitempty"`
@@ -1540,6 +2632,8 @@ func (*SessionSnapshotRewindData) Type() SessionEventType {
 
 // Session termination metrics including usage statistics, code changes, and shutdown reason
 type SessionShutdownData struct {
+	// Per-agent usage breakdown, keyed by agent instance identifier. The main conversation uses the stable key `main`.
+	AgentMetrics map[string]ShutdownAgentMetric `json:"agentMetrics,omitzero"`
 	// Aggregate code change metrics for the session
 	CodeChanges ShutdownCodeChanges `json:"codeChanges"`
 	// Non-system message token count at shutdown
@@ -1601,17 +2695,19 @@ type SkillInvokedData struct {
 	Content string `json:"content"`
 	// Description of the skill from its SKILL.md frontmatter
 	Description *string `json:"description,omitempty"`
+	// Whether model invocation is disabled for this skill
+	DisableModelInvocation *bool `json:"disableModelInvocation,omitempty"`
 	// Model identifier active when the skill was invoked, when known
 	Model *string `json:"model,omitempty"`
 	// Name of the invoked skill
 	Name string `json:"name"`
-	// File path to the SKILL.md definition
+	// File path to the SKILL.md definition, or an empty string for an SDK-provided skill without a filesystem identity
 	Path string `json:"path"`
 	// Name of the plugin this skill originated from, when applicable
 	PluginName *string `json:"pluginName,omitempty"`
 	// Version of the plugin this skill originated from, when applicable
 	PluginVersion *string `json:"pluginVersion,omitempty"`
-	// Source identifier for where the skill was discovered. Known values include: project (workspace skill), inherited (parent-directory skill), personal-copilot (~/.copilot/skills), personal-agents (~/.agents/skills), custom (configured directory), plugin (installed plugin), builtin (bundled runtime skill), and remote (org/enterprise skill)
+	// Source identifier for where the skill was discovered. Known values include: project (workspace skill), inherited (parent-directory skill), personal-copilot (~/.copilot/skills), personal-agents (~/.agents/skills), custom (configured directory), plugin (installed plugin), builtin (bundled runtime skill), remote (org/enterprise skill), and sdk (SDK-provided skill)
 	Source *string `json:"source,omitempty"`
 	// What triggered the skill invocation: `user-invoked` (explicit user action, such as via a slash command or UI affordance), `agent-invoked` (agent requested the skill), or `context-load` (loaded as part of another context, such as preloading skills configured on a custom agent or subagent)
 	Trigger *SkillInvokedTrigger `json:"trigger,omitempty"`
@@ -1709,10 +2805,26 @@ type SubagentCompletedData struct {
 	AgentDisplayName string `json:"agentDisplayName"`
 	// Internal name of the sub-agent
 	AgentName string `json:"agentName"`
+	// Whether the sub-agent was torn down by cancellation - its own abort, or an ancestor being killed - instead of finishing its work. Cancellation is not a failure, so the run still reports completion; this distinguishes a torn-down sub-agent from one that ran to the end.
+	Cancelled *bool `json:"cancelled,omitempty"`
+	// Whether the first model actually dispatched matched the user's configured preference
+	ConfiguredModelMatchesActual *bool `json:"configuredModelMatchesActual,omitempty"`
+	// Concrete model the user configured for this sub-agent via `/subagents`, when present
+	ConfiguredModelPreference *string `json:"configuredModelPreference,omitempty"`
 	// Wall-clock duration of the sub-agent execution in milliseconds
 	DurationMs *int64 `json:"durationMs,omitempty"`
+	// Whether the explicit task-call model matched the user's configured preference
+	ExplicitModelMatchesPreference *bool `json:"explicitModelMatchesPreference,omitempty"`
+	// Explicit model supplied by the parent agent on the task call, when present
+	ExplicitModelOverride *string `json:"explicitModelOverride,omitempty"`
+	// First model for which the sub-agent started an inference request, when one was dispatched
+	FirstDispatchedModel *string `json:"firstDispatchedModel,omitempty"`
 	// Model used by the sub-agent
 	Model *string `json:"model,omitempty"`
+	// Why an explicit task-call model did not become the effective model
+	ModelOverrideReason *string `json:"modelOverrideReason,omitempty"`
+	// Authority or runtime mechanism responsible for sub-agent model selection
+	ModelSelectionSource *SubagentModelSelectionSource `json:"modelSelectionSource,omitempty"`
 	// Tool call ID of the parent tool invocation that spawned this sub-agent
 	ToolCallID string `json:"toolCallId"`
 	// Total tokens (input + output) consumed by the sub-agent
@@ -1730,12 +2842,26 @@ type SubagentFailedData struct {
 	AgentDisplayName string `json:"agentDisplayName"`
 	// Internal name of the sub-agent
 	AgentName string `json:"agentName"`
+	// Whether the first model actually dispatched matched the user's configured preference
+	ConfiguredModelMatchesActual *bool `json:"configuredModelMatchesActual,omitempty"`
+	// Concrete model the user configured for this sub-agent via `/subagents`, when present
+	ConfiguredModelPreference *string `json:"configuredModelPreference,omitempty"`
 	// Wall-clock duration of the sub-agent execution in milliseconds
 	DurationMs *int64 `json:"durationMs,omitempty"`
 	// Error message describing why the sub-agent failed
 	Error string `json:"error"`
+	// Whether the explicit task-call model matched the user's configured preference
+	ExplicitModelMatchesPreference *bool `json:"explicitModelMatchesPreference,omitempty"`
+	// Explicit model supplied by the parent agent on the task call, when present
+	ExplicitModelOverride *string `json:"explicitModelOverride,omitempty"`
+	// First model for which the sub-agent started an inference request, when one was dispatched
+	FirstDispatchedModel *string `json:"firstDispatchedModel,omitempty"`
 	// Model selected for the sub-agent, when known
 	Model *string `json:"model,omitempty"`
+	// Why an explicit task-call model did not become the effective model
+	ModelOverrideReason *string `json:"modelOverrideReason,omitempty"`
+	// Authority or runtime mechanism responsible for sub-agent model selection
+	ModelSelectionSource *SubagentModelSelectionSource `json:"modelSelectionSource,omitempty"`
 	// Tool call ID of the parent tool invocation that spawned this sub-agent
 	ToolCallID string `json:"toolCallId"`
 	// Total tokens (input + output) consumed before the sub-agent failed
@@ -1755,8 +2881,22 @@ type SubagentStartedData struct {
 	AgentDisplayName string `json:"agentDisplayName"`
 	// Internal name of the sub-agent
 	AgentName string `json:"agentName"`
+	// Type of the sub-agent selected at spawn time.
+	AgentType *string `json:"agentType,omitempty"`
+	// Whether the sub-agent runs synchronously or in the background.
+	ExecutionMode *string `json:"executionMode,omitempty"`
+	// Root id of the factory run that spawned this sub-agent, when it was spawned by one.
+	FactoryRunID *string `json:"factoryRunId,omitempty"`
 	// Model the sub-agent will run with, when known at start.
 	Model *string `json:"model,omitempty"`
+	// Authority or runtime mechanism responsible for sub-agent model selection, when known at start.
+	ModelSelectionSource *SubagentModelSelectionSource `json:"modelSelectionSource,omitempty"`
+	// Task-registry ID of the spawning sub-agent. Absent when the root session spawned this child.
+	ParentID *string `json:"parentId,omitempty"`
+	// Whether this sub-agent can be resumed. Currently always false.
+	Resumable *bool `json:"resumable,omitempty"`
+	// Where the model input for this sub-agent came from. Present when the task planner resolved the launch (the task tool and factory agents); absent for sub-agents created through other runtime paths.
+	TaskModelSource *SubagentTaskModelSource `json:"taskModelSource,omitempty"`
 	// Tool call ID of the parent tool invocation that spawned this sub-agent
 	ToolCallID string `json:"toolCallId"`
 }
@@ -1779,6 +2919,8 @@ func (*SystemNotificationData) Type() SessionEventType { return SessionEventType
 type SystemMessageData struct {
 	// The system or developer prompt text sent as model input
 	Content string `json:"content"`
+	// Logical interaction identifier for the model run receiving this prompt
+	InteractionID *string `json:"interactionId,omitempty"`
 	// Metadata about the prompt template and its construction
 	Metadata *SystemMessageMetadata `json:"metadata,omitempty"`
 	// Optional name identifier for the message source
@@ -1792,10 +2934,6 @@ func (*SystemMessageData) Type() SessionEventType { return SessionEventTypeSyste
 
 // Task completion notification with summary from the agent
 type SessionTaskCompleteData struct {
-	// Whether the tool call succeeded. False when validation failed (e.g., invalid arguments)
-	Success *bool `json:"success,omitempty"`
-	// Summary of the completed task, provided by the agent
-	Summary *string `json:"summary,omitempty"`
 }
 
 func (*SessionTaskCompleteData) sessionEventData()      {}
@@ -1805,6 +2943,9 @@ func (*SessionTaskCompleteData) Type() SessionEventType { return SessionEventTyp
 type ToolExecutionCompleteData struct {
 	// Error details when the tool execution failed
 	Error *ToolExecutionCompleteError `json:"error,omitempty"`
+	// Experimental HydraFusion attribution for this tool completion.
+	// Experimental: Fusion is part of an experimental API and may change or be removed.
+	Fusion *FusionAttribution `json:"fusion,omitempty"`
 	// CAPI interaction ID for correlating this tool execution with upstream telemetry
 	InteractionID *string `json:"interactionId,omitempty"`
 	// Whether this tool call was explicitly requested by the user rather than the assistant
@@ -1819,8 +2960,13 @@ type ToolExecutionCompleteData struct {
 	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
 	// Tool execution result on success
 	Result *ToolExecutionCompleteResult `json:"result,omitempty"`
+	// Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
+	Rte *bool `json:"rte,omitempty"`
 	// Whether this tool execution ran inside a sandbox container
 	Sandboxed *bool `json:"sandboxed,omitempty"`
+	// Experimental shell completion facts captured before the persisted result contents are stripped.
+	// Experimental: ShellExecution is part of an experimental API and may change or be removed.
+	ShellExecution *ToolExecutionCompleteShellExecution `json:"shellExecution,omitempty"`
 	// Whether the tool execution completed successfully
 	Success bool `json:"success"`
 	// Unique identifier for the completed tool call
@@ -1857,15 +3003,26 @@ type ToolExecutionStartData struct {
 	Arguments any `json:"arguments,omitempty"`
 	// When true, the tool output should be displayed expanded (verbatim) in the CLI timeline
 	DisplayVerbatim *bool `json:"displayVerbatim,omitempty"`
+	// Experimental HydraFusion attribution for this tool execution.
+	// Experimental: Fusion is part of an experimental API and may change or be removed.
+	Fusion *FusionAttribution `json:"fusion,omitempty"`
+	// Preferred lookup name for the MCP server hosting this tool: the configured (namespaced) config-map key when the tool carries one, otherwise the display name from `mcpServerName`. Present when the tool is an MCP tool; this is the name unrestricted provenance telemetry hashes so it joins with `mcp_server_setup`, which keys off the configured name too.
+	MCPConfigServerName *string `json:"mcpConfigServerName,omitempty"`
+	// Where the MCP server's configuration came from (`user`, `workspace`, `plugin`, or `builtin`), when the tool is an MCP tool and the server is configured
+	MCPConfigSource *MCPServerSource `json:"mcpConfigSource,omitempty"`
 	// Name of the MCP server hosting this tool, when the tool is an MCP tool
 	MCPServerName *string `json:"mcpServerName,omitempty"`
 	// Original tool name on the MCP server, when the tool is an MCP tool
 	MCPToolName *string `json:"mcpToolName,omitempty"`
+	// Transport the MCP server hosting this tool is connected over, when the tool is an MCP tool and the server is configured
+	MCPTransport *MCPServerTransport `json:"mcpTransport,omitempty"`
 	// Model identifier that generated this tool call
 	Model *string `json:"model,omitempty"`
 	// Tool call ID of the parent tool invocation when this event originates from a sub-agent
 	// Deprecated: ParentToolCallID is deprecated.
 	ParentToolCallID *string `json:"parentToolCallId,omitempty"`
+	// Per-request treatment/eligibility signal returned by the Copilot API in the `X-GitHub-Copilot-Request-TE` response header for the associated model call; `false` when the header was absent or unparseable.
+	Rte *bool `json:"rte,omitempty"`
 	// Shell-tool path hints derived from the command at start time for shell tools (bash/powershell/local_shell). Produced by the same shell-aware extractor as PermissionRequestShell.possiblePaths, so it is present even when the command is auto-approved and no permission request fires. Absent for non-shell tools.
 	ShellToolInfo *ToolExecutionStartShellToolInfo `json:"shellToolInfo,omitempty"`
 	// Unique identifier for this tool call
@@ -1977,6 +3134,8 @@ func (*ToolUserRequestedData) Type() SessionEventType { return SessionEventTypeT
 type SessionWarningData struct {
 	// Human-readable warning message for display in the timeline
 	Message string `json:"message"`
+	// What the user must do to recover, when the runtime knows of an action. The `message` never names a client affordance, so a client that offers one — a slash command, a settings pane, a link — renders it from this value.
+	Remediation *RemediationAction `json:"remediation,omitempty"`
 	// Optional URL associated with this warning that the user can open in a browser
 	URL *string `json:"url,omitempty"`
 	// Category of warning (e.g., "subscription", "policy", "mcp")
@@ -2000,6 +3159,8 @@ type SessionContextChangedData struct {
 	HeadCommit *string `json:"headCommit,omitempty"`
 	// Hosting platform type of the repository (github or ado)
 	HostType *WorkingDirectoryContextHostType `json:"hostType,omitempty"`
+	// Set on the immediate preliminary event of a working-directory change, before the git context is resolved. A settled follow-up event (enriched with git context, or cwd-only for a non-repository) is always emitted afterward, so observers may defer to it. Absent on standalone/final events (e.g. relay context changes).
+	PendingGitContext *bool `json:"pendingGitContext,omitempty"`
 	// Repository identifier derived from the git remote URL ("owner/name" for GitHub, "org/project/repo" for Azure DevOps)
 	Repository *string `json:"repository,omitempty"`
 	// Raw host string from the git remote URL (e.g. "github.com", "mycompany.ghe.com", "dev.azure.com")
@@ -2024,20 +3185,36 @@ func (*SessionWorkspaceFileChangedData) Type() SessionEventType {
 	return SessionEventTypeSessionWorkspaceFileChanged
 }
 
+// Neutral provider-tagged reasoning content blocks preserved verbatim for round-tripping
+// Experimental: AssistantMessageReasoningBlocks is part of an experimental API and may change or be removed.
+type AssistantMessageReasoningBlocks struct {
+	// Provider-native reasoning items or content blocks preserved verbatim, in order. A single response can carry several, and provider signatures or identifiers may depend on their exact content and ordering.
+	Blocks []any `json:"blocks,omitzero"`
+	// Model provider that produced these reasoning blocks.
+	Provider string `json:"provider"`
+}
+
 // Neutral provider-tagged server-side tool-use payload (tool search, advisor) for verbatim round-tripping
 // Experimental: AssistantMessageServerTools is part of an experimental API and may change or be removed.
 type AssistantMessageServerTools struct {
-	AdvisorModel           *string           `json:"advisorModel,omitempty"`
+	// Advisor model identifier associated with the server-tool payload.
+	AdvisorModel *string `json:"advisorModel,omitempty"`
+	// Provider function-call namespaces keyed by function-call identifier.
 	FunctionCallNamespaces map[string]string `json:"functionCallNamespaces,omitzero"`
-	Items                  []any             `json:"items,omitzero"`
-	Provider               string            `json:"provider"`
-	RawContentBlocks       []any             `json:"rawContentBlocks,omitzero"`
+	// Provider-native server-tool call and output items preserved verbatim for replay.
+	Items []any `json:"items,omitzero"`
+	// Model provider that produced this server-tool payload.
+	Provider string `json:"provider"`
+	// Raw provider content blocks retained for verbatim round-tripping.
+	RawContentBlocks []any `json:"rawContentBlocks,omitzero"`
 }
 
 // A tool invocation request from the assistant
 type AssistantMessageToolRequest struct {
 	// Arguments to pass to the tool, format depends on the tool
 	Arguments any `json:"arguments,omitempty"`
+	// Hosted program that requested this client tool call
+	Caller *AssistantMessageToolRequestCaller `json:"caller,omitempty"`
 	// Resolved intention summary describing what this specific call does
 	IntentionSummary *string `json:"intentionSummary,omitempty"`
 	// Name of the MCP server hosting this tool, when the tool is an MCP tool
@@ -2054,8 +3231,18 @@ type AssistantMessageToolRequest struct {
 	Type *AssistantMessageToolRequestType `json:"type,omitempty"`
 }
 
+// Hosted program that requested this client tool call
+type AssistantMessageToolRequestCaller struct {
+	// Provider-assigned identifier for the hosted caller.
+	CallerID string `json:"callerId"`
+	// Kind of hosted caller that requested the client tool call.
+	Type AssistantMessageToolRequestCallerType `json:"type"`
+}
+
 // Per-request cost and usage data from the CAPI copilot_usage response field
 type AssistantUsageCopilotUsage struct {
+	// Default billing model for token details that do not identify their own model
+	Model *string `json:"model,omitempty"`
 	// Itemized token usage breakdown
 	// Internal: TokenDetails is part of the SDK's internal API surface and is not intended for external use.
 	TokenDetails []AssistantUsageCopilotUsageTokenDetail `json:"tokenDetails,omitzero"`
@@ -2069,6 +3256,8 @@ type AssistantUsageCopilotUsageTokenDetail struct {
 	BatchSize int64 `json:"batchSize"`
 	// Cost per batch of tokens
 	CostPerBatch int64 `json:"costPerBatch"`
+	// Model responsible for this billing entry
+	Model *string `json:"model,omitempty"`
 	// Total token count for this entry
 	TokenCount int64 `json:"tokenCount"`
 	// Token category (e.g., "input", "output")
@@ -2304,6 +3493,9 @@ type CompactionCompleteCompactionTokensUsed struct {
 // Per-request cost and usage data from the CAPI copilot_usage response field
 // Internal: CompactionCompleteCompactionTokensUsedCopilotUsage is an internal SDK API and is not part of the public surface.
 type CompactionCompleteCompactionTokensUsedCopilotUsage struct {
+	// Default billing model for token details that do not identify their own model
+	// Internal: Model is part of the SDK's internal API surface and is not intended for external use.
+	Model *string `json:"model,omitempty"`
 	// Itemized token usage breakdown
 	// Internal: TokenDetails is part of the SDK's internal API surface and is not intended for external use.
 	TokenDetails []CompactionCompleteCompactionTokensUsedCopilotUsageTokenDetail `json:"tokenDetails,omitzero"`
@@ -2317,22 +3509,50 @@ type CompactionCompleteCompactionTokensUsedCopilotUsageTokenDetail struct {
 	BatchSize int64 `json:"batchSize"`
 	// Cost per batch of tokens
 	CostPerBatch int64 `json:"costPerBatch"`
+	// Model responsible for this billing entry
+	Model *string `json:"model,omitempty"`
 	// Total token count for this entry
 	TokenCount int64 `json:"tokenCount"`
 	// Token category (e.g., "input", "output")
 	TokenType string `json:"tokenType"`
 }
 
-// A single loaded custom agent in `session.custom_agents_updated`, with identity, source, tools, invocability, and model override.
+// Inclusive durable event range summarized by a completion receipt.
+type CompletionReceiptEventRange struct {
+	// Identifier of the assistant turn-end event that ends the covered exchange. Always equals the receipt's sourceEventId, so either field is a valid join key.
+	EndEventID string `json:"endEventId"`
+	// Identifier of the user message that starts the covered exchange.
+	StartEventID string `json:"startEventId"`
+}
+
+// Final structured tool completion in the covered event range.
+type CompletionReceiptFinalTool struct {
+	// Process exit code from a structured shell result, when available.
+	ExitCode *int64 `json:"exitCode,omitempty"`
+	// Structured success or failure status from the tool completion event.
+	Status CompletionReceiptToolStatus `json:"status"`
+	// Unique identifier of the completed tool call.
+	ToolCallID string `json:"toolCallId"`
+	// Tool name from the matching tool execution start event, when available.
+	ToolName *string `json:"toolName,omitempty"`
+}
+
+// A single loaded custom agent in `session.custom_agents_updated`, with identity, source, tools, invocability, and authored model configuration.
 type CustomAgentsUpdatedAgent struct {
 	// Description of what the agent does
 	Description string `json:"description"`
+	// Whether model-driven invocation is disabled for this agent.
+	DisableModelInvocation *bool `json:"disableModelInvocation,omitempty"`
 	// Human-readable display name
 	DisplayName string `json:"displayName"`
 	// Unique identifier for the agent
 	ID string `json:"id"`
 	// Model override for this agent, if set
 	Model *string `json:"model,omitempty"`
+	// Whether authored models are preferences or required constraints
+	ModelPolicy *AgentModelPolicy `json:"modelPolicy,omitempty"`
+	// Authored model ids in priority order, if configured
+	Models []string `json:"models,omitzero"`
 	// Internal name of the agent
 	Name string `json:"name"`
 	// Source location: user, project, inherited, remote, or plugin
@@ -2363,6 +3583,116 @@ type ExtensionsLoadedExtension struct {
 	Source ExtensionsLoadedExtensionSource `json:"source"`
 	// Current status: running, disabled, failed, or starting
 	Status ExtensionsLoadedExtensionStatus `json:"status"`
+}
+
+// A declared phase shown in a factory permission prompt.
+type FactoryPermissionPhase struct {
+	// Optional phase detail
+	Detail *string `json:"detail,omitempty"`
+	// Phase title
+	Title string `json:"title"`
+}
+
+// Experimental attribution linking an ordinary event to the HydraFusion turn, phase, and concrete source that produced it.
+// Experimental: FusionAttribution is part of an experimental API and may change or be removed.
+type FusionAttribution struct {
+	// Idempotency identifier for the authoritative commit, when the event belongs to the selected output.
+	CommitID *string `json:"commitId,omitempty"`
+	// Conversation scope in which the concrete phase executed.
+	ConversationScope *string `json:"conversationScope,omitempty"`
+	// Stable identifier for the HydraFusion turn that produced the event.
+	FusionID string `json:"fusionId"`
+	// HydraFusion orchestration pattern selected for the turn.
+	Pattern string `json:"pattern"`
+	// Identifier of the concrete phase that produced the event.
+	PhaseID *string `json:"phaseId,omitempty"`
+	// Kind of concrete phase that produced the event.
+	PhaseKind *string `json:"phaseKind,omitempty"`
+	// HydraFusion routing policy used for the turn.
+	Policy string `json:"policy"`
+	// Semantic role assigned to the concrete phase.
+	Role *string `json:"role,omitempty"`
+	// Concrete model that produced the attributed event.
+	SourceModel *string `json:"sourceModel,omitempty"`
+	// Phase whose output supplied the authoritative content, when different from the executing phase.
+	SourcePhaseID *string `json:"sourcePhaseId,omitempty"`
+	// Synthetic HydraFusion model selected for the session.
+	SyntheticModel string `json:"syntheticModel"`
+}
+
+// Durable server recommendation for subsequent HydraFusion turns.
+// Experimental: FusionFollowUpRecommendation is part of an experimental API and may change or be removed.
+type FusionFollowUpRecommendation struct {
+	// Recommended routing action for the next compaction turn.
+	CompactionTurn FusionFollowUpAction `json:"compactionTurn"`
+	// Recommended routing action for the next user-message turn.
+	UserTurn FusionFollowUpAction `json:"userTurn"`
+}
+
+// Presentation-neutral phase planned for a HydraFusion turn.
+// Experimental: FusionPhasePlanStep is part of an experimental API and may change or be removed.
+type FusionPhasePlanStep struct {
+	// Whether the phase executes only when an earlier phase requests it.
+	Conditional bool `json:"conditional"`
+	// Kind of phase that may execute.
+	Kind FusionPhaseKind `json:"kind"`
+	// Semantic role assigned to the phase.
+	Role string `json:"role"`
+	// Conversation scope in which the phase executes.
+	Scope FusionConversationScope `json:"scope"`
+}
+
+// Aggregate concrete-model usage for one HydraFusion phase.
+// Experimental: FusionPhaseUsage is part of an experimental API and may change or be removed.
+type FusionPhaseUsage struct {
+	// Total cached input tokens reported for the phase.
+	CachedTokens int64 `json:"cachedTokens"`
+	// Total tokens written to prompt cache during the phase.
+	CacheWriteTokens *int64 `json:"cacheWriteTokens,omitempty"`
+	// Total input tokens consumed by the phase.
+	InputTokens int64 `json:"inputTokens"`
+	// Total output tokens produced by the phase.
+	OutputTokens int64 `json:"outputTokens"`
+	// Number of concrete model requests made by the phase.
+	RequestCount int64 `json:"requestCount"`
+	// Total normalized AI-unit cost reported for the phase, in nano-AIU.
+	TotalNanoAiu float64 `json:"totalNanoAiu"`
+}
+
+// Validated HydraFusion routing capability scores.
+// Experimental: FusionScores is part of an experimental API and may change or be removed.
+type FusionScores struct {
+	// Code-generation capability score returned by the authenticated router.
+	CodeGen float64 `json:"codeGen"`
+	// Debugging capability score returned by the authenticated router.
+	Debugging float64 `json:"debugging"`
+	// Reasoning capability score returned by the authenticated router.
+	Reasoning float64 `json:"reasoning"`
+	// Tool-use capability score returned by the authenticated router.
+	ToolUse float64 `json:"toolUse"`
+}
+
+// Internal durable terminal request staged by a HydraFusion phase until an idempotent final commit selects it.
+// Experimental: FusionStagedTerminal is part of an experimental API and may change or be removed.
+// Internal: FusionStagedTerminal is an internal SDK API and is not part of the public surface.
+type FusionStagedTerminal struct {
+	Arguments        string `json:"arguments"`
+	AssistantMessage any    `json:"assistantMessage"`
+	PhaseID          string `json:"phaseId"`
+	ToolCallID       string `json:"toolCallId"`
+	ToolName         string `json:"toolName"`
+}
+
+// Per-session configuration for the built-in GitHub MCP server
+type GitHubMCPToolConfig struct {
+	// Additional GitHub MCP tools requested by the session
+	AdditionalTools []string `json:"additionalTools,omitzero"`
+	// Additional GitHub MCP toolsets requested by the session
+	AdditionalToolsets []string `json:"additionalToolsets,omitzero"`
+	// Whether to use the read-write endpoint and request all toolsets
+	EnableAllTools *bool `json:"enableAllTools,omitempty"`
+	// Whether to request the GitHub MCP insiders build
+	EnableInsidersMode *bool `json:"enableInsidersMode,omitempty"`
 }
 
 // Repository context for the handed-off session
@@ -2447,6 +3777,8 @@ type MCPOauthWwwAuthenticateParams struct {
 
 // A single MCP server status summary in `session.mcp_servers_loaded`, including name, status, source, transport, and plugin metadata.
 type MCPServersLoadedServer struct {
+	// Human-readable display name supplied by a managed server catalog.
+	DisplayName *string `json:"displayName,omitempty"`
 	// Error message if the server failed to connect
 	Error *string `json:"error,omitempty"`
 	// Server name (config key)
@@ -2455,9 +3787,11 @@ type MCPServersLoadedServer struct {
 	PluginName *string `json:"pluginName,omitempty"`
 	// Version of the plugin that supplied the effective MCP server config, only when source is plugin
 	PluginVersion *string `json:"pluginVersion,omitempty"`
-	// Configuration source: user, workspace, plugin, or builtin
+	// Server-advertised metadata for a connected server. Omitted when no live connection metadata is available, including while pending or when failed, disabled, stopped, or not configured.
+	ServerMetadata *MCPServerMetadata `json:"serverMetadata,omitempty"`
+	// Configuration source: user, workspace, plugin, builtin, or managed
 	Source *MCPServerSource `json:"source,omitempty"`
-	// Connection status: connected, failed, needs-auth, pending, disabled, or not_configured
+	// Connection status: connected, failed, needs-auth, pending, disabled, stopped, or not_configured
 	Status MCPServerStatus `json:"status"`
 	// Transport mechanism: stdio, http, sse (deprecated), or memory (in-process MCP server)
 	Transport *MCPServerTransport `json:"transport,omitempty"`
@@ -2481,13 +3815,17 @@ type ModelCallFailureRequestFingerprint struct {
 	ToolResultMessageCount int64 `json:"toolResultMessageCount"`
 }
 
-// Auto-approval judge information attached to a permission request. Present (non-null) only when the session's allow-all mode is "auto"; its absence means auto mode was off and the judge did not evaluate the request. The `recommendation` conveys the judge's disposition for this request.
-// Experimental: PermissionAutoApproval is part of an experimental API and may change or be removed.
-type PermissionAutoApproval struct {
+// Assisted-approval judge information attached to a permission request. Present only in assisted mode; its absence means the judge did not evaluate the request. The `recommendation` conveys the judge's disposition for this request.
+// Experimental: PermissionAssistedApproval is part of an experimental API and may change or be removed.
+type PermissionAssistedApproval struct {
+	// Classified cause of an `error` recommendation. Absent for every other recommendation.
+	FailureReason *AssistedApprovalJudgeFailureReason `json:"failureReason,omitempty"`
+	// Model id that produced the recommendation, when the judge was consulted and reported one. Absent for `excluded` (the judge was not consulted) and for failures that occurred before a model was selected.
+	Model *string `json:"model,omitempty"`
 	// Human-readable reason for the judge's recommendation, when available.
 	Reason *string `json:"reason,omitempty"`
-	// The auto-approval safety judge's outcome for this request.
-	Recommendation AutoApprovalRecommendation `json:"recommendation"`
+	// The assisted-approval safety judge's outcome for this request.
+	Recommendation AssistedApprovalRecommendation `json:"recommendation"`
 }
 
 // Derived user-facing permission prompt details for UI consumers
@@ -2508,9 +3846,9 @@ func (r RawPermissionPromptRequest) Kind() PermissionPromptRequestKind {
 
 // Shell command permission prompt
 type PermissionPromptRequestCommands struct {
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Whether the UI can offer session-wide approval for this command pattern
 	CanOfferSessionApproval bool `json:"canOfferSessionApproval"`
 	// Command identifiers covered by this approval prompt
@@ -2519,6 +3857,14 @@ type PermissionPromptRequestCommands struct {
 	FullCommandText string `json:"fullCommandText"`
 	// Human-readable description of what the command intends to do
 	Intention string `json:"intention"`
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// True when the shell command is requesting sandbox escalation. This is a request, not a grant.
+	RequestSandboxBypass *bool `json:"requestSandboxBypass,omitempty"`
+	// Reason for the sandbox escalation request.
+	RequestSandboxBypassReason *string `json:"requestSandboxBypassReason,omitempty"`
+	// True when the escalation is a permissive retry that keeps the sandbox and network policy attached while recording file and process accesses instead of blocking them.
+	RequestSandboxPermissive *bool `json:"requestSandboxPermissive,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 	// Optional warning message about risks of running this command
@@ -2534,9 +3880,9 @@ func (PermissionPromptRequestCommands) Kind() PermissionPromptRequestKind {
 type PermissionPromptRequestCustomTool struct {
 	// Arguments to pass to the custom tool
 	Args any `json:"args,omitempty"`
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 	// Description of what the custom tool does
@@ -2550,11 +3896,29 @@ func (PermissionPromptRequestCustomTool) Kind() PermissionPromptRequestKind {
 	return PermissionPromptRequestKindCustomTool
 }
 
+// Extension sensitive environment variable access prompt
+type PermissionPromptRequestExtensionEnvAccess struct {
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
+	// Names of the sensitive environment variables the extension is requesting. Values never appear here.
+	EnvironmentVariables []string `json:"environmentVariables"`
+	// Name of the extension requesting environment variable access
+	ExtensionName string `json:"extensionName"`
+	// Tool call ID that triggered this permission request
+	ToolCallID *string `json:"toolCallId,omitempty"`
+}
+
+func (PermissionPromptRequestExtensionEnvAccess) permissionPromptRequest() {}
+func (PermissionPromptRequestExtensionEnvAccess) Kind() PermissionPromptRequestKind {
+	return PermissionPromptRequestKindExtensionEnvAccess
+}
+
 // Extension management permission prompt
 type PermissionPromptRequestExtensionManagement struct {
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Name of the extension being managed
 	ExtensionName *string `json:"extensionName,omitempty"`
 	// The extension management operation (scaffold, reload)
@@ -2570,9 +3934,9 @@ func (PermissionPromptRequestExtensionManagement) Kind() PermissionPromptRequest
 
 // Extension permission access prompt
 type PermissionPromptRequestExtensionPermissionAccess struct {
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Capabilities the extension is requesting
 	Capabilities []string `json:"capabilities"`
 	// Name of the extension requesting permission access
@@ -2586,11 +3950,55 @@ func (PermissionPromptRequestExtensionPermissionAccess) Kind() PermissionPromptR
 	return PermissionPromptRequestKindExtensionPermissionAccess
 }
 
+// Factory run or authoring permission prompt
+type PermissionPromptRequestFactory struct {
+	// Canonical key used for scoped factory approvals
+	ApprovalKey string `json:"approvalKey"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
+	// Whether this factory is eligible for persistent approval
+	CanPersistApproval bool `json:"canPersistApproval"`
+	// Factory-declared AI-credit limit before any run/resume caller override is applied.
+	DeclaredMaxAiCredits *float64 `json:"declaredMaxAiCredits,omitempty"`
+	// Factory-declared concurrent-subagent limit before any run/resume caller override is applied.
+	DeclaredMaxConcurrentSubagents *int64 `json:"declaredMaxConcurrentSubagents,omitempty"`
+	// Factory-declared total-subagent limit before any run/resume caller override is applied.
+	DeclaredMaxTotalSubagents *int64 `json:"declaredMaxTotalSubagents,omitempty"`
+	// Factory-declared active-time limit in seconds before any run/resume caller override is applied.
+	DeclaredTimeoutSeconds *float64 `json:"declaredTimeoutSeconds,omitempty"`
+	// Factory description
+	Description string `json:"description"`
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// Effective AI-credit limit; omitted means unlimited
+	MaxAiCredits *float64 `json:"maxAiCredits,omitempty"`
+	// Effective concurrent-subagent limit; omitted means unlimited
+	MaxConcurrentSubagents *int64 `json:"maxConcurrentSubagents,omitempty"`
+	// Effective total-subagent limit; omitted means unlimited
+	MaxTotalSubagents *int64 `json:"maxTotalSubagents,omitempty"`
+	// Factory name
+	Name string `json:"name"`
+	// Factory operation, either run or author
+	Operation FactoryPermissionOperation `json:"operation"`
+	// Declared factory phases
+	Phases []FactoryPermissionPhase `json:"phases"`
+	// Effective active-time limit in seconds; omitted means unlimited
+	TimeoutSeconds *float64 `json:"timeoutSeconds,omitempty"`
+	// Tool call ID that triggered this permission request
+	ToolCallID *string `json:"toolCallId,omitempty"`
+}
+
+func (PermissionPromptRequestFactory) permissionPromptRequest() {}
+func (PermissionPromptRequestFactory) Kind() PermissionPromptRequestKind {
+	return PermissionPromptRequestKindFactory
+}
+
 // Hook confirmation permission prompt
 type PermissionPromptRequestHook struct {
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Optional message from the hook explaining why confirmation is needed
 	HookMessage *string `json:"hookMessage,omitempty"`
 	// Arguments of the tool call being gated
@@ -2610,9 +4018,14 @@ func (PermissionPromptRequestHook) Kind() PermissionPromptRequestKind {
 type PermissionPromptRequestMCP struct {
 	// Arguments to pass to the MCP tool
 	Args any `json:"args,omitempty"`
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
+	// Whether the host may offer a server-wide "approve all tools from this server" blanket. Absent is treated as true; the runtime sends false when managed policy disables bypass-permissions mode, which forbids the server-wide escalation while still allowing per-tool approval.
+	CanOfferServerWideApproval *bool `json:"canOfferServerWideApproval,omitempty"`
+	// Advisory runtime permission recommendation. The host remains responsible for deciding the request and may reject it.
+	// Experimental: PermissionRecommendation is part of an experimental API and may change or be removed.
+	PermissionRecommendation *PermissionRecommendation `json:"permissionRecommendation,omitempty"`
 	// Name of the MCP server providing the tool
 	ServerName string `json:"serverName"`
 	// Tool call ID that triggered this permission request
@@ -2632,9 +4045,9 @@ func (PermissionPromptRequestMCP) Kind() PermissionPromptRequestKind {
 type PermissionPromptRequestMemory struct {
 	// Whether this is a store or vote memory operation
 	Action *PermissionRequestMemoryAction `json:"action,omitempty"`
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Source references for the stored fact (store only)
 	Citations *string `json:"citations,omitempty"`
 	// Vote direction (vote only)
@@ -2658,9 +4071,9 @@ func (PermissionPromptRequestMemory) Kind() PermissionPromptRequestKind {
 type PermissionPromptRequestPath struct {
 	// Underlying permission kind that needs path approval
 	AccessKind PermissionPromptRequestPathAccessKind `json:"accessKind"`
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// File paths that require explicit approval
 	Paths []string `json:"paths"`
 	// Tool call ID that triggered this permission request
@@ -2674,13 +4087,18 @@ func (PermissionPromptRequestPath) Kind() PermissionPromptRequestKind {
 
 // File read permission prompt
 type PermissionPromptRequestRead struct {
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Human-readable description of why the file is being read
 	Intention string `json:"intention"`
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// Path of the file or directory being read
 	Path string `json:"path"`
+	// Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display path.
+	// Experimental: ResolvedPath is part of an experimental API and may change or be removed.
+	ResolvedPath *string `json:"resolvedPath,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 }
@@ -2692,14 +4110,18 @@ func (PermissionPromptRequestRead) Kind() PermissionPromptRequestKind {
 
 // URL access permission prompt
 type PermissionPromptRequestURL struct {
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Human-readable description of why the URL is being accessed
 	Intention string `json:"intention"`
-	// True when this URL fetch is requesting to bypass the sandbox network policy: either the model set requestSandboxBypass: true, or the tool re-issued the request as an interactive bypass after the network policy denied the approved URL (host opted in via sandbox.allowBypass). This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// Immediately preceding URL when this prompt is for a redirect target
+	RedirectedFrom *string `json:"redirectedFrom,omitempty"`
+	// True when the tool is asking to run this URL fetch outside the sandbox, after the network policy denied the approved URL or the sandbox proxy could not reach it (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
 	RequestSandboxBypass *bool `json:"requestSandboxBypass,omitempty"`
-	// Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+	// What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
 	RequestSandboxBypassReason *string `json:"requestSandboxBypassReason,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
@@ -2714,9 +4136,9 @@ func (PermissionPromptRequestURL) Kind() PermissionPromptRequestKind {
 
 // File write permission prompt
 type PermissionPromptRequestWrite struct {
-	// Auto-approval judge information for this request; present only when auto mode is enabled.
-	// Experimental: AutoApproval is part of an experimental API and may change or be removed.
-	AutoApproval *PermissionAutoApproval `json:"autoApproval,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Whether the UI can offer session-wide approval for file write operations
 	CanOfferSessionApproval bool `json:"canOfferSessionApproval"`
 	// Unified diff showing the proposed changes
@@ -2725,8 +4147,13 @@ type PermissionPromptRequestWrite struct {
 	FileName string `json:"fileName"`
 	// Human-readable description of the intended file change
 	Intention string `json:"intention"`
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// Complete new file contents for newly created files
 	NewFileContents *string `json:"newFileContents,omitempty"`
+	// Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display fileName.
+	// Experimental: ResolvedPath is part of an experimental API and may change or be removed.
+	ResolvedPath *string `json:"resolvedPath,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 }
@@ -2740,6 +4167,7 @@ func (PermissionPromptRequestWrite) Kind() PermissionPromptRequestKind {
 type PermissionRequest interface {
 	permissionRequest()
 	Kind() PermissionRequestKind
+	RequiresManagedApproval() bool
 }
 
 type RawPermissionRequest struct {
@@ -2756,6 +4184,10 @@ func (r RawPermissionRequest) Kind() PermissionRequestKind {
 type PermissionRequestCustomTool struct {
 	// Arguments to pass to the custom tool
 	Args any `json:"args,omitempty"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// Whether the tool declared that permission may be skipped unless a deny rule matches
+	SkipPermission *bool `json:"skipPermission,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 	// Description of what the custom tool does
@@ -2769,10 +4201,29 @@ func (PermissionRequestCustomTool) Kind() PermissionRequestKind {
 	return PermissionRequestKindCustomTool
 }
 
+// Extension sensitive environment variable access request
+type PermissionRequestExtensionEnvAccess struct {
+	// Names of the sensitive environment variables the extension is requesting. Values never appear here.
+	EnvironmentVariables []string `json:"environmentVariables"`
+	// Name of the extension requesting environment variable access
+	ExtensionName string `json:"extensionName"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// Tool call ID that triggered this permission request
+	ToolCallID *string `json:"toolCallId,omitempty"`
+}
+
+func (PermissionRequestExtensionEnvAccess) permissionRequest() {}
+func (PermissionRequestExtensionEnvAccess) Kind() PermissionRequestKind {
+	return PermissionRequestKindExtensionEnvAccess
+}
+
 // Extension management permission request
 type PermissionRequestExtensionManagement struct {
 	// Name of the extension being managed
 	ExtensionName *string `json:"extensionName,omitempty"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// The extension management operation (scaffold, reload)
 	Operation string `json:"operation"`
 	// Tool call ID that triggered this permission request
@@ -2790,6 +4241,8 @@ type PermissionRequestExtensionPermissionAccess struct {
 	Capabilities []string `json:"capabilities"`
 	// Name of the extension requesting permission access
 	ExtensionName string `json:"extensionName"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 }
@@ -2799,10 +4252,53 @@ func (PermissionRequestExtensionPermissionAccess) Kind() PermissionRequestKind {
 	return PermissionRequestKindExtensionPermissionAccess
 }
 
+// Factory run or authoring permission request
+type PermissionRequestFactory struct {
+	// Canonical key used for scoped factory approvals
+	ApprovalKey string `json:"approvalKey"`
+	// Whether this factory is eligible for persistent approval
+	CanPersistApproval bool `json:"canPersistApproval"`
+	// Factory-declared AI-credit limit before any run/resume caller override is applied.
+	DeclaredMaxAiCredits *float64 `json:"declaredMaxAiCredits,omitempty"`
+	// Factory-declared concurrent-subagent limit before any run/resume caller override is applied.
+	DeclaredMaxConcurrentSubagents *int64 `json:"declaredMaxConcurrentSubagents,omitempty"`
+	// Factory-declared total-subagent limit before any run/resume caller override is applied.
+	DeclaredMaxTotalSubagents *int64 `json:"declaredMaxTotalSubagents,omitempty"`
+	// Factory-declared active-time limit in seconds before any run/resume caller override is applied.
+	DeclaredTimeoutSeconds *float64 `json:"declaredTimeoutSeconds,omitempty"`
+	// Factory description
+	Description string `json:"description"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// Effective AI-credit limit; omitted means unlimited
+	MaxAiCredits *float64 `json:"maxAiCredits,omitempty"`
+	// Effective concurrent-subagent limit; omitted means unlimited
+	MaxConcurrentSubagents *int64 `json:"maxConcurrentSubagents,omitempty"`
+	// Effective total-subagent limit; omitted means unlimited
+	MaxTotalSubagents *int64 `json:"maxTotalSubagents,omitempty"`
+	// Factory name
+	Name string `json:"name"`
+	// Factory operation, either run or author
+	Operation FactoryPermissionOperation `json:"operation"`
+	// Declared factory phases
+	Phases []FactoryPermissionPhase `json:"phases"`
+	// Effective active-time limit in seconds; omitted means unlimited
+	TimeoutSeconds *float64 `json:"timeoutSeconds,omitempty"`
+	// Tool call ID that triggered this permission request
+	ToolCallID *string `json:"toolCallId,omitempty"`
+}
+
+func (PermissionRequestFactory) permissionRequest() {}
+func (PermissionRequestFactory) Kind() PermissionRequestKind {
+	return PermissionRequestKindFactory
+}
+
 // Hook confirmation permission request
 type PermissionRequestHook struct {
 	// Optional message from the hook explaining why confirmation is needed
 	HookMessage *string `json:"hookMessage,omitempty"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// Arguments of the tool call being gated
 	ToolArgs any `json:"toolArgs,omitempty"`
 	// Tool call ID that triggered this permission request
@@ -2820,6 +4316,11 @@ func (PermissionRequestHook) Kind() PermissionRequestKind {
 type PermissionRequestMCP struct {
 	// Arguments to pass to the MCP tool
 	Args any `json:"args,omitempty"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// Advisory runtime permission recommendation. The SDK host remains responsible for deciding the request and may reject it.
+	// Experimental: PermissionRecommendation is part of an experimental API and may change or be removed.
+	PermissionRecommendation *PermissionRecommendation `json:"permissionRecommendation,omitempty"`
 	// Whether this MCP tool is read-only (no side effects)
 	ReadOnly bool `json:"readOnly"`
 	// Name of the MCP server providing the tool
@@ -2841,14 +4342,23 @@ func (PermissionRequestMCP) Kind() PermissionRequestKind {
 type PermissionRequestMemory struct {
 	// Whether this is a store or vote memory operation
 	Action *PermissionRequestMemoryAction `json:"action,omitempty"`
+	// Assisted-approval judge information for this request; present only in assisted mode.
+	// Experimental: AssistedApproval is part of an experimental API and may change or be removed.
+	AssistedApproval *PermissionAssistedApproval `json:"assistedApproval,omitempty"`
 	// Source references for the stored fact (store only)
 	Citations *string `json:"citations,omitempty"`
 	// Vote direction (vote only)
 	Direction *PermissionRequestMemoryDirection `json:"direction,omitempty"`
 	// The fact being stored or voted on
 	Fact string `json:"fact"`
+	// When true, managed policy requires an explicit user decision and automatic approval must be bypassed.
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// Reason for the vote (vote only)
 	Reason *string `json:"reason,omitempty"`
+	// Repository name with owner associated with the stored memory (store only)
+	RepoNwo *string `json:"repoNwo,omitempty"`
+	// Scope of the stored memory (store only)
+	Scope *PermissionRequestMemoryScope `json:"scope,omitempty"`
 	// Topic or subject of the memory (store only)
 	Subject *string `json:"subject,omitempty"`
 	// Tool call ID that triggered this permission request
@@ -2864,12 +4374,17 @@ func (PermissionRequestMemory) Kind() PermissionRequestKind {
 type PermissionRequestRead struct {
 	// Human-readable description of why the file is being read
 	Intention string `json:"intention"`
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// Path of the file or directory being read
 	Path string `json:"path"`
-	// True when the model has requested to run this search outside the sandbox (it set requestSandboxBypass: true and the host opted in via sandbox.allowBypass). This is a request, not a grant: the search runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+	// True when the tool is asking to re-run this search outside the sandbox, after a sandboxed run looked blocked (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the search runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
 	RequestSandboxBypass *bool `json:"requestSandboxBypass,omitempty"`
-	// Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+	// What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
 	RequestSandboxBypassReason *string `json:"requestSandboxBypassReason,omitempty"`
+	// Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display path.
+	// Experimental: ResolvedPath is part of an experimental API and may change or be removed.
+	ResolvedPath *string `json:"resolvedPath,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 }
@@ -2885,20 +4400,32 @@ type PermissionRequestShell struct {
 	CanOfferSessionApproval bool `json:"canOfferSessionApproval"`
 	// Parsed command identifiers found in the command text
 	Commands []PermissionRequestShellCommand `json:"commands"`
+	// Parsed command segments, including arguments, used for managed policy matching
+	CommandSegments []PermissionRequestShellCommandSegment `json:"commandSegments,omitzero"`
 	// The complete shell command text to be executed
 	FullCommandText string `json:"fullCommandText"`
 	// Whether the command includes a file write redirection (e.g., > or >>)
 	HasWriteFileRedirection bool `json:"hasWriteFileRedirection"`
 	// Human-readable description of what the command intends to do
 	Intention string `json:"intention"`
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// File paths that may be read or written by the command
 	PossiblePaths []string `json:"possiblePaths"`
 	// URLs that may be accessed by the command
 	PossibleURLs []PermissionRequestShellPossibleURL `json:"possibleUrls"`
-	// True when the model has requested to run this command outside the sandbox (it set requestSandboxBypass: true and the host opted in via sandbox.allowBypass). This is a request, not a grant: the command runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+	// True when the tool is asking to run this command outside the sandbox, either because the command detaches and cannot be sandboxed at all, or because a sandboxed run looked blocked (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the command runs unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
 	RequestSandboxBypass *bool `json:"requestSandboxBypass,omitempty"`
-	// Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+	// What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
 	RequestSandboxBypassReason *string `json:"requestSandboxBypassReason,omitempty"`
+	// True when the requested escalation is a permissive retry rather than a full bypass: the command re-runs inside the sandbox with its file and process restrictions recording instead of blocking, while the network policy stays enforced. Always accompanied by requestSandboxBypass, so hosts that do not recognize this field still treat the request as the escalation it is. Hosts that do recognize it must not describe the command as running outside the sandbox, which would overstate the privilege being granted.
+	RequestSandboxPermissive *bool `json:"requestSandboxPermissive,omitempty"`
+	// Runtime-resolved canonical object each possiblePaths entry names, keyed by the requested spelling, used for authorization identity checks. Internal and experimental; clients should continue to display possiblePaths.
+	// Experimental: ResolvedPaths is part of an experimental API and may change or be removed.
+	ResolvedPaths map[string]string `json:"resolvedPaths,omitzero"`
+	// Runtime-resolved canonical working directory the command runs in, used for authorization identity checks. Internal and experimental; clients should not display it.
+	// Experimental: ResolvedWorkingDirectory is part of an experimental API and may change or be removed.
+	ResolvedWorkingDirectory *string `json:"resolvedWorkingDirectory,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 	// Optional warning message about risks of running this command
@@ -2914,9 +4441,13 @@ func (PermissionRequestShell) Kind() PermissionRequestKind {
 type PermissionRequestURL struct {
 	// Human-readable description of why the URL is being accessed
 	Intention string `json:"intention"`
-	// True when this URL fetch is requesting to bypass the sandbox network policy: either the model set requestSandboxBypass: true, or the tool re-issued the request as an interactive bypass after the network policy denied the approved URL (host opted in via sandbox.allowBypass). This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
+	// Immediately preceding URL when this request is for a redirect target
+	RedirectedFrom *string `json:"redirectedFrom,omitempty"`
+	// True when the tool is asking to run this URL fetch outside the sandbox, after the network policy denied the approved URL or the sandbox proxy could not reach it (host opted in via sandbox.allowBypass). The model cannot ask for this; only the tool raises it. This is a request, not a grant: the fetch runs only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
 	RequestSandboxBypass *bool `json:"requestSandboxBypass,omitempty"`
-	// Model-provided justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
+	// What the tool tells the user about the bypass on offer: which policy rule blocked the call, or why it cannot be sandboxed. Only meaningful when requestSandboxBypass is true.
 	RequestSandboxBypassReason *string `json:"requestSandboxBypassReason,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
@@ -2939,12 +4470,17 @@ type PermissionRequestWrite struct {
 	FileName string `json:"fileName"`
 	// Human-readable description of the intended file change
 	Intention string `json:"intention"`
+	// Whether managed policy requires a human response and forbids host auto-approval
+	ManagedApprovalRequired *bool `json:"managedApprovalRequired,omitempty"`
 	// Complete new file contents for newly created files
 	NewFileContents *string `json:"newFileContents,omitempty"`
 	// True when a built-in file tool (apply_patch / str_replace_editor) asked to write a path the sandbox filesystem policy would block, and the host opted in via sandbox.allowBypass. This is a request, not a grant: the write happens unsandboxed only if the user approves this permission request. Hosts should highlight the elevated risk in the approval UI.
 	RequestSandboxBypass *bool `json:"requestSandboxBypass,omitempty"`
 	// Justification for the sandbox-bypass request. Only meaningful when requestSandboxBypass is true.
 	RequestSandboxBypassReason *string `json:"requestSandboxBypassReason,omitempty"`
+	// Runtime-resolved canonical path used for authorization identity checks. Internal and experimental; clients should continue to display fileName.
+	// Experimental: ResolvedPath is part of an experimental API and may change or be removed.
+	ResolvedPath *string `json:"resolvedPath,omitempty"`
 	// Tool call ID that triggered this permission request
 	ToolCallID *string `json:"toolCallId,omitempty"`
 }
@@ -2960,6 +4496,14 @@ type PermissionRequestShellCommand struct {
 	Identifier string `json:"identifier"`
 	// Whether this command is read-only (no side effects)
 	ReadOnly bool `json:"readOnly"`
+}
+
+// A parsed shell command segment used for argument-aware managed policy matching.
+type PermissionRequestShellCommandSegment struct {
+	// Full text of this command segment, including arguments
+	FullCommandText string `json:"fullCommandText"`
+	// Command identifier (e.g., executable name)
+	Identifier string `json:"identifier"`
 }
 
 // A URL that may be accessed by a command in a shell permission request.
@@ -2986,6 +4530,8 @@ func (r RawPermissionResult) Kind() PermissionResultKind {
 
 // Permission response variant indicating the request was approved without persisting an approval rule.
 type PermissionApproved struct {
+	// Whether a managed approval policy already handled this request
+	ManagedApprovalHandled *bool `json:"managedApprovalHandled,omitempty"`
 }
 
 func (PermissionApproved) permissionResult() {}
@@ -2999,6 +4545,8 @@ type PermissionApprovedForLocation struct {
 	Approval UserToolSessionApproval `json:"approval"`
 	// The location key (git root or cwd) to persist the approval to
 	LocationKey string `json:"locationKey"`
+	// Whether a managed approval policy already handled this request
+	ManagedApprovalHandled *bool `json:"managedApprovalHandled,omitempty"`
 }
 
 func (PermissionApprovedForLocation) permissionResult() {}
@@ -3010,6 +4558,8 @@ func (PermissionApprovedForLocation) Kind() PermissionResultKind {
 type PermissionApprovedForSession struct {
 	// The approval to add as a session-scoped rule
 	Approval UserToolSessionApproval `json:"approval"`
+	// Whether a managed approval policy already handled this request
+	ManagedApprovalHandled *bool `json:"managedApprovalHandled,omitempty"`
 }
 
 func (PermissionApprovedForSession) permissionResult() {}
@@ -3181,6 +4731,20 @@ type SessionLimitsExhaustedResponse struct {
 	MaxAiCredits *float64 `json:"maxAiCredits,omitempty"`
 }
 
+// Usage attributed to one agent instance at session shutdown.
+type ShutdownAgentMetric struct {
+	// Human-readable label for this subagent invocation, copied from the originating `subagent.started` event. For task-tool subagents this is the invocation's task description rather than the agent's configured display name, so group by `agentName` for stable per-agent labels.
+	AgentDisplayName *string `json:"agentDisplayName,omitempty"`
+	// Configured agent name, when this is a subagent
+	AgentName *string `json:"agentName,omitempty"`
+	// Per-model usage for this agent, keyed by model identifier
+	ModelMetrics map[string]ShutdownModelMetric `json:"modelMetrics"`
+	// Time spent in model API calls by this agent, in milliseconds
+	TotalAPIDurationMs int64 `json:"totalApiDurationMs"`
+	// Accumulated nano-AI units cost for this agent
+	TotalNanoAiu float64 `json:"totalNanoAiu"`
+}
+
 // Aggregate code change metrics for the session
 type ShutdownCodeChanges struct {
 	// List of file paths that were modified during the session
@@ -3244,6 +4808,8 @@ type ShutdownTokenDetail struct {
 type SkillsLoadedSkill struct {
 	// Optional freeform hint describing the skill's expected arguments, from the `argument-hint` frontmatter field
 	ArgumentHint *string `json:"argumentHint,omitempty"`
+	// Canonical slash command name used to invoke the skill, without the leading '/'
+	CommandName *string `json:"commandName,omitempty"`
 	// Description of what the skill does
 	Description string `json:"description"`
 	// Whether the skill is currently enabled
@@ -3252,7 +4818,7 @@ type SkillsLoadedSkill struct {
 	Name string `json:"name"`
 	// Absolute path to the skill file, if available
 	Path *string `json:"path,omitempty"`
-	// Source location type (e.g., project, personal-copilot, plugin, builtin)
+	// Source location type (e.g., project, personal-copilot, plugin, builtin, remote, sdk)
 	Source SkillSource `json:"source"`
 	// Whether the skill can be invoked by the user as a slash command
 	UserInvocable bool `json:"userInvocable"`
@@ -3284,12 +4850,14 @@ func (r RawSystemNotification) Type() SystemNotificationType {
 
 // System notification metadata for a background agent that completed or failed, including agent ID, type, status, description, and prompt.
 type SystemNotificationAgentCompleted struct {
-	// Unique identifier of the background agent
+	// Unique task identifier
 	AgentID string `json:"agentId"`
 	// Type of the agent (e.g., explore, task, general-purpose)
 	AgentType string `json:"agentType"`
 	// Human-readable description of the agent task
 	Description *string `json:"description,omitempty"`
+	// Friendly, non-unique name intended for display
+	DisplayName *string `json:"displayName,omitempty"`
 	// The full prompt given to the background agent
 	Prompt *string `json:"prompt,omitempty"`
 	// Whether the agent completed successfully or failed
@@ -3303,17 +4871,50 @@ func (SystemNotificationAgentCompleted) Type() SystemNotificationType {
 
 // System notification metadata for a background agent that became idle, including agent ID, type, and description.
 type SystemNotificationAgentIdle struct {
-	// Unique identifier of the background agent
+	// Unique task identifier
 	AgentID string `json:"agentId"`
 	// Type of the agent (e.g., explore, task, general-purpose)
 	AgentType string `json:"agentType"`
 	// Human-readable description of the agent task
 	Description *string `json:"description,omitempty"`
+	// Friendly, non-unique name intended for display
+	DisplayName *string `json:"displayName,omitempty"`
 }
 
 func (SystemNotificationAgentIdle) systemNotification() {}
 func (SystemNotificationAgentIdle) Type() SystemNotificationType {
 	return SystemNotificationTypeAgentIdle
+}
+
+// System notification metadata for a factory execution attempt that reached a terminal state.
+type SystemNotificationFactoryCompleted struct {
+	// Execution attempt that reached this terminal state.
+	Attempt int64 `json:"attempt"`
+	// Consumed AI usage in nano-AIU.
+	ConsumedNanoAiu int64 `json:"consumedNanoAiu"`
+	// Subagents consumed by the run across all attempts.
+	ConsumedSubagents int64 `json:"consumedSubagents"`
+	// Accumulated active execution time in milliseconds.
+	ElapsedMs int64 `json:"elapsedMs"`
+	// Persisted factory name.
+	FactoryName string `json:"factoryName"`
+	// Machine-readable terminal failure details, when present.
+	Failure any `json:"failure,omitempty"`
+	// Pause initiator metadata when this attempt settled as paused.
+	PauseInfo SystemNotificationFactoryPauseInfo `json:"pauseInfo,omitempty"`
+	// Bounded prompt-safe preview of the completed result.
+	ResultPreview *string `json:"resultPreview,omitempty"`
+	// Actionable run_factory resume guidance for a resource-limit failure.
+	RetryGuidance *string `json:"retryGuidance,omitempty"`
+	// Factory run identifier.
+	RunID string `json:"runId"`
+	// Terminal status reached by this execution attempt.
+	Status SystemNotificationFactoryCompletedStatus `json:"status"`
+}
+
+func (SystemNotificationFactoryCompleted) systemNotification() {}
+func (SystemNotificationFactoryCompleted) Type() SystemNotificationType {
+	return SystemNotificationTypeFactoryCompleted
 }
 
 // System notification metadata for an instruction file discovered during tool access, including source, trigger file, and tool.
@@ -3376,6 +4977,51 @@ type SystemNotificationShellDetachedCompleted struct {
 func (SystemNotificationShellDetachedCompleted) systemNotification() {}
 func (SystemNotificationShellDetachedCompleted) Type() SystemNotificationType {
 	return SystemNotificationTypeShellDetachedCompleted
+}
+
+// System notification metadata from an external host that does not match a runtime-owned notification kind.
+type SystemNotificationUnclassified struct {
+	// Opaque metadata supplied by the external host, when present.
+	Metadata any `json:"metadata,omitempty"`
+}
+
+func (SystemNotificationUnclassified) systemNotification() {}
+func (SystemNotificationUnclassified) Type() SystemNotificationType {
+	return SystemNotificationTypeUnclassified
+}
+
+// Durable metadata describing who initiated a factory pause.
+type SystemNotificationFactoryPauseInfo interface {
+	systemNotificationFactoryPauseInfo()
+	Type() SystemNotificationFactoryPauseInfoType
+}
+
+type RawSystemNotificationFactoryPauseInfo struct {
+	Discriminator SystemNotificationFactoryPauseInfoType
+	Raw           json.RawMessage
+}
+
+func (RawSystemNotificationFactoryPauseInfo) systemNotificationFactoryPauseInfo() {}
+func (r RawSystemNotificationFactoryPauseInfo) Type() SystemNotificationFactoryPauseInfoType {
+	return r.Discriminator
+}
+
+type SystemNotificationFactoryPauseInfoCheckpoint struct {
+	// Stable author-defined checkpoint key that initiated the pause.
+	Key string `json:"key"`
+}
+
+func (SystemNotificationFactoryPauseInfoCheckpoint) systemNotificationFactoryPauseInfo() {}
+func (SystemNotificationFactoryPauseInfoCheckpoint) Type() SystemNotificationFactoryPauseInfoType {
+	return SystemNotificationFactoryPauseInfoTypeCheckpoint
+}
+
+type SystemNotificationFactoryPauseInfoUser struct {
+}
+
+func (SystemNotificationFactoryPauseInfoUser) systemNotificationFactoryPauseInfo() {}
+func (SystemNotificationFactoryPauseInfoUser) Type() SystemNotificationFactoryPauseInfoType {
+	return SystemNotificationFactoryPauseInfoTypeUser
 }
 
 // A content block within a tool result, which may be text, terminal output, image, audio, or a resource
@@ -3460,6 +5106,8 @@ type ToolExecutionCompleteContentShellExit struct {
 	Cwd *string `json:"cwd,omitempty"`
 	// Exit code from the completed shell command
 	ExitCode int64 `json:"exitCode"`
+	// Path reported in the shell session's filesystem namespace when shell output exceeded the configured large-output threshold.
+	OutputFilePath *string `json:"outputFilePath,omitempty"`
 	// Output associated with this shell command, if available. May be partial, truncated, or a preview; not guaranteed to be full output.
 	OutputPreview *string `json:"outputPreview,omitempty"`
 	// Whether outputPreview is known to be incomplete or truncated
@@ -3523,6 +5171,8 @@ type ToolExecutionCompleteError struct {
 	Code *string `json:"code,omitempty"`
 	// Human-readable error message
 	Message string `json:"message"`
+	// What the user must do to recover, when the runtime knows of an action. Set on sandbox policy denials, where `message` names the rule that blocked the call but never the client affordance that relaxes it.
+	Remediation *RemediationAction `json:"remediation,omitempty"`
 }
 
 // Tool execution result on success
@@ -3537,7 +5187,7 @@ type ToolExecutionCompleteResult struct {
 	Content string `json:"content"`
 	// Structured content blocks (text, images, audio, resources) returned by the tool in their native format
 	Contents []ToolExecutionCompleteContent `json:"contents,omitzero"`
-	// Full detailed tool result for UI/timeline display, preserving complete content such as diffs. Falls back to content when absent.
+	// Detailed tool result for UI/timeline display, preserving complete content such as diffs for most tools. Successful skill invocations intentionally use the concise model-facing content here; the authoritative skill body is carried by the corresponding skill invocation event. Falls back to content when absent.
 	DetailedContent *string `json:"detailedContent,omitempty"`
 	// FIDES IFC label projected from tool ingress metadata (MCP `CallToolResult._meta` or synthesized built-in ingress labels) — persisted as `{ ifc: ... }` (only the `ifc` key, not the whole `_meta`). Persisted so the FIDES IFC label survives session resume: the engine rehydrates accumulated taint by replaying these on load. Populated for ingress sources when FIDES IFC is on. Experimental.
 	// Experimental: MCPMeta is part of an experimental API and may change or be removed.
@@ -3546,6 +5196,13 @@ type ToolExecutionCompleteResult struct {
 	StructuredContent any `json:"structuredContent,omitempty"`
 	// MCP Apps UI resource content for rendering in a sandboxed iframe
 	UIResource *ToolExecutionCompleteUIResource `json:"uiResource,omitempty"`
+}
+
+// Experimental shell completion facts retained independently of the full tool result.
+// Experimental: ToolExecutionCompleteShellExecution is part of an experimental API and may change or be removed.
+type ToolExecutionCompleteShellExecution struct {
+	// Process exit code reported by the shell driver.
+	ExitCode int64 `json:"exitCode"`
 }
 
 // Tool definition metadata, present for MCP tools with MCP Apps support
@@ -3595,18 +5252,24 @@ type ToolExecutionCompleteUIResourceMeta struct {
 // MCP Apps UI resource metadata for a completed tool result, including CSP, permissions, domain, and border preference.
 type ToolExecutionCompleteUIResourceMetaUI struct {
 	// CSP domain allowlists for an MCP Apps UI resource, including connect, resource, frame, and base URI domains.
-	Csp    *ToolExecutionCompleteUIResourceMetaUICsp `json:"csp,omitempty"`
-	Domain *string                                   `json:"domain,omitempty"`
+	Csp *ToolExecutionCompleteUIResourceMetaUICsp `json:"csp,omitempty"`
+	// Optional dedicated origin for the rendered MCP Apps UI resource.
+	Domain *string `json:"domain,omitempty"`
 	// Browser permission metadata for an MCP Apps UI resource, including camera, microphone, geolocation, and clipboard-write.
-	Permissions   *ToolExecutionCompleteUIResourceMetaUIPermissions `json:"permissions,omitempty"`
-	PrefersBorder *bool                                             `json:"prefersBorder,omitempty"`
+	Permissions *ToolExecutionCompleteUIResourceMetaUIPermissions `json:"permissions,omitempty"`
+	// Whether the host should render a border around the MCP Apps UI resource.
+	PrefersBorder *bool `json:"prefersBorder,omitempty"`
 }
 
 // CSP domain allowlists for an MCP Apps UI resource, including connect, resource, frame, and base URI domains.
 type ToolExecutionCompleteUIResourceMetaUICsp struct {
-	BaseURIDomains  []string `json:"baseUriDomains,omitzero"`
-	ConnectDomains  []string `json:"connectDomains,omitzero"`
-	FrameDomains    []string `json:"frameDomains,omitzero"`
+	// Domains the UI resource may use as document base URIs.
+	BaseURIDomains []string `json:"baseUriDomains,omitzero"`
+	// Domains the UI resource may connect to.
+	ConnectDomains []string `json:"connectDomains,omitzero"`
+	// Domains the UI resource may embed as nested frames.
+	FrameDomains []string `json:"frameDomains,omitzero"`
+	// Domains from which the UI resource may load scripts, styles, images, and other resources.
 	ResourceDomains []string `json:"resourceDomains,omitzero"`
 }
 
@@ -3640,6 +5303,9 @@ type ToolExecutionCompleteUIResourceMetaUIPermissionsMicrophone struct {
 
 // Shell-aware path hints for a shell tool's command, captured at start time so consumers can snapshot a file's pre-image before the tool runs.
 type ToolExecutionStartShellToolInfo struct {
+	// The command with a redundant leading `cd` into the working directory removed, present only when there was one to remove. Computed with the same routine the shell driver applies before spawning, so a surface that renders this shows the text that actually runs. Consumers that display it should keep the original tool arguments available on demand.
+	// Experimental: DisplayCommand is part of an experimental API and may change or be removed.
+	DisplayCommand *string `json:"displayCommand,omitempty"`
 	// Whether the command includes a file write redirection (e.g., > or >>).
 	HasWriteFileRedirection bool `json:"hasWriteFileRedirection"`
 	// File paths the command may read or write, derived from the command at start time. Produced by the same shell-aware extractor as PermissionRequestShell.possiblePaths, so it is present even when the command is auto-approved and no permission request fires.
@@ -3670,6 +5336,18 @@ type ToolExecutionStartToolDescriptionMetaUI struct {
 	Visibility []ToolExecutionStartToolDescriptionMetaUIVisibility `json:"visibility,omitzero"`
 }
 
+// Internal prompt-cache expiration state for one model
+// Internal: UsageCheckpointModelCacheState is an internal SDK API and is not part of the public surface.
+type UsageCheckpointModelCacheState struct {
+	// Latest known prompt-cache expiration
+	CacheExpiresAt time.Time `json:"cacheExpiresAt"`
+	// Retained cache lifetime in seconds, used to refresh expiration after a cache read
+	// Internal: CacheTtlSeconds is part of the SDK's internal API surface and is not intended for external use.
+	CacheTtlSeconds int64 `json:"cacheTtlSeconds"`
+	// Model identifier associated with this cache state
+	ModelID string `json:"modelId"`
+}
+
 // Working directory and git context at session start
 type WorkingDirectoryContext struct {
 	// Base commit of current git branch at session start time
@@ -3684,11 +5362,44 @@ type WorkingDirectoryContext struct {
 	HeadCommit *string `json:"headCommit,omitempty"`
 	// Hosting platform type of the repository (github or ado)
 	HostType *WorkingDirectoryContextHostType `json:"hostType,omitempty"`
+	// Set on the immediate preliminary event of a working-directory change, before the git context is resolved. A settled follow-up event (enriched with git context, or cwd-only for a non-repository) is always emitted afterward, so observers may defer to it. Absent on standalone/final events (e.g. relay context changes).
+	PendingGitContext *bool `json:"pendingGitContext,omitempty"`
 	// Repository identifier derived from the git remote URL ("owner/name" for GitHub, "org/project/repo" for Azure DevOps)
 	Repository *string `json:"repository,omitempty"`
 	// Raw host string from the git remote URL (e.g. "github.com", "mycompany.ghe.com", "dev.azure.com")
 	RepositoryHost *string `json:"repositoryHost,omitempty"`
 }
+
+// What the agent was doing when the user interrupted it.
+type AgentInterruptedActivity string
+
+const (
+	// Background sub-agents were running while the main loop was idle.
+	AgentInterruptedActivityBackgroundAgent AgentInterruptedActivity = "background_agent"
+	// A request to the model was open.
+	AgentInterruptedActivityModelCall AgentInterruptedActivity = "model_call"
+	// The turn was sleeping between retry attempts.
+	AgentInterruptedActivityRetryBackoff AgentInterruptedActivity = "retry_backoff"
+	// One or more tools were executing.
+	AgentInterruptedActivityToolCall AgentInterruptedActivity = "tool_call"
+)
+
+// Where the interruption landed relative to the first streamed token.
+type AgentInterruptedCancelPhase string
+
+const (
+	// The response was already streaming when the request was cancelled.
+	AgentInterruptedCancelPhaseMidStream AgentInterruptedCancelPhase = "mid_stream"
+	// No output had been produced when the request was cancelled.
+	AgentInterruptedCancelPhasePreFirstToken AgentInterruptedCancelPhase = "pre_first_token"
+)
+
+// Hosted program caller type
+type AssistantMessageToolRequestCallerType string
+
+const (
+	AssistantMessageToolRequestCallerTypeProgram AssistantMessageToolRequestCallerType = "program"
+)
 
 // Tool call type: "function" for standard tool calls, "custom" for grammar-based tool calls. Defaults to "function" when absent.
 type AssistantMessageToolRequestType string
@@ -3714,19 +5425,46 @@ const (
 	AssistantUsageAPIEndpointWsResponses AssistantUsageAPIEndpoint = "ws:/responses"
 )
 
-// Outcome of the auto-approval safety judge for a permission request. Present only when auto mode is enabled; its absence means the judge did not evaluate the request (auto mode was off).
-// Experimental: AutoApprovalRecommendation is part of an experimental API and may change or be removed.
-type AutoApprovalRecommendation string
+// Transport used for a successful model call
+type AssistantUsageTransport string
+
+const (
+	// HTTP transport, including SSE streams.
+	AssistantUsageTransportHTTP AssistantUsageTransport = "http"
+	// WebSocket transport.
+	AssistantUsageTransportWebsocket AssistantUsageTransport = "websocket"
+)
+
+// Why the assisted-approval judge produced no usable recommendation. Present only alongside an `error` recommendation, where the human-readable reason is a fixed string and therefore cannot distinguish these cases. Intended to make a judge failure reportable by a consumer that has no access to the host's logs.
+// Experimental: AssistedApprovalJudgeFailureReason is part of an experimental API and may change or be removed.
+type AssistedApprovalJudgeFailureReason string
+
+const (
+	// The judge model call was cancelled before it returned.
+	AssistedApprovalJudgeFailureReasonAbort AssistedApprovalJudgeFailureReason = "abort"
+	// The judge model call completed but returned no content.
+	AssistedApprovalJudgeFailureReasonEmptyResponse AssistedApprovalJudgeFailureReason = "empty_response"
+	// The judge model call failed (for example a transport, authentication, or rate-limit error).
+	AssistedApprovalJudgeFailureReasonModelError AssistedApprovalJudgeFailureReason = "model_error"
+	// The judge model replied, but the reply carried no ALLOW/DENY verdict.
+	AssistedApprovalJudgeFailureReasonParseError AssistedApprovalJudgeFailureReason = "parse_error"
+	// The judge model call exceeded its deadline.
+	AssistedApprovalJudgeFailureReasonTimeout AssistedApprovalJudgeFailureReason = "timeout"
+)
+
+// Outcome of the assisted-approval safety judge for a permission request. Present only in assisted mode; its absence means the judge did not evaluate the request.
+// Experimental: AssistedApprovalRecommendation is part of an experimental API and may change or be removed.
+type AssistedApprovalRecommendation string
 
 const (
 	// The judge evaluated the request and recommends automatically approving it.
-	AutoApprovalRecommendationApprove AutoApprovalRecommendation = "approve"
+	AssistedApprovalRecommendationApprove AssistedApprovalRecommendation = "approve"
 	// The judge was consulted but did not return a usable recommendation, so the request requires explicit approval.
-	AutoApprovalRecommendationError AutoApprovalRecommendation = "error"
-	// Auto mode is enabled, but this request category is never auto-approvable (for example, sandbox-bypass requests), so the judge was not consulted.
-	AutoApprovalRecommendationExcluded AutoApprovalRecommendation = "excluded"
-	// The judge evaluated the request and does not recommend auto-approving it; explicit approval is required. Whether that means prompting, denying, or something else is the consumer's decision.
-	AutoApprovalRecommendationRequireApproval AutoApprovalRecommendation = "requireApproval"
+	AssistedApprovalRecommendationError AssistedApprovalRecommendation = "error"
+	// Assisted mode is enabled, but this request category is never automatically approvable (for example, sandbox-bypass requests), so the judge was not consulted.
+	AssistedApprovalRecommendationExcluded AssistedApprovalRecommendation = "excluded"
+	// The judge evaluated the request and does not recommend automatically approving it; explicit approval is required. Whether that means prompting, denying, or something else is the consumer's decision.
+	AssistedApprovalRecommendationRequireApproval AssistedApprovalRecommendation = "requireApproval"
 )
 
 // Coarse request-difficulty bucket for UX explainability
@@ -3779,6 +5517,20 @@ const (
 	AutopilotObjectiveChangedStatusPaused AutopilotObjectiveChangedStatus = "paused"
 )
 
+// Terminal reason an Auto preference activation failed.
+type AutoTierSwitchFailureReason string
+
+const (
+	// The candidate model was rejected by model policy.
+	AutoTierSwitchFailureReasonPolicyRejected AutoTierSwitchFailureReason = "policy_rejected"
+	// The Auto routing request failed or returned an unusable response.
+	AutoTierSwitchFailureReasonRequestFailed AutoTierSwitchFailureReason = "request_failed"
+	// The runtime could not prepare the Auto routing request.
+	AutoTierSwitchFailureReasonSetupFailed AutoTierSwitchFailureReason = "setup_failed"
+	// The provider does not support Auto routing.
+	AutoTierSwitchFailureReasonUnsupported AutoTierSwitchFailureReason = "unsupported"
+)
+
 // Binary result type discriminator. Use "image" for images and "resource" for other binary data.
 type BinaryAssetReferenceType string
 
@@ -3820,6 +5572,50 @@ const (
 	CitationProviderClient CitationProvider = "client"
 	// Citation produced by an OpenAI model response.
 	CitationProviderOpenai CitationProvider = "openai"
+)
+
+// What initiated a conversation compaction
+type CompactionTrigger string
+
+const (
+	// Compaction forced by a context-limit model response (e.g. HTTP 413) before retrying the request.
+	CompactionTriggerContextLimitRetry CompactionTrigger = "context_limit_retry"
+	// User-requested compaction, e.g. the /compact command or the history.compact API.
+	CompactionTriggerManual CompactionTrigger = "manual"
+	// Emergency compaction triggered by high process memory usage.
+	CompactionTriggerMemoryPressure CompactionTrigger = "memory_pressure"
+	// Compaction requested while switching to a model with a smaller context window.
+	CompactionTriggerModelSwitch CompactionTrigger = "model_switch"
+	// Background compaction started automatically because context utilization crossed the background threshold.
+	CompactionTriggerThreshold CompactionTrigger = "threshold"
+)
+
+// Runtime reason the completion decision was accepted.
+type CompletionReceiptStopReason string
+
+const (
+	// The configured agentStop continuation limit was reached.
+	CompletionReceiptStopReasonAgentStopBlockLimit CompletionReceiptStopReason = "agent_stop_block_limit"
+	// The model reached a natural terminal response.
+	CompletionReceiptStopReasonNatural CompletionReceiptStopReason = "natural"
+	// A terminal tool ended the interaction.
+	CompletionReceiptStopReasonTerminalTool CompletionReceiptStopReason = "terminal_tool"
+)
+
+// Structured terminal status from a tool completion event.
+type CompletionReceiptToolStatus string
+
+const (
+	// The permissions service denied the tool call.
+	CompletionReceiptToolStatusDenied CompletionReceiptToolStatus = "denied"
+	// The tool failed without a more specific structured status.
+	CompletionReceiptToolStatusFailure CompletionReceiptToolStatus = "failure"
+	// The user rejected the tool call.
+	CompletionReceiptToolStatusRejected CompletionReceiptToolStatus = "rejected"
+	// The tool completed successfully.
+	CompletionReceiptToolStatusSuccess CompletionReceiptToolStatus = "success"
+	// The tool exceeded its time budget.
+	CompletionReceiptToolStatusTimeout CompletionReceiptToolStatus = "timeout"
 )
 
 // The user action: "accept" (submitted form), "decline" (explicitly refused), or "cancel" (dismissed)
@@ -3893,6 +5689,138 @@ const (
 	ExtensionsLoadedExtensionStatusStarting ExtensionsLoadedExtensionStatus = "starting"
 )
 
+// Operation gated by a factory permission request.
+type FactoryPermissionOperation string
+
+const (
+	// Authoring a factory, which writes JavaScript into a session-scoped extension and loads it.
+	FactoryPermissionOperationAuthor FactoryPermissionOperation = "author"
+	// Running a registered factory, which spends subagents, active time, and AI credits under the approved limits.
+	FactoryPermissionOperationRun FactoryPermissionOperation = "run"
+)
+
+// Terminal status a factory run committed. A settled run is never `pending` or `running`, so those two members of the run-status domain are deliberately absent.
+type FactoryRunSettledStatus string
+
+const (
+	// The run was cancelled by its caller or by session disposal.
+	FactoryRunSettledStatusCancelled FactoryRunSettledStatus = "cancelled"
+	// The factory body resolved and its result was committed.
+	FactoryRunSettledStatusCompleted FactoryRunSettledStatus = "completed"
+	// The run failed, with `failureType` carrying the class when it has one.
+	FactoryRunSettledStatusError FactoryRunSettledStatus = "error"
+	// The run was stopped by a limit, an approval refusal or another policy decision.
+	FactoryRunSettledStatusHalted FactoryRunSettledStatus = "halted"
+	// The attempt paused intentionally while preserving resumable run state.
+	FactoryRunSettledStatusPaused FactoryRunSettledStatus = "paused"
+)
+
+// Conversation scope in which a HydraFusion phase executes.
+// Experimental: FusionConversationScope is part of an experimental API and may change or be removed.
+type FusionConversationScope string
+
+const (
+	// Isolated read-only review history that does not enter the root conversation.
+	FusionConversationScopeReview FusionConversationScope = "review"
+	// Canonical root conversation history.
+	FusionConversationScopeRoot FusionConversationScope = "root"
+)
+
+// Server-recommended routing behavior for a later HydraFusion turn.
+// Experimental: FusionFollowUpAction is part of an experimental API and may change or be removed.
+type FusionFollowUpAction string
+
+const (
+	// Request a new routing decision.
+	FusionFollowUpActionReroute FusionFollowUpAction = "reroute"
+	// Reuse the durable primary model without routing.
+	FusionFollowUpActionReusePrimary FusionFollowUpAction = "reuse_primary"
+)
+
+// Validated HydraFusion execution pattern.
+// Experimental: FusionPattern is part of an experimental API and may change or be removed.
+type FusionPattern string
+
+const (
+	// Run a primary phase, a judge, and an optional repair.
+	FusionPatternCascade FusionPattern = "cascade"
+	// Run a primary draft, a read-only critique, and a revision.
+	FusionPatternCritique FusionPattern = "critique"
+	// Run one primary solver phase.
+	FusionPatternSingle FusionPattern = "single"
+)
+
+// Content-safe activity observed while a HydraFusion phase is running.
+// Experimental: FusionPhaseActivityKind is part of an experimental API and may change or be removed.
+type FusionPhaseActivityKind string
+
+const (
+	// The provider produced additional private output bytes.
+	FusionPhaseActivityKindModelOutput FusionPhaseActivityKind = "model_output"
+	// A tool finished executing inside the phase.
+	FusionPhaseActivityKindToolCompleted FusionPhaseActivityKind = "tool_completed"
+	// A tool began executing inside the phase.
+	FusionPhaseActivityKindToolStarted FusionPhaseActivityKind = "tool_started"
+)
+
+// HydraFusion phase kind.
+// Experimental: FusionPhaseKind is part of an experimental API and may change or be removed.
+type FusionPhaseKind string
+
+const (
+	// Read-only critique phase.
+	FusionPhaseKindCritic FusionPhaseKind = "critic"
+	// Initial critique-pattern draft phase.
+	FusionPhaseKindDraft FusionPhaseKind = "draft"
+	// Follow-up phase continuing from the resolved model.
+	FusionPhaseKindFollowUp FusionPhaseKind = "follow_up"
+	// Read-only cascade judge phase.
+	FusionPhaseKindJudge FusionPhaseKind = "judge"
+	// Primary solver phase.
+	FusionPhaseKindPrimary FusionPhaseKind = "primary"
+	// Cascade repair phase.
+	FusionPhaseKindRepair FusionPhaseKind = "repair"
+	// Critique-pattern revision phase.
+	FusionPhaseKindRevision FusionPhaseKind = "revision"
+)
+
+// Durable outcome status of a HydraFusion phase.
+// Experimental: FusionPhaseStatus is part of an experimental API and may change or be removed.
+type FusionPhaseStatus string
+
+const (
+	// The phase was cancelled.
+	FusionPhaseStatusCancelled FusionPhaseStatus = "cancelled"
+	// The phase failed.
+	FusionPhaseStatusFailed FusionPhaseStatus = "failed"
+	// The phase completed successfully.
+	FusionPhaseStatusSucceeded FusionPhaseStatus = "succeeded"
+)
+
+// How a durable phase checkpoint contributes its exact message to canonical root history.
+// Experimental: FusionProjectionMode is part of an experimental API and may change or be removed.
+type FusionProjectionMode string
+
+const (
+	// Append the exact root message immediately.
+	FusionProjectionModeAppend FusionProjectionMode = "append"
+	// Do not project the checkpoint into root history.
+	FusionProjectionModeNone FusionProjectionMode = "none"
+	// Hold a terminal message outside canonical history until the final commit selects it.
+	FusionProjectionModeStaged FusionProjectionMode = "staged"
+)
+
+// Kind of turn for which HydraFusion routing is running.
+// Experimental: FusionTurnKind is part of an experimental API and may change or be removed.
+type FusionTurnKind string
+
+const (
+	// A conversation-compaction turn.
+	FusionTurnKindCompaction FusionTurnKind = "compaction"
+	// A user-message turn.
+	FusionTurnKindUser FusionTurnKind = "user"
+)
+
 // Origin type of the session being handed off
 type HandoffSourceType string
 
@@ -3903,15 +5831,47 @@ const (
 	HandoffSourceTypeRemote HandoffSourceType = "remote"
 )
 
-// Which channel supplied the effective enterprise managed settings (highest-authority present layer wins wholesale)
+// The category of runtime action that enterprise managed settings governed (blocked or capped)
+type ManagedSettingsEnforcedAction string
+
+const (
+	// An attempt to turn on a bypass-permissions ("yolo") escalation was refused or capped because policy disables bypass-permissions mode.
+	ManagedSettingsEnforcedActionBypassPermissionsBlocked ManagedSettingsEnforcedAction = "bypass_permissions_blocked"
+)
+
+// For a `bypass_permissions_blocked` action, which permission-escalation primitive was refused
+type ManagedSettingsEnforcedEscalation string
+
+const (
+	// Full allow-all permissions — automatically approving tools, paths, and URLs.
+	ManagedSettingsEnforcedEscalationAllowAll ManagedSettingsEnforcedEscalation = "allow_all"
+	// Automatic approval of all tool permission requests.
+	ManagedSettingsEnforcedEscalationApproveAll ManagedSettingsEnforcedEscalation = "approve_all"
+	// Assisted mode — keeps normal prompt paths and adds an LLM recommendation, distinct from allow-all.
+	ManagedSettingsEnforcedEscalationAssistedApproval ManagedSettingsEnforcedEscalation = "assisted_approval"
+	// A server-wide MCP "Always Allow" (or `--allow-tool <server>`) blanket that would auto-approve every tool from an MCP server. Capped to per-tool approval; each tool still prompts.
+	ManagedSettingsEnforcedEscalationServerWideMCPApproval ManagedSettingsEnforcedEscalation = "server_wide_mcp_approval"
+	// Unrestricted filesystem access outside the session's allowed directories.
+	ManagedSettingsEnforcedEscalationUnrestrictedPaths ManagedSettingsEnforcedEscalation = "unrestricted_paths"
+	// Unrestricted URL fetch access.
+	ManagedSettingsEnforcedEscalationUnrestrictedURLs ManagedSettingsEnforcedEscalation = "unrestricted_urls"
+)
+
+// Summary of which managed-settings channels contributed to the effective session policy. Use the per-channel booleans for exact provenance.
 type ManagedSettingsResolvedSource string
 
 const (
-	// Device-level MDM policy discovered from plist/registry/file (lower authority).
+	// Only session-local SDK-host injection contributed.
+	ManagedSettingsResolvedSourceClient ManagedSettingsResolvedSource = "client"
+	// Only the device MDM/plist/registry/file channel contributed.
 	ManagedSettingsResolvedSourceDevice ManagedSettingsResolvedSource = "device"
-	// No managed policy is in force (no layer contributed).
+	// More than one channel contributed. Ordinary keys resolve device over server over policy helper per key, while permissions compose restrictively across all present layers.
+	ManagedSettingsResolvedSourceMixed ManagedSettingsResolvedSource = "mixed"
+	// No managed policy is in force (no channel contributed).
 	ManagedSettingsResolvedSourceNone ManagedSettingsResolvedSource = "none"
-	// Account/org policy self-fetched from the GitHub managed-settings endpoint (higher authority).
+	// A policy helper registered by device or server policy contributed. Device registration takes priority when present.
+	ManagedSettingsResolvedSourcePolicyHelper ManagedSettingsResolvedSource = "policyHelper"
+	// Only the server/account channel contributed.
 	ManagedSettingsResolvedSourceServer ManagedSettingsResolvedSource = "server"
 )
 
@@ -3919,6 +5879,8 @@ const (
 type MCPHeadersRefreshCompletedOutcome string
 
 const (
+	// The host credential broker rejected or failed the refresh.
+	MCPHeadersRefreshCompletedOutcomeError MCPHeadersRefreshCompletedOutcome = "error"
 	// The host supplied dynamic headers.
 	MCPHeadersRefreshCompletedOutcomeHeaders MCPHeadersRefreshCompletedOutcome = "headers"
 	// The host responded with no dynamic headers.
@@ -3994,6 +5956,16 @@ const (
 	ModelCallFailureBadRequestKindStructuredError ModelCallFailureBadRequestKind = "structured_error"
 )
 
+// Boundary that produced a model call failure
+type ModelCallFailureKind string
+
+const (
+	// The provider returned an API error response.
+	ModelCallFailureKindAPI ModelCallFailureKind = "api"
+	// The request transport failed before a usable API response completed.
+	ModelCallFailureKindTransport ModelCallFailureKind = "transport"
+)
+
 // Where the failed model call originated
 type ModelCallFailureSource string
 
@@ -4006,6 +5978,30 @@ const (
 	ModelCallFailureSourceTopLevel ModelCallFailureSource = "top_level"
 )
 
+// Transport used for a failed model call
+type ModelCallFailureTransport string
+
+const (
+	// HTTP transport, including SSE streams.
+	ModelCallFailureTransportHTTP ModelCallFailureTransport = "http"
+	// WebSocket transport.
+	ModelCallFailureTransportWebsocket ModelCallFailureTransport = "websocket"
+)
+
+// Final outcome of one logical model dispatch after response acceptance processing
+type ModelCallFinishedOutcome string
+
+const (
+	// The dispatch was cancelled before an accepted response was produced.
+	ModelCallFinishedOutcomeCancelled ModelCallFinishedOutcome = "cancelled"
+	// The dispatch ended with a provider or transport error.
+	ModelCallFinishedOutcomeError ModelCallFinishedOutcome = "error"
+	// The provider response was rejected during post-response acceptance processing.
+	ModelCallFinishedOutcomeRejected ModelCallFinishedOutcome = "rejected"
+	// The provider response was accepted for continued agent processing.
+	ModelCallFinishedOutcomeSuccess ModelCallFinishedOutcome = "success"
+)
+
 // Binary result type discriminator. Use "image" for images and "resource" for other binary data.
 type OmittedBinaryType string
 
@@ -4016,17 +6012,15 @@ const (
 	OmittedBinaryTypeResource OmittedBinaryType = "resource"
 )
 
-// Allow-all mode for the session.
-// Experimental: PermissionAllowAllMode is part of an experimental API and may change or be removed.
-type PermissionAllowAllMode string
+// Which direction a message-backed authorization claim moves authority in.
+// Experimental: PermissionMessageAuthorizationPolarity is part of an experimental API and may change or be removed.
+type PermissionMessageAuthorizationPolarity string
 
 const (
-	// Permission requests follow the normal approval flow with an LLM advisory recommendation attached; clients may choose to auto-approve requests the judge evaluated as acceptable.
-	PermissionAllowAllModeAuto PermissionAllowAllMode = "auto"
-	// Permission requests follow the normal approval flow.
-	PermissionAllowAllModeOff PermissionAllowAllMode = "off"
-	// Tool, path, and URL permission requests are automatically approved.
-	PermissionAllowAllModeOn PermissionAllowAllMode = "on"
+	// The human's words refused an effect.
+	PermissionMessageAuthorizationPolarityDenial PermissionMessageAuthorizationPolarity = "denial"
+	// The human's words authorized an effect.
+	PermissionMessageAuthorizationPolarityGrant PermissionMessageAuthorizationPolarity = "grant"
 )
 
 // Kind discriminator for PermissionPromptRequest.
@@ -4035,8 +6029,10 @@ type PermissionPromptRequestKind string
 const (
 	PermissionPromptRequestKindCommands                  PermissionPromptRequestKind = "commands"
 	PermissionPromptRequestKindCustomTool                PermissionPromptRequestKind = "custom-tool"
+	PermissionPromptRequestKindExtensionEnvAccess        PermissionPromptRequestKind = "extension-env-access"
 	PermissionPromptRequestKindExtensionManagement       PermissionPromptRequestKind = "extension-management"
 	PermissionPromptRequestKindExtensionPermissionAccess PermissionPromptRequestKind = "extension-permission-access"
+	PermissionPromptRequestKindFactory                   PermissionPromptRequestKind = "factory"
 	PermissionPromptRequestKindHook                      PermissionPromptRequestKind = "hook"
 	PermissionPromptRequestKindMCP                       PermissionPromptRequestKind = "mcp"
 	PermissionPromptRequestKindMemory                    PermissionPromptRequestKind = "memory"
@@ -4058,13 +6054,24 @@ const (
 	PermissionPromptRequestPathAccessKindWrite PermissionPromptRequestPathAccessKind = "write"
 )
 
+// Advisory recommendation the runtime attaches to a permission request whose origin it can vouch for by construction. Unlike the auto-approval judge this does not depend on auto mode and does not evaluate what the tool call does; its absence simply means the runtime has no opinion and the request follows the host's normal approval flow.
+// Experimental: PermissionRecommendation is part of an experimental API and may change or be removed.
+type PermissionRecommendation string
+
+const (
+	// The runtime vouches for the request's origin and recommends approving it without prompting. The host still owns the decision and may deny it; deny rules, managed policy, and the auto-approval safety judge all outrank this recommendation.
+	PermissionRecommendationApprove PermissionRecommendation = "approve"
+)
+
 // Kind discriminator for PermissionRequest.
 type PermissionRequestKind string
 
 const (
 	PermissionRequestKindCustomTool                PermissionRequestKind = "custom-tool"
+	PermissionRequestKindExtensionEnvAccess        PermissionRequestKind = "extension-env-access"
 	PermissionRequestKindExtensionManagement       PermissionRequestKind = "extension-management"
 	PermissionRequestKindExtensionPermissionAccess PermissionRequestKind = "extension-permission-access"
+	PermissionRequestKindFactory                   PermissionRequestKind = "factory"
 	PermissionRequestKindHook                      PermissionRequestKind = "hook"
 	PermissionRequestKindMCP                       PermissionRequestKind = "mcp"
 	PermissionRequestKindMemory                    PermissionRequestKind = "memory"
@@ -4092,6 +6099,16 @@ const (
 	PermissionRequestMemoryDirectionDownvote PermissionRequestMemoryDirection = "downvote"
 	// Vote that the memory is useful or accurate.
 	PermissionRequestMemoryDirectionUpvote PermissionRequestMemoryDirection = "upvote"
+)
+
+// Scope of a stored memory.
+type PermissionRequestMemoryScope string
+
+const (
+	// Store the memory for the current repository.
+	PermissionRequestMemoryScopeRepository PermissionRequestMemoryScope = "repository"
+	// Store the memory for the current user.
+	PermissionRequestMemoryScopeUser PermissionRequestMemoryScope = "user"
 )
 
 // Kind discriminator for PermissionResult.
@@ -4140,6 +6157,28 @@ const (
 	PlanChangedOperationUpdate PlanChangedOperation = "update"
 )
 
+// Auto preferences that Copilot API can recommend.
+type RecommendedAutoTier string
+
+const (
+	// Balance efficiency and intelligence.
+	RecommendedAutoTierBalance RecommendedAutoTier = "balance"
+	// Optimize for efficiency.
+	RecommendedAutoTierEfficiency RecommendedAutoTier = "efficiency"
+	// Optimize for intelligence.
+	RecommendedAutoTierIntelligence RecommendedAutoTier = "intelligence"
+)
+
+// Who created the schedule: `user` (an explicit user action such as `/every` or `/after`) or `model` (the agent via the `manage_schedule` tool). Gates whether a scheduled skill that opted out of model invocation may fire: only user-created schedules may.
+type ScheduleOrigin string
+
+const (
+	// The schedule was created by the agent via the `manage_schedule` tool.
+	ScheduleOriginModel ScheduleOrigin = "model"
+	// The schedule was created by an explicit user action, such as `/every` or `/after`.
+	ScheduleOriginUser ScheduleOrigin = "user"
+)
+
 // User action selected for an exhausted session limit.
 type SessionLimitsExhaustedResponseAction string
 
@@ -4166,6 +6205,40 @@ const (
 	SkillInvokedTriggerUserInvoked SkillInvokedTrigger = "user-invoked"
 )
 
+// Authority or runtime mechanism responsible for sub-agent model selection.
+type SubagentModelSelectionSource string
+
+const (
+	// Default model declared by the agent definition.
+	SubagentModelSelectionSourceAgentDefinitionDefault SubagentModelSelectionSource = "agent_definition_default"
+	// Complementary-model default selected for the sub-agent.
+	SubagentModelSelectionSourceComplementaryDefault SubagentModelSelectionSource = "complementary_default"
+	// Non-required model preference configured for the sub-agent.
+	SubagentModelSelectionSourceConfiguredPreference SubagentModelSelectionSource = "configured_preference"
+	// Required model policy configured for the sub-agent.
+	SubagentModelSelectionSourceConfiguredRequired SubagentModelSelectionSource = "configured_required"
+	// Explicit model supplied by the parent agent on the task call and selected for dispatch.
+	SubagentModelSelectionSourceExplicitOverride SubagentModelSelectionSource = "explicit_override"
+	// Runtime policy, Auto mode, or an experiment selected the model.
+	SubagentModelSelectionSourceRuntimePolicy SubagentModelSelectionSource = "runtime_policy"
+	// Model inherited from the parent session.
+	SubagentModelSelectionSourceSessionInheritance SubagentModelSelectionSource = "session_inheritance"
+)
+
+// Where the model input for a task-tool sub-agent came from.
+type SubagentTaskModelSource string
+
+const (
+	// The task omitted a model and the user-defined custom agent's definition supplied one.
+	SubagentTaskModelSourceCustomAgentDefinition SubagentTaskModelSource = "custom_agent_definition"
+	// The task omitted a model and the per-sub-agent settings entry supplied a concrete one.
+	SubagentTaskModelSourceSubagentConfiguration SubagentTaskModelSource = "subagent_configuration"
+	// The spawning agent supplied the task tool's model argument.
+	SubagentTaskModelSourceTaskArgument SubagentTaskModelSource = "task_argument"
+	// Neither the task call, the per-sub-agent settings entry, nor a custom agent definition supplied a model.
+	SubagentTaskModelSourceUnset SubagentTaskModelSource = "unset"
+)
+
 // Message role: "system" for system prompts, "developer" for developer-injected instructions
 type SystemMessageRole string
 
@@ -4186,16 +6259,42 @@ const (
 	SystemNotificationAgentCompletedStatusFailed SystemNotificationAgentCompletedStatus = "failed"
 )
 
+// Terminal status reached by a factory execution attempt.
+type SystemNotificationFactoryCompletedStatus string
+
+const (
+	// The factory was cancelled.
+	SystemNotificationFactoryCompletedStatusCancelled SystemNotificationFactoryCompletedStatus = "cancelled"
+	// The factory completed successfully.
+	SystemNotificationFactoryCompletedStatusCompleted SystemNotificationFactoryCompletedStatus = "completed"
+	// The factory failed.
+	SystemNotificationFactoryCompletedStatusError SystemNotificationFactoryCompletedStatus = "error"
+	// The factory was halted.
+	SystemNotificationFactoryCompletedStatusHalted SystemNotificationFactoryCompletedStatus = "halted"
+	// The factory attempt paused intentionally.
+	SystemNotificationFactoryCompletedStatusPaused SystemNotificationFactoryCompletedStatus = "paused"
+)
+
+// Type discriminator for SystemNotificationFactoryPauseInfo.
+type SystemNotificationFactoryPauseInfoType string
+
+const (
+	SystemNotificationFactoryPauseInfoTypeCheckpoint SystemNotificationFactoryPauseInfoType = "checkpoint"
+	SystemNotificationFactoryPauseInfoTypeUser       SystemNotificationFactoryPauseInfoType = "user"
+)
+
 // Type discriminator for SystemNotification.
 type SystemNotificationType string
 
 const (
 	SystemNotificationTypeAgentCompleted         SystemNotificationType = "agent_completed"
 	SystemNotificationTypeAgentIdle              SystemNotificationType = "agent_idle"
+	SystemNotificationTypeFactoryCompleted       SystemNotificationType = "factory_completed"
 	SystemNotificationTypeInstructionDiscovered  SystemNotificationType = "instruction_discovered"
 	SystemNotificationTypeNewInboxMessage        SystemNotificationType = "new_inbox_message"
 	SystemNotificationTypeShellCompleted         SystemNotificationType = "shell_completed"
 	SystemNotificationTypeShellDetachedCompleted SystemNotificationType = "shell_detached_completed"
+	SystemNotificationTypeUnclassified           SystemNotificationType = "unclassified"
 )
 
 // Theme variant this icon is intended for
@@ -4239,6 +6338,23 @@ const (
 	ToolExecutionStartToolDescriptionMetaUIVisibilityApp ToolExecutionStartToolDescriptionMetaUIVisibility = "app"
 	// Tool is callable by the model (LLM tool surface)
 	ToolExecutionStartToolDescriptionMetaUIVisibilityModel ToolExecutionStartToolDescriptionMetaUIVisibility = "model"
+)
+
+// Lifecycle phase for a Rust-owned ephemeral query stream.
+// Experimental: UIEphemeralQueryPhase is part of an experimental API and may change or be removed.
+type UIEphemeralQueryPhase string
+
+const (
+	// The ephemeral query stream was cancelled before completing.
+	UIEphemeralQueryPhaseAborted UIEphemeralQueryPhase = "aborted"
+	// A partial result chunk was produced by the stream.
+	UIEphemeralQueryPhaseChunk UIEphemeralQueryPhase = "chunk"
+	// The ephemeral query stream finished successfully.
+	UIEphemeralQueryPhaseCompleted UIEphemeralQueryPhase = "completed"
+	// The ephemeral query stream ended with an error.
+	UIEphemeralQueryPhaseFailed UIEphemeralQueryPhase = "failed"
+	// The ephemeral query stream has begun.
+	UIEphemeralQueryPhaseStarted UIEphemeralQueryPhase = "started"
 )
 
 // The agent mode that was active when this message was sent

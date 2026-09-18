@@ -164,6 +164,14 @@ function handleMessage(message) {
     });
     return;
   }
+  if (message.method === "session.options.update") {
+    writeResponse(message.id, { success: true });
+    return;
+  }
+  if (message.method === "session.detach") {
+    writeResponse(message.id, { success: true });
+    return;
+  }
   writeResponse(message.id, {});
 }
 
@@ -284,7 +292,9 @@ class TestClientOptions:
                 enable_config_discovery=True,
                 enable_on_demand_instruction_discovery=True,
                 include_sub_agent_streaming_events=False,
+                custom_agents_local_only=False,
             )
+            session_id = session.session_id
             try:
                 with open(capture_path) as f:
                     capture = json.load(f)
@@ -295,8 +305,72 @@ class TestClientOptions:
                 assert params["enableConfigDiscovery"] is True
                 assert params["enableOnDemandInstructionDiscovery"] is True
                 assert params["includeSubAgentStreamingEvents"] is False
+                assert params["customAgentsLocalOnly"] is False
             finally:
                 await session.disconnect()
+
+            resumed = await client.resume_session(
+                session_id,
+                on_permission_request=PermissionHandler.approve_all,
+                custom_agents_local_only=False,
+            )
+            try:
+                with open(capture_path) as f:
+                    capture = json.load(f)
+                resume_request = next(
+                    r for r in capture["requests"] if r["method"] == "session.resume"
+                )
+                assert resume_request["params"]["customAgentsLocalOnly"] is False
+            finally:
+                await resumed.disconnect()
+        finally:
+            try:
+                await client.stop()
+            except Exception:
+                await client.force_stop()
+
+    async def test_should_send_empty_mode_custom_agent_locality_defaults(self, ctx: E2ETestContext):
+        cli_path = os.path.join(ctx.work_dir, "fake-cli-empty.js")
+        capture_path = os.path.join(ctx.work_dir, "fake-cli-empty-capture.json")
+        with open(cli_path, "w") as f:
+            f.write(FAKE_STDIO_CLI_SCRIPT)
+
+        client = CopilotClient(
+            **_make_options(
+                ctx,
+                cli_path=cli_path,
+                cli_args=["--capture-file", capture_path],
+                mode="empty",
+                base_directory=ctx.work_dir,
+                use_logged_in_user=False,
+            ),
+        )
+        try:
+            session = await client.create_session(
+                available_tools=["builtin:ask_user"],
+                on_permission_request=PermissionHandler.approve_all,
+            )
+            session_id = session.session_id
+            await session.disconnect()
+
+            resumed = await client.resume_session(
+                session_id,
+                available_tools=["builtin:ask_user"],
+                on_permission_request=PermissionHandler.approve_all,
+            )
+            try:
+                with open(capture_path) as f:
+                    capture = json.load(f)
+                create_request = next(
+                    r for r in capture["requests"] if r["method"] == "session.create"
+                )
+                resume_request = next(
+                    r for r in capture["requests"] if r["method"] == "session.resume"
+                )
+                assert create_request["params"]["customAgentsLocalOnly"] is True
+                assert resume_request["params"]["customAgentsLocalOnly"] is True
+            finally:
+                await resumed.disconnect()
         finally:
             try:
                 await client.stop()
@@ -326,7 +400,7 @@ class TestClientOptions:
             await client.start()
             session = await client.create_session(
                 client_name="advanced-create-client",
-                model="claude-sonnet-4.5",
+                model="claude-sonnet-5",
                 reasoning_effort="medium",
                 reasoning_summary="detailed",
                 context_tier="long_context",
@@ -400,7 +474,7 @@ class TestClientOptions:
                         "provider": "create-provider",
                         "id": "create-model",
                         "name": "Create Model",
-                        "model_id": "claude-sonnet-4.5",
+                        "model_id": "claude-sonnet-5",
                         "wire_model": "create-wire-model",
                         "max_context_window_tokens": 12_000,
                         "max_prompt_tokens": 10_000,
@@ -412,7 +486,7 @@ class TestClientOptions:
             try:
                 params = _get_captured_request(capture_path, "session.create")
                 assert params["clientName"] == "advanced-create-client"
-                assert params["model"] == "claude-sonnet-4.5"
+                assert params["model"] == "claude-sonnet-5"
                 assert params["reasoningEffort"] == "medium"
                 assert params["reasoningSummary"] == "detailed"
                 assert params["contextTier"] == "long_context"
@@ -468,7 +542,7 @@ class TestClientOptions:
         try:
             await client.start()
             session = await client.create_session(
-                model="claude-sonnet-4.5",
+                model="claude-sonnet-5",
                 provider={
                     "type": "azure",
                     "wire_api": "responses",
@@ -478,7 +552,7 @@ class TestClientOptions:
                     "bearer_token": "provider-bearer-token",
                     "azure": {"api_version": "2024-02-15-preview"},
                     "headers": {"X-Provider-Wire": "yes"},
-                    "model_id": "claude-sonnet-4.5",
+                    "model_id": "claude-sonnet-5",
                     "wire_model": "azure-deployment",
                     "max_prompt_tokens": 8192,
                     "max_output_tokens": 1024,
@@ -495,7 +569,7 @@ class TestClientOptions:
                 assert provider["bearerToken"] == "provider-bearer-token"
                 assert provider["azure"]["apiVersion"] == "2024-02-15-preview"
                 assert provider["headers"]["X-Provider-Wire"] == "yes"
-                assert provider["modelId"] == "claude-sonnet-4.5"
+                assert provider["modelId"] == "claude-sonnet-5"
                 assert provider["wireModel"] == "azure-deployment"
                 assert provider["maxPromptTokens"] == 8192
                 assert provider["maxOutputTokens"] == 1024

@@ -15,9 +15,24 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { approveAll } from "../src/index.js";
+import { FACTORY_AGENT_OPTION_KEYS } from "../src/factory.js";
+import type { FactoryAgentOptions as WireFactoryAgentOptions } from "../src/generated/rpc.js";
 import type {
     // The aggregate union; must still resolve via the package root.
     SessionEvent,
+    AutoTier,
+    AutoTierSwitchFailedData,
+    AutoTierSwitchFailedEvent,
+    AutoTierSwitchFailureReason,
+    CapiSessionOptions,
+    PermissionRequest,
+    PermissionRequestedData,
+    PermissionRequestedEvent,
+    PermissionResponseCapability,
+    ManagedSettingsResolvedData,
+    ManagedSettingsResolvedEvent,
+    ManagedSettingsResolvedSource,
 
     // *Data payload types from the v0.3.0 generated session-event schema.
     AssistantMessageData,
@@ -50,6 +65,11 @@ import type {
     UserMessageAgentMode,
     Attachment,
     WorkingDirectoryContextHostType,
+    FactoryContext,
+    FactoryDefinition,
+    FactoryAgentOptions,
+    FactoryRunResult,
+    JsonValue,
 } from "../src/index.js";
 
 /**
@@ -80,8 +100,105 @@ type _AssistantMessageEventStaysAlignedWithSessionEventUnion = _AssertEqual<
     Extract<SessionEvent, { type: "assistant.message" }>
 >;
 const _assistantMessageEventAlignmentCheck: _AssistantMessageEventStaysAlignedWithSessionEventUnion = true;
+type _DefaultFactoryArgsAreJsonValue = _AssertEqual<FactoryContext["args"], JsonValue>;
+const _defaultFactoryArgsCheck: _DefaultFactoryArgsAreJsonValue = true;
+type _DefaultFactoryResultIsJsonValueOrVoid = _AssertEqual<
+    Awaited<ReturnType<FactoryDefinition["run"]>>,
+    JsonValue | void
+>;
+const _defaultFactoryResultCheck: _DefaultFactoryResultIsJsonValueOrVoid = true;
+type _FactoryRunResultIsJsonValueOrUndefined = _AssertEqual<
+    FactoryRunResult["result"],
+    JsonValue | undefined
+>;
+const _factoryRunResultCheck: _FactoryRunResultIsJsonValueOrUndefined = true;
+type _FactoryAgentOptionKeysMatchPublicInterface = _AssertEqual<
+    (typeof FACTORY_AGENT_OPTION_KEYS)[number],
+    keyof FactoryAgentOptions
+>;
+const _factoryAgentOptionKeysCheck: _FactoryAgentOptionKeysMatchPublicInterface = true;
+type _PublicFactoryAgentOptionsMatchWire = _AssertEqual<
+    keyof FactoryAgentOptions,
+    keyof WireFactoryAgentOptions
+>;
+const _publicFactoryAgentOptionsCheck: _PublicFactoryAgentOptionsMatchWire = true;
+// @ts-expect-error Factory arguments must be representable on the JSON wire.
+type _FactoryArgsRejectUndefined = FactoryContext<undefined>;
+// @ts-expect-error Factory results must be JSON values or top-level void.
+type _FactoryResultRejectsFunction = FactoryDefinition<JsonValue, () => void>;
+type _PermissionRequestedEventStaysAlignedWithSessionEventUnion = _AssertEqual<
+    PermissionRequestedEvent,
+    Extract<SessionEvent, { type: "permission.requested" }>
+>;
+const _permissionRequestedEventAlignmentCheck: _PermissionRequestedEventStaysAlignedWithSessionEventUnion = true;
 
 describe("Session event type exports (#1156)", () => {
+    it.each(["efficiency", "balance", "intelligence", "fast", undefined] satisfies (
+        | AutoTier
+        | undefined
+    )[])("exposes Auto tier %s on start and resume data", (autoTier) => {
+        const start: StartData = {
+            copilotVersion: "1.0.82-1",
+            producer: "copilot-agent",
+            sessionId: "session-1",
+            startTime: "2026-08-28T00:00:00Z",
+            version: 1,
+            autoTier,
+        };
+        const resume: ResumeData = {
+            eventCount: 1,
+            resumeTime: "2026-08-28T00:01:00Z",
+            autoTier,
+        };
+        const capi: CapiSessionOptions = { autoTier: start.autoTier };
+        expect(capi.autoTier).toBe(autoTier);
+        expect(resume.autoTier).toBe(autoTier);
+        if (autoTier === undefined) {
+            expect(JSON.parse(JSON.stringify(start))).not.toHaveProperty("autoTier");
+            expect(JSON.parse(JSON.stringify(resume))).not.toHaveProperty("autoTier");
+        }
+    });
+
+    it.each([
+        "policy_rejected",
+        "request_failed",
+        "setup_failed",
+        "unsupported",
+    ] satisfies AutoTierSwitchFailureReason[])(
+        "exposes the Auto tier switch failure event with reason %s",
+        (reason) => {
+            const data: AutoTierSwitchFailedData = {
+                reason,
+                requestedAutoTier: "fast",
+                effectiveAutoTier: "balance",
+            };
+            const event: AutoTierSwitchFailedEvent = {
+                type: "session.auto_tier_switch_failed",
+                id: "event-1",
+                parentId: null,
+                timestamp: "2026-09-02T00:00:00Z",
+                ephemeral: true,
+                data,
+            };
+
+            // The failure event must be reachable through the aggregate union so
+            // consumers can narrow on it in a single event handler.
+            const asSessionEvent: SessionEvent = event;
+            expect(asSessionEvent.type).toBe("session.auto_tier_switch_failed");
+            expect(data.reason).toBe(reason);
+            expect(data.requestedAutoTier).toBe("fast");
+        }
+    );
+
+    it("allows a null requested Auto tier when returning to default routing fails", () => {
+        const data: AutoTierSwitchFailedData = {
+            reason: "unsupported",
+            requestedAutoTier: null,
+        };
+        expect(data.requestedAutoTier).toBeNull();
+        expect(data.effectiveAutoTier).toBeUndefined();
+    });
+
     it("exposes the headline ToolExecutionStartData type with a usable shape", () => {
         // This is the specific type called out in issue #1156. The annotation
         // is the compile-time API-surface check; these assertions only validate
@@ -97,10 +214,125 @@ describe("Session event type exports (#1156)", () => {
 
         expect(data.toolName).toBe("shell");
         expect(data.toolCallId).toBe("call-1");
-        expect(data.arguments?.command).toBe("ls");
+        expect(data.arguments).toEqual({ command: "ls" });
         expect(data.mcpServerName).toBe("filesystem");
         expect(data.mcpToolName).toBe("list_dir");
         expect(data.turnId).toBe("turn-1");
+    });
+
+    it("exposes explicit user approval metadata for managed Domain requests", () => {
+        const request: PermissionRequest = {
+            kind: "url",
+            url: "https://api.example.com/data",
+            intention: "Fetch domain data",
+            managedApprovalRequired: true,
+        };
+
+        expect(request.managedApprovalRequired).toBe(true);
+    });
+
+    it("exposes managed approval metadata through permission event types", () => {
+        const data: PermissionRequestedData = {
+            permissionRequest: {
+                kind: "url",
+                url: "https://api.example.com/data",
+                intention: "Fetch domain data",
+                managedApprovalRequired: true,
+            },
+            requestId: "permission-1",
+        };
+        const event: SessionEvent = {
+            id: "evt-permission-1",
+            parentId: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            type: "permission.requested",
+            data,
+        };
+
+        if (event.type !== "permission.requested") {
+            throw new Error("expected permission.requested narrowing");
+        }
+
+        const permissionEvent: PermissionRequestedEvent = event;
+        expect(permissionEvent.data.permissionRequest.managedApprovalRequired).toBe(true);
+    });
+
+    it("exposes managed settings client and mixed provenance", () => {
+        const sources: ManagedSettingsResolvedSource[] = [
+            "server",
+            "device",
+            "client",
+            "mixed",
+            "none",
+        ];
+        expect(sources).toEqual(["server", "device", "client", "mixed", "none"]);
+
+        const clientData: ManagedSettingsResolvedData = {
+            bypassPermissionsDisabled: true,
+            clientManaged: true,
+            deviceManaged: false,
+            failClosed: false,
+            managedKeys: ["permissions"],
+            serverManaged: false,
+            source: "client",
+        };
+        const clientEvent: ManagedSettingsResolvedEvent = {
+            ephemeral: true,
+            id: "evt-managed-1",
+            parentId: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            type: "session.managed_settings_resolved",
+            data: clientData,
+        };
+        expect(clientEvent.data.source).toBe("client");
+        expect(clientEvent.data.clientManaged).toBe(true);
+
+        const { clientManaged: _, ...withoutClientManaged } = clientData;
+        const mixedData: ManagedSettingsResolvedData = {
+            ...withoutClientManaged,
+            source: "mixed",
+        };
+        expect(mixedData.source).toBe("mixed");
+        expect("clientManaged" in mixedData).toBe(false);
+    });
+
+    it("rejects approveAll in managed settings sessions", () => {
+        expect(() =>
+            approveAll(
+                {
+                    kind: "url",
+                    url: "https://api.example.com/data",
+                    intention: "Fetch ordinary data",
+                },
+                { sessionId: "session-1", managedSettingsEnabled: true }
+            )
+        ).toThrow("approveAll cannot be used when managed settings are enabled");
+
+        expect(() =>
+            approveAll(
+                {
+                    kind: "url",
+                    url: "https://api.example.com/data",
+                    intention: "Fetch managed data",
+                    managedApprovalRequired: true,
+                },
+                { sessionId: "session-1", managedSettingsEnabled: true }
+            )
+        ).toThrow("approveAll cannot be used when managed settings are enabled");
+    });
+
+    it("leaves managed requests pending when managed settings are disabled", () => {
+        expect(
+            approveAll(
+                {
+                    kind: "url",
+                    url: "https://api.example.com/data",
+                    intention: "Fetch managed data",
+                    managedApprovalRequired: true,
+                },
+                { sessionId: "session-1", managedSettingsEnabled: false }
+            )
+        ).toEqual({ kind: "no-result" });
     });
 
     it("wraps ToolExecutionStartData inside the exported ToolExecutionStartEvent", () => {
@@ -160,6 +392,9 @@ describe("Session event type exports (#1156)", () => {
         assertImportable<ToolExecutionProgressData>();
         assertImportable<ToolExecutionStartData>();
         assertImportable<UserMessageData>();
+        assertImportable<PermissionRequestedData>();
+        assertImportable<PermissionResponseCapability>();
+        assertImportable<ManagedSettingsResolvedData>();
 
         assertImportable<AssistantMessageEvent>();
         assertImportable<ErrorEvent>();
@@ -169,6 +404,9 @@ describe("Session event type exports (#1156)", () => {
         assertImportable<ToolExecutionCompleteEvent>();
         assertImportable<ToolExecutionStartEvent>();
         assertImportable<UserMessageEvent>();
+        assertImportable<PermissionRequestedEvent>();
+        assertImportable<ManagedSettingsResolvedEvent>();
+        assertImportable<ManagedSettingsResolvedSource>();
 
         // Supporting auxiliary types referenced by the *Data shapes — these
         // must round-trip through the package root too, otherwise consumers

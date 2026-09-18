@@ -12,6 +12,8 @@ import type { JSONSchema7, JSONSchema7Definition } from "json-schema";
 import path from "path";
 import { fileURLToPath } from "url";
 import { promisify } from "util";
+import { COPILOT_CLI_VERSION } from "../../nodejs/src/cliVersion.js";
+import { ensureCopilotPackage } from "../../nodejs/scripts/releaseArtifacts.js";
 
 export const execFileAsync = promisify(execFile);
 
@@ -45,59 +47,23 @@ export type SchemaWithSharedDefinitions<T extends JSONSchema7 = JSONSchema7> = T
 };
 // ── Schema paths ────────────────────────────────────────────────────────────
 
-const SDK_NODE_MODULES = path.join(REPO_ROOT, "nodejs/node_modules");
-
 /**
- * Resolve a JSON schema shipped by the `@github/copilot` CLI package.
- *
- * The CLI package layout changed in 1.0.64-1: the umbrella `@github/copilot`
- * package became a thin loader and its bundled assets (including the JSON
- * schemas) moved into the platform-specific packages installed as optional
- * dependencies, e.g. `@github/copilot-linux-x64` or `@github/copilot-win32-x64`.
- *
- * To support both layouts we look in the umbrella package first (older
- * versions) and then in whichever platform package was installed for the
- * current host.
+ * Resolve a JSON schema from the pinned Copilot CLI GitHub Release.
  */
-async function resolveCopilotSchemaPath(nodeModulesDir: string, fileName: string): Promise<string> {
-    const candidates = [path.join(nodeModulesDir, "@github/copilot/schemas", fileName)];
-
-    const githubScopeDir = path.join(nodeModulesDir, "@github");
-    try {
-        for (const entry of await fs.readdir(githubScopeDir)) {
-            if (entry.startsWith("copilot-")) {
-                candidates.push(path.join(githubScopeDir, entry, "schemas", fileName));
-            }
-        }
-    } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code !== "ENOENT" && code !== "ENOTDIR") {
-            throw err;
-        }
-        // @github scope directory may not exist yet; fall through to the error below.
-    }
-
-    for (const candidate of candidates) {
-        try {
-            await fs.access(candidate);
-            return candidate;
-        } catch {
-            // Try the next candidate.
-        }
-    }
-
-    throw new Error(
-        `${fileName} not found under ${githubScopeDir}. Run 'npm ci' in nodejs/ first.`
-    );
+async function resolveCopilotSchemaPath(fileName: string): Promise<string> {
+    const packageRoot = await ensureCopilotPackage(COPILOT_CLI_VERSION);
+    const schemaPath = path.join(packageRoot, "schemas", fileName);
+    await fs.access(schemaPath);
+    return schemaPath;
 }
 
 export async function getSessionEventsSchemaPath(): Promise<string> {
-    return resolveCopilotSchemaPath(SDK_NODE_MODULES, "session-events.schema.json");
+    return resolveCopilotSchemaPath("session-events.schema.json");
 }
 
 export async function getApiSchemaPath(cliArg?: string): Promise<string> {
     if (cliArg) return cliArg;
-    return resolveCopilotSchemaPath(SDK_NODE_MODULES, "api.schema.json");
+    return resolveCopilotSchemaPath("api.schema.json");
 }
 
 // ── Brand casing normalization ──────────────────────────────────────────────
@@ -198,6 +164,27 @@ export function postProcessSchema(schema: JSONSchema7): JSONSchema7 {
     if (typeof schema !== "object" || schema === null) return schema;
 
     const processed = { ...schema } as JSONSchema7WithDefs;
+
+    if (processed.title === "ProviderModelConfig" && processed.properties) {
+        const tokenFields = new Set([
+            "maxPromptTokens",
+            "maxContextWindowTokens",
+            "maxOutputTokens",
+        ]);
+        processed.properties = Object.fromEntries(
+            Object.entries(processed.properties).map(([key, value]) => {
+                if (
+                    tokenFields.has(key) &&
+                    typeof value === "object" &&
+                    value !== null &&
+                    (value as JSONSchema7).type === "number"
+                ) {
+                    return [key, { ...(value as JSONSchema7), type: "integer" }];
+                }
+                return [key, value];
+            })
+        );
+    }
 
     if ("const" in processed && typeof processed.const === "boolean") {
         processed.enum = [processed.const];
@@ -451,6 +438,50 @@ export function cloneSchemaForCodegen<T>(value: T): T {
     }
 
     return value;
+}
+
+const PERMISSION_REQUEST_DEFINITION_NAMES = [
+    "PermissionRequestCustomTool",
+    "PermissionRequestExtensionManagement",
+    "PermissionRequestExtensionEnvAccess",
+    "PermissionRequestExtensionPermissionAccess",
+    "PermissionRequestFactory",
+    "PermissionRequestHook",
+    "PermissionRequestMcp",
+    "PermissionRequestMemory",
+    "PermissionRequestRead",
+    "PermissionRequestShell",
+    "PermissionRequestUrl",
+    "PermissionRequestWrite",
+] as const;
+
+/**
+ * Add managed approval metadata until the pinned CLI schema includes the field.
+ */
+export function addManagedApprovalRequiredToPermissionRequests<T extends JSONSchema7>(schema: T): T {
+    const cloned = cloneSchemaForCodegen(schema);
+    const property: JSONSchema7 = {
+        description:
+            "When true, managed policy requires an explicit user decision and automatic approval must be bypassed.",
+        type: ["boolean", "null"],
+    };
+    (property as Record<string, unknown>)["x-copilot-sdk-append-last"] = true;
+
+    for (const definitions of [cloned.definitions, cloned.$defs]) {
+        if (!definitions) continue;
+        for (const name of PERMISSION_REQUEST_DEFINITION_NAMES) {
+            const definition = definitions[name];
+            if (!definition || typeof definition !== "object") continue;
+            const objectDefinition = definition as JSONSchema7;
+            objectDefinition.properties = {
+                ...objectDefinition.properties,
+                managedApprovalRequired:
+                    objectDefinition.properties?.managedApprovalRequired ?? cloneSchemaForCodegen(property),
+            };
+        }
+    }
+
+    return cloned;
 }
 
 export function getEnumValueDescriptions(schema: JSONSchema7 | null | undefined): EnumValueDescriptions | undefined {
@@ -898,6 +929,34 @@ export function propagateInternalVisibility(schema: JSONSchema7): JSONSchema7 {
  */
 export function isOpaqueJson(schema: JSONSchema7 | null | undefined): boolean {
     return typeof schema === "object" && schema !== null && (schema as Record<string, unknown>)["x-opaque-json"] === true;
+}
+
+/** Returns true when a JSON Schema node is marked `x-opaque-in-process: true`. */
+export function isOpaqueInProcess(schema: JSONSchema7 | null | undefined): boolean {
+    return typeof schema === "object" && schema !== null && (schema as Record<string, unknown>)["x-opaque-in-process"] === true;
+}
+
+/**
+ * Returns true when a schema node has no structural constraints that describe a
+ * more precise TypeScript type than an opaque marker.
+ */
+export function isBareSchemaNode(schema: JSONSchema7 | null | undefined): boolean {
+    if (typeof schema !== "object" || schema === null) return false;
+    const node = schema as Record<string, unknown>;
+    return ![
+        "type",
+        "anyOf",
+        "oneOf",
+        "allOf",
+        "$ref",
+        "properties",
+        "items",
+        "enum",
+        "const",
+        "additionalProperties",
+        "not",
+        "patternProperties",
+    ].some((key) => key in node);
 }
 
 /**

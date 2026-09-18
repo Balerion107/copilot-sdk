@@ -20,31 +20,35 @@ Java SDK for programmatic control of GitHub Copilot CLI, enabling you to build A
 To use the SDK, you'll need:
 
 - Java 17 or later. **JDK 25 recommended**. The distributed jar is a multi-release jar (MR-JAR) and is compiled on JDK 25 with `maven.compiler.release` set to 17. This means, when run on JDK 25 and later, the SDK automatically uses virtual threads for its default internal executor.
-- GitHub Copilot CLI 1.0.55-5 or later installed and in `PATH` (or provide custom `cliPath`)
+
+Managed stdio and TCP connections materialize the platform classifier's
+`copilot-runtime[.exe]` and adjacent `runtime.node` by default. An explicit
+`cliPath` or `COPILOT_CLI_PATH` environment variable overrides the bundled
+runtime.
 
 ## Installation
 
 ### Maven
 
-Replace `${copilot.sdk.version}` with the latest release from Maven Central.
-
 ```xml
 <dependency>
     <groupId>com.github</groupId>
     <artifactId>copilot-sdk-java</artifactId>
-    <version>1.0.5-01</version>
+    <version>1.0.14-preview.1</version>
 </dependency>
 ```
 
 ### Gradle
 
 ```groovy
-implementation 'com.github:copilot-sdk-java:1.0.7-01'
+implementation 'com.github:copilot-sdk-java:1.0.14-preview.1'
 ```
 
-#### Snapshot Builds
+### Snapshot builds
 
-Snapshot builds of the next development version are published to Maven Central Snapshots. To use them, add the repository and update the dependency version in your `pom.xml`:
+Snapshot builds of the next development version are published to Maven Central Snapshots. To use them, add the snapshot repository and depend on the development version:
+
+#### Maven
 
 ```xml
 <repositories>
@@ -58,16 +62,61 @@ Snapshot builds of the next development version are published to Maven Central S
 <dependency>
     <groupId>com.github</groupId>
     <artifactId>copilot-sdk-java</artifactId>
-    <version>1.0.8-SNAPSHOT</version>
+    <version>1.0.15-preview.1-SNAPSHOT</version>
 </dependency>
 ```
 
-### Gradle
-
-Replace `${copilot.sdk.version}` with the latest release from Maven Central.
+#### Gradle
 
 ```groovy
-implementation 'com.github:copilot-sdk-java:1.0.7-01-SNAPSHOT'
+implementation 'com.github:copilot-sdk-java:1.0.15-preview.1-SNAPSHOT'
+```
+
+## In-process mode (experimental)
+
+The SDK supports running the Copilot runtime **in-process** as a native library instead of spawning a separate CLI process. This eliminates process management overhead and simplifies deployment. In-process mode is currently experimental and supported on **linux-x64** (glibc), **linux-arm64** (glibc), **win32-x64**, **win32-arm64**, **darwin-x64**, and **darwin-arm64**.
+
+Because in-process mode is experimental, see the [Using experimental APIs](#using-experimental-apis) section for how to opt in.
+
+### Additional dependency
+
+Add both the SDK and the platform-specific native runtime to your project:
+
+```xml
+<dependencies>
+    <!-- Pure-Java SDK (~1.5 MB) -->
+    <dependency>
+        <groupId>com.github</groupId>
+        <artifactId>copilot-sdk-java</artifactId>
+        <version>${copilot.version}</version>
+    </dependency>
+    <!-- Add the native runtime for the target platform -->
+    <dependency>
+        <groupId>com.github</groupId>
+        <artifactId>copilot-sdk-java-runtime</artifactId>
+        <version>${copilot.version}</version>
+        <classifier>linux-x64</classifier>
+    </dependency>
+    <!-- Use linux-arm64, win32-x64, win32-arm64, darwin-x64, or darwin-arm64 on those target platforms -->
+    <!-- JNA (required for in-process mode) -->
+    <dependency>
+        <groupId>net.java.dev.jna</groupId>
+        <artifactId>jna</artifactId>
+        <version>5.19.1</version>
+    </dependency>
+</dependencies>
+```
+
+### Usage
+
+Configure the client to use the in-process connection:
+
+```java
+CopilotClientOptions options = new CopilotClientOptions()
+    .setConnection(RuntimeConnection.forInProcess());
+
+CopilotClient client = new CopilotClient(options);
+client.start().get();
 ```
 
 ## Quick Start
@@ -120,16 +169,136 @@ public class CopilotSDK {
 }
 ```
 
+When targeting MCP tools configured through `setMcpServers(...)`, remember the
+runtime tool name is `<server-key>-<tool-name>`. For `setAvailableTools(...)`
+and `setExcludedTools(...)`, prefer the source-qualified filter form
+`mcp:<server-key>-<tool-name>`. For `CustomAgentConfig.setTools(...)` and
+`DefaultAgentConfig.setExcludedTools(...)`, use `<server-key>-<tool-name>`
+directly.
+
+`CopilotClientOptions.setCwd(...)` sets the runtime process working directory, which otherwise inherits the current process working directory. `SessionConfig.setWorkingDirectory(...)` sets the session working directory, which otherwise defaults to the runtime process working directory.
+
+`SessionConfig.setAskUserVariant(AskUserVariant.ELICITATION)` selects the
+structured form-based `ask_user` tool when an elicitation handler is also set.
+The default is `AskUserVariant.LEGACY`. Re-supply the option and handler through
+`ResumeSessionConfig` on a cold resume.
+
+For rotating per-session GitHub credentials, use
+`SessionConfig.setGitHubTokenProvider(...)` (or the equivalent
+`ResumeSessionConfig` setter) instead of `setGitHubToken(...)`:
+
+```java
+var config = new SessionConfig()
+    .setGitHubTokenProvider(args ->
+        acquireForHost(args.host()).thenApply(token ->
+            GitHubTokenProviderResult.token(token, 8 * 60 * 60)))
+    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL);
+```
+
+The remaining lifetime is required and must be positive when the callback
+completes; production GitHub tokens typically last eight hours. A static token
+and a provider are mutually exclusive.
+
+Initial acquisition runs during session creation or resume. Cancellation,
+provider errors, and invalid token responses reject that operation instead of
+falling back to ambient authentication. Idle sessions refresh only before their
+next credential-consuming operation; there is no background refresh timer.
+
+## Message source
+
+Use `MessageSource.SYSTEM` for application-generated system context and
+`MessageSource.agent(id)` for messages from an identified agent:
+
+```java
+import com.github.copilot.rpc.MessageOptions;
+import com.github.copilot.rpc.MessageSource;
+
+session.send(new MessageOptions()
+    .setPrompt("The background build completed successfully.")
+    .setSource(MessageSource.SYSTEM)).get();
+
+session.sendAndWait(new MessageOptions()
+    .setPrompt("The review found no blocking issues.")
+    .setSource(MessageSource.agent("reviewer"))).get();
+```
+
+Leave `source` unset to omit it from the request and retain the runtime's default
+user-input behavior, or set `MessageSource.USER` explicitly. Source is independent
+of delivery mode (`enqueue` or `immediate`) and does not configure the session's
+system prompt.
+
+Agent sources serialize as `agent-<id>`. Pass the agent ID without adding a
+prefix. The SDK preserves its case and whitespace and rejects null IDs.
+`sendAndWait` accepts the same source values as `send`.
+
+## Structured output (experimental)
+
+Annotate a result record or class using the same compile-time schema-generation
+approach as `@CopilotTool`. No additional schema dependency is needed:
+
+```java
+@CopilotResponse
+public record Inventory(int count, String color) {}
+
+Inventory inventory = session.sendAndWait(
+    "Call get_inventory, then report the widget count and color.",
+    Inventory.class
+).get();
+```
+
+Enable annotation processing with `CopilotResponseProcessor` (automatically
+discoverable alongside the SDK's existing processors), and opt in to experimental
+APIs as described below. The processor reuses the custom-tool `SchemaGenerator`,
+closing record/class objects for strict output. Its existing type-mapping
+limitations apply: custom Jackson naming/converters and recursive types need an explicit schema.
+Provider restrictions, including optional-field and dictionary restrictions,
+still apply. Jackson deserialization is not full JSON Schema validation.
+
+For an explicit schema, use `new MessageOptions().setPrompt(...).setResponseSchema(schema)`
+with `send` or `sendAndWait`; schema-bearing `sendAndWait` returns the ordinary
+message event. Typed overloads accept message options and a timeout, clone the
+options, and reject explicit schemas and immediate delivery.
+
+Schemas apply to one run, including tools, steering, and stop-hook corrections;
+independent sends and subagents do not inherit them. Streaming stays text.
+Structured waits return the last correlated root message without tool requests at
+non-autopilot idle. Concurrent waits keep their own results; queued work can delay
+idle. Aborts, session errors after the run starts, and missing final output fail.
+Cancellation and timeout stop waiting without aborting the agent.
+
+## Permission Handling
+
+`PermissionHandler.APPROVE_ALL` approves requests when managed settings are disabled. When `enableManagedSettings` is true, it completes exceptionally. Custom handlers can inspect `request.getManagedApprovalRequired()` for human-facing confirmation logic.
+
+When handling `PermissionRequestedEvent` directly, convert its generated event value with `PermissionRequest.fromJsonValue(event.getData().permissionRequest())` to access the typed metadata.
+
+Custom handlers must check managed approval before applying kind-specific automatic decisions:
+
+```java
+import java.util.concurrent.CompletableFuture;
+
+import com.github.copilot.rpc.PermissionHandler;
+import com.github.copilot.rpc.PermissionRequestResult;
+
+PermissionHandler handler = (request, invocation) -> {
+    if (Boolean.TRUE.equals(request.getManagedApprovalRequired())) {
+        return CompletableFuture.completedFuture(PermissionRequestResult.noResult());
+    }
+
+    return CompletableFuture.completedFuture(PermissionRequestResult.approveOnce());
+};
+```
+
 ## Try it with JBang
 
 You can run the SDK without setting up a full Java project, by using [JBang](https://www.jbang.dev/).
 
-See the full source of [`jbang-example.java`](jbang-example.java) for a complete example with more features like session idle handling and usage info events.
+See the full source of [`jbang-example.java`](sdk/jbang-example.java) for a complete example with more features like session idle handling and usage info events.
 
 Or run it directly from the repository:
 
 ```bash
-jbang https://github.com/github/copilot-sdk/blob/main/java/jbang-example.java
+jbang https://github.com/github/copilot-sdk/blob/main/java/sdk/jbang-example.java
 ```
 
 ## Annotation-based tools and `ToolInvocation` context
@@ -231,6 +400,59 @@ Chain fluent modifiers to set tool options:
 - `.overridesBuiltInTool(boolean)` — shadow built-in tools
 
 For design context and decision rationale, see [ADR-006](docs/adr/adr-006-tool-definition-inline.md).
+
+## Auto routing tiers
+
+Use `CapiSessionOptions.setAutoTier(...)` to select `AutoTier.EFFICIENCY`,
+`AutoTier.BALANCE`, `AutoTier.INTELLIGENCE`, or `AutoTier.FAST`. This option is
+meaningful only with model `auto` (Auto mode V2).
+It requires a runtime version that supports `capi.autoTier`.
+`AutoTier.FAST` is an integrator-only latency preset, not a first-party GitHub
+Copilot product preference — the SDK does not decide Fast eligibility or apply
+it implicitly.
+
+```java
+import com.github.copilot.rpc.AutoTier;
+import com.github.copilot.rpc.CapiSessionOptions;
+import com.github.copilot.rpc.PermissionHandler;
+import com.github.copilot.rpc.SessionConfig;
+
+var config = new SessionConfig()
+    .setOnPermissionRequest(PermissionHandler.APPROVE_ALL)
+    .setModel("auto")
+    .setCapi(new CapiSessionOptions().setAutoTier(AutoTier.BALANCE));
+```
+
+The same options work with `ResumeSessionConfig.setCapi(...)` and can be combined
+with `setEnableWebSocketResponses(false)`. The SDK omits an unset (`null`) tier:
+the runtime chooses its default on create and preserves the persisted/current
+tier on resume. An explicit tier overrides the persisted tier on cold resume. On
+resident resume, a different tier requests a safe switch applied after the
+resume succeeds; it cannot change a turn that is already in flight. The SDK does not choose a default or manage tier persistence.
+See [Auto tier persistence](../docs/features/session-persistence.md#auto-tier-persistence)
+for the lifecycle rules.
+
+### Changing the Auto tier during a session
+
+Change the Auto routing preference without changing the selected model. The runtime does not apply the preference immediately: it records the request and commits it only when a later user turn using the `auto` model successfully obtains a usable model from the provider, so a `pending` status confirms acceptance rather than effect. Only the most recent request survives.
+
+Watch for the outcome through the `session.model_change` event on success or the ephemeral `session.auto_tier_switch_failed` event on failure. A failed activation leaves the incumbent effective tier unchanged. Read the authoritative committed, pending, and activating preferences at any time through the session's `model.getCurrent` RPC method.
+
+```java
+var result = session.setAutoTier(AutoTier.INTELLIGENCE).get();
+if (result.status() == ModelSwitchAutoTierStatus.PENDING) {
+    // Accepted, but not yet in effect.
+}
+
+// Return to the provider's default Auto routing.
+session.setAutoTier(null).get();
+```
+
+`setModel(SetModelOptions)` accepts the same preference through `SetModelOptions.setAutoTier(...)`, which stages the tier atomically with selecting `auto`. Call `setResetAutoTier(true)` instead to return to provider-default routing; the two options are mutually exclusive.
+
+## Session Store
+
+`enableSessionStore` on `SessionConfig` enables the cross-session store for search and retrieval across sessions. When unset in the default `CopilotClientMode.COPILOT_CLI` mode, the runtime default applies (enabled). In `CopilotClientMode.EMPTY` mode, defaults to disabled.
 
 ## Memory
 
@@ -386,15 +608,12 @@ The gate also applies to individual methods annotated with `@CopilotExperimental
 
 ### Development Setup
 
-Requires JDK 25 or later for development. The following steps validate the artifact built with JDK 25 runs on both 25 and 17, preserving the MR-JAR behavior.
+Requires JDK 25 or later and a supported [Node.js version](../nodejs/README.md#prerequisites) for development. The following steps validate the artifact built with JDK 25 runs on both 25 and 17, preserving the MR-JAR behavior.
 
 ```bash
 # Clone the repository
 git clone https://github.com/github/copilot-sdk.git
 cd copilot-sdk/java
-
-# Enable git hooks for code formatting
-git config core.hooksPath .githooks
 
 # Build and test with JDK 25
 mvn test-compile jar:jar
@@ -405,6 +624,107 @@ mvn verify -Dskip.test.harness=true
 mvn jacoco:prepare-agent@wire-up-coverage-instrumentation antrun:run@print-test-jdk-banner surefire:test failsafe:integration-test failsafe:verify jacoco:report@build-coverage-report-from-tests -Denforcer.skip=true
 ```
 
+#### Formatting and linting
+
+From the repository root, run `just format-java` to apply formatting and `just lint-java` to check formatting and Javadoc. These recipes are also included in `just format` and `just lint`.
+
+Without `just`, run the equivalent Maven commands from `java/`:
+
+```bash
+# Apply formatting
+mvn -pl sdk spotless:apply
+
+# Check formatting and Javadoc
+mvn -pl sdk spotless:check checkstyle:check
+```
+
+CI enforces both checks. Spotless runs explicitly in CI; `mvn verify` alone does not check formatting.
+
+#### Development Setup for native embedding
+
+Run native-runtime Maven commands from the `java` directory. Native packaging requires Node.js in addition to JDK 25 and Maven because `copilot-native/scripts/fetch-native.mjs` retrieves the pinned runtime package from the corresponding GitHub release.
+
+On a native Linux glibc host, Maven activates `native-linux-x64` or `native-linux-arm64` for the matching architecture when `copilot.native.libc=glibc` is set. On Windows x64, Windows ARM64, Intel macOS, and Apple Silicon macOS, Maven activates `native-win32-x64`, `native-win32-arm64`, `native-darwin-x64`, or `native-darwin-arm64` automatically. The matching profile validates the host, runs the native script tests, fetches the pinned platform package from the corresponding `github/copilot-cli` release during `generate-resources`, packages the classifier JAR during `package`, and verifies its native contents.
+
+Before opting in, validate that Node.js reports glibc for the build host:
+
+```bash
+node copilot-native/scripts/validate-native-host.mjs linux-x64
+mvn -pl copilot-native clean verify -Dcopilot.native.libc=glibc
+```
+
+The `inprocess` test profile performs the same validation and native packaging automatically, so the full in-process test command remains:
+
+```bash
+mvn -Pinprocess clean verify
+```
+
+On Windows x64 or ARM64 PowerShell, initialize Java and run the same profile:
+
+```powershell
+mvn -Pinprocess clean verify
+```
+
+The same command validates in-process mode on macOS; use the classifier for the host architecture:
+
+```bash
+node copilot-native/scripts/validate-native-host.mjs darwin-x64 # Use darwin-arm64 on Apple Silicon
+mvn -Pinprocess clean verify
+```
+
+The same command validates in-process mode on Linux ARM64:
+
+```bash
+node copilot-native/scripts/validate-native-host.mjs linux-arm64
+mvn -Pinprocess clean verify -Dcopilot.native.libc=glibc
+```
+
+On Linux musl and other unsupported hosts, do not set `copilot.native.libc=glibc`. A normal build produces only the OS-neutral primary, sources, and Javadoc JARs; it does not run native script tests, download or stage native files, or produce a platform classifier JAR.
+
+To build only the OS-neutral artifacts on any host, or override the glibc opt-in, disable native download and packaging:
+
+```bash
+mvn -pl copilot-native clean package -DskipTests -Dcopilot.native.libc=glibc -Dcopilot.native.skip.download=true
+```
+
+The verified Linux x64 checks are:
+
+```bash
+node --test copilot-native/scripts/fetch-native.test.mjs copilot-native/scripts/validate-native-host.test.mjs
+mvn -pl copilot-native help:active-profiles -Dcopilot.native.libc=glibc -Dcopilot.native.skip.download=false
+mvn -pl copilot-native test -Dcopilot.native.libc=glibc
+mvn clean verify -Dcopilot.native.libc=glibc
+mvn clean package -pl copilot-native -DskipTests -Dcopilot.native.libc=glibc -Dcopilot.native.skip.download=true
+```
+
+Each classifier JAR includes `runtime.node`, `platform.properties`, and `copilot-runtime` (or `copilot-runtime.exe`) under its `native/<classifier>` directory. It does not contain the legacy `copilot` SEA. The placeholder JAR remains OS-neutral and contains no native binaries. Unsupported hosts retain the placeholder-only behavior.
+
+### Versioning and releases
+
+The Java SDK uses [Maven CI-friendly versions](https://maven.apache.org/maven-ci-friendly.html). Every module declares `<version>${revision}</version>`, and the single source of truth is the `<revision>` property in `java/pom.xml`. The committed value stays a `-SNAPSHOT` (for example `1.0.14-SNAPSHOT`) and is only used for local development and the daily snapshot publish.
+
+Releasing is intentionally a **read-only** operation that never mutates the repository:
+
+- The release version is computed by the shared release pipeline (`.github/workflows/publish.yml`) — the same version used by every other language SDK — and injected at build time with `-Drevision=X.Y.Z`. The POM is **not** edited or committed.
+- `.github/workflows/java-publish-maven.yml` builds every native classifier and the primary artifact from a single immutable source commit and publishes to Maven Central. It creates no commits, no branch-protection bypass, and requires no elevated repository token.
+- The `java/vX.Y.Z` traceability tag and the cross-language `vX.Y.Z` GitHub Release are created by `publish.yml` **after** publication succeeds, pointing at the original release commit.
+
+For an independent Java publication retry, dispatch `java-publish-maven.yml` from `main` with the original `releaseVersion` and full `sourceSha`. The source must be a commit already in `main`'s history. Unmerged commits, branch names, and tag names are rejected before builds run.
+
+Because there is no `maven-release-plugin` and no `release:prepare` ceremony, the POM deliberately does not track the "next" release version. To validate a build with an explicit version locally, without publishing:
+
+```bash
+# Build and verify with an explicit version, without touching the POM
+mvn clean verify -Drevision=1.2.3
+
+# Inspect the generated flattened POMs for the literal version (no ${revision})
+cat sdk/.flattened-pom.xml copilot-native/.flattened-pom.xml
+```
+
+These commands do not upload artifacts. Do not use `deploy` for local validation: the Central publishing plugin is configured with `autoPublish=true`.
+
+`flatten-maven-plugin` (ossrh mode) resolves `${revision}` into the installed and published POMs, so downstream consumers never see the unresolved property. Documentation version references are updated through a normal reviewed pull request (see `scripts/update-documentation-versions.sh`), not as a side effect of publishing.
+
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](../LICENSE) for details.

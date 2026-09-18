@@ -9,6 +9,141 @@ namespace GitHub.Copilot.Test.Unit;
 
 public class SessionEventSerializationTests
 {
+    public static TheoryData<AutoTier?, string?> AutoTiers => new()
+    {
+        { AutoTier.Efficiency, "efficiency" },
+        { AutoTier.Balance, "balance" },
+        { AutoTier.Intelligence, "intelligence" },
+        { AutoTier.Fast, "fast" },
+        { null, null },
+    };
+
+    [Theory]
+    [MemberData(nameof(AutoTiers))]
+    public void SessionEvent_Deserializes_AutoTier(AutoTier? expectedTier, string? wireTier)
+    {
+        foreach (var eventType in new[] { "session.start", "session.resume" })
+        {
+            var autoTierProperty = wireTier is null ? "" : $""", "autoTier": "{wireTier}" """;
+            var json = $$"""
+                {
+                    "id": "11111111-1111-1111-1111-111111111111",
+                    "timestamp": "2026-08-28T00:00:00Z",
+                    "parentId": null,
+                    "type": "{{eventType}}",
+                    "data": {
+                        "sessionId": "test-session", "version": 1,
+                        "producer": "copilot", "copilotVersion": "1.0.82-1",
+                        "startTime": "2026-08-28T00:00:00Z",
+                        "resumeTime": "2026-08-28T00:00:00Z", "eventCount": 1
+                        {{autoTierProperty}}
+                    }
+                }
+                """;
+
+            var sessionEvent = SessionEvent.FromJson(json);
+            var actualTier = eventType == "session.start"
+                ? Assert.IsType<SessionStartEvent>(sessionEvent).Data.AutoTier
+                : Assert.IsType<SessionResumeEvent>(sessionEvent).Data.AutoTier;
+            Assert.Equal(expectedTier, actualTier);
+        }
+    }
+
+    [Theory]
+    [InlineData("message-1")]
+    [InlineData(null)]
+    public void UserMessageEvent_MessageId_UsesCamelCaseAndIsOptional(string? messageId)
+    {
+        var messageIdProperty = messageId is null ? "" : $""", "messageId": "{messageId}" """;
+        var json = $$"""
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-08-28T00:00:00Z",
+                "parentId": null,
+                "type": "user.message",
+                "data": {
+                    "content": "hello"
+                    {{messageIdProperty}}
+                }
+            }
+            """;
+
+        var sessionEvent = Assert.IsType<UserMessageEvent>(SessionEvent.FromJson(json));
+        Assert.Equal(messageId, sessionEvent.Data.MessageId);
+
+        using var document = JsonDocument.Parse(sessionEvent.ToJson());
+        var data = document.RootElement.GetProperty("data");
+        if (messageId is null)
+        {
+            Assert.False(data.TryGetProperty("messageId", out _));
+        }
+        else
+        {
+            Assert.Equal(messageId, data.GetProperty("messageId").GetString());
+        }
+    }
+
+    public static TheoryData<string> AutoTierSwitchFailureReasons =>
+    [
+        "policy_rejected",
+        "request_failed",
+        "setup_failed",
+        "unsupported",
+    ];
+
+    [Theory]
+    [MemberData(nameof(AutoTierSwitchFailureReasons))]
+    public void SessionEvent_Deserializes_AutoTierSwitchFailed(string wireReason)
+    {
+        var json = $$"""
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-08-28T00:00:00Z",
+                "parentId": null,
+                "type": "session.auto_tier_switch_failed",
+                "data": {
+                    "effectiveAutoTier": "balance",
+                    "requestedAutoTier": "fast",
+                    "reason": "{{wireReason}}"
+                }
+            }
+            """;
+
+        var sessionEvent = SessionEvent.FromJson(json);
+
+        var data = Assert.IsType<SessionAutoTierSwitchFailedEvent>(sessionEvent).Data;
+        Assert.Equal(new AutoTierSwitchFailureReason(wireReason), data.Reason);
+        Assert.Equal(AutoTier.Balance, data.EffectiveAutoTier);
+        Assert.Equal(AutoTier.Fast, data.RequestedAutoTier);
+    }
+
+    [Fact]
+    public void SessionEvent_Deserializes_AutoTierSwitchFailed_WithNullRequestedTier()
+    {
+        // A null requested tier means the attempt to return to provider-default
+        // Auto routing is what failed.
+        var json = """
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-08-28T00:00:00Z",
+                "parentId": null,
+                "type": "session.auto_tier_switch_failed",
+                "data": {
+                    "effectiveAutoTier": "efficiency",
+                    "requestedAutoTier": null,
+                    "reason": "unsupported"
+                }
+            }
+            """;
+
+        var sessionEvent = SessionEvent.FromJson(json);
+
+        var data = Assert.IsType<SessionAutoTierSwitchFailedEvent>(sessionEvent).Data;
+        Assert.Null(data.RequestedAutoTier);
+        Assert.Equal(AutoTier.Efficiency, data.EffectiveAutoTier);
+        Assert.Equal(AutoTierSwitchFailureReason.Unsupported, data.Reason);
+    }
+
     public static TheoryData<SessionEvent, string> JsonElementBackedEvents => new()
     {
         {
@@ -367,5 +502,66 @@ public class SessionEventSerializationTests
 
         Assert.NotNull(authEvent.Data.StaticClientConfig);
         Assert.Equal("static-secret", authEvent.Data.StaticClientConfig.ClientSecret);
+    }
+
+    [Fact]
+    public void ManagedSettingsResolvedData_Preserves_Client_Provenance()
+    {
+        Assert.Equal("server", ManagedSettingsResolvedSource.Server.Value);
+        Assert.Equal("device", ManagedSettingsResolvedSource.Device.Value);
+        Assert.Equal("client", ManagedSettingsResolvedSource.Client.Value);
+        Assert.Equal("mixed", ManagedSettingsResolvedSource.Mixed.Value);
+        Assert.Equal("none", ManagedSettingsResolvedSource.None.Value);
+
+        const string clientJson = """
+            {
+              "id": "11111111-1111-1111-1111-111111111111",
+              "timestamp": "2026-03-15T21:26:54.987Z",
+              "parentId": null,
+              "type": "session.managed_settings_resolved",
+              "data": {
+                "source": "client",
+                "serverManaged": false,
+                "deviceManaged": false,
+                "clientManaged": true,
+                "failClosed": false,
+                "bypassPermissionsDisabled": true,
+                "managedKeys": ["permissions"]
+              }
+            }
+            """;
+
+        var clientEvent = Assert.IsType<SessionManagedSettingsResolvedEvent>(
+            SessionEvent.FromJson(clientJson));
+        Assert.Equal(ManagedSettingsResolvedSource.Client, clientEvent.Data.Source);
+        Assert.True(clientEvent.Data.ClientManaged);
+        using (var document = JsonDocument.Parse(clientEvent.ToJson()))
+        {
+            Assert.True(document.RootElement.GetProperty("data").GetProperty("clientManaged").GetBoolean());
+        }
+
+        const string mixedJson = """
+            {
+              "id": "22222222-2222-2222-2222-222222222222",
+              "timestamp": "2026-03-15T21:26:54.987Z",
+              "parentId": null,
+              "type": "session.managed_settings_resolved",
+              "data": {
+                "source": "mixed",
+                "serverManaged": true,
+                "deviceManaged": true,
+                "failClosed": false,
+                "bypassPermissionsDisabled": true,
+                "managedKeys": ["permissions"]
+              }
+            }
+            """;
+
+        var mixedEvent = Assert.IsType<SessionManagedSettingsResolvedEvent>(
+            SessionEvent.FromJson(mixedJson));
+        Assert.Equal(ManagedSettingsResolvedSource.Mixed, mixedEvent.Data.Source);
+        Assert.Null(mixedEvent.Data.ClientManaged);
+        using var mixedDocument = JsonDocument.Parse(mixedEvent.ToJson());
+        Assert.False(mixedDocument.RootElement.GetProperty("data").TryGetProperty("clientManaged", out _));
     }
 }

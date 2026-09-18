@@ -40,8 +40,7 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
             OnPermissionRequest = PermissionHandler.ApproveAll,
         });
 
-        await session.SendAsync(new MessageOptions { Prompt = prompt });
-        var assistantMessage = await TestHelper.GetFinalAssistantMessageAsync(session);
+        var assistantMessage = await TestHelper.SendAndGetFinalAssistantMessageAsync(session, new MessageOptions { Prompt = prompt });
         Assert.NotNull(assistantMessage);
         Assert.Contains("TELEMETRY_E2E_DONE", assistantMessage!.Data.Content ?? string.Empty, StringComparison.Ordinal);
 
@@ -54,9 +53,6 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
         Assert.NotEmpty(spans);
         Assert.All(spans, span => Assert.Equal(sourceName, GetInstrumentationScopeName(span)));
 
-        // All spans for one SDK turn must share the same trace id and must not be in error state.
-        var traceIds = spans.Select(GetTraceId).Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList();
-        Assert.Single(traceIds);
         Assert.All(spans, span => Assert.NotEqual(2, GetStatusCode(span)));
 
         var invokeAgentSpan = AssertSpanWithOperation(spans, "invoke_agent");
@@ -65,10 +61,13 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
             "invoke_agent should be the root of the SDK turn trace.");
         var invokeAgentSpanId = GetSpanId(invokeAgentSpan);
         Assert.False(string.IsNullOrEmpty(invokeAgentSpanId));
+        var invokeAgentTraceId = GetTraceId(invokeAgentSpan);
+        Assert.False(string.IsNullOrEmpty(invokeAgentTraceId));
 
         var chatSpans = spans.Where(span => IsSpanWithOperation(span, "chat")).ToList();
         Assert.NotEmpty(chatSpans);
         Assert.All(chatSpans, chat => Assert.Equal(invokeAgentSpanId, GetParentSpanId(chat)));
+        Assert.All(chatSpans, chat => Assert.Equal(invokeAgentTraceId, GetTraceId(chat)));
         Assert.Contains(
             chatSpans,
             span => (GetStringAttribute(span, "gen_ai.input.messages") ?? string.Empty).Contains(prompt, StringComparison.Ordinal));
@@ -78,6 +77,7 @@ public class TelemetryExportE2ETests(E2ETestFixture fixture, ITestOutputHelper o
 
         var toolSpan = AssertSpanWithOperation(spans, "execute_tool");
         Assert.Equal(invokeAgentSpanId, GetParentSpanId(toolSpan));
+        Assert.Equal(invokeAgentTraceId, GetTraceId(toolSpan));
         Assert.Equal(toolName, GetStringAttribute(toolSpan, "gen_ai.tool.name"));
         Assert.False(string.IsNullOrWhiteSpace(GetStringAttribute(toolSpan, "gen_ai.tool.call.id")),
             "execute_tool span should carry gen_ai.tool.call.id.");

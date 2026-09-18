@@ -180,6 +180,65 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     }
 
     [Fact]
+    public async Task Should_Forward_CustomAgentsLocalOnly_In_Create_Wire_Request()
+    {
+        var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
+
+        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForStdio(path: cliPath, args: ["--capture-file", capturePath]),
+            UseLoggedInUser = false,
+        });
+
+        await client.StartAsync();
+
+        var session = await client.CreateSessionAsync(new SessionConfig
+        {
+            CustomAgentsLocalOnly = false,
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+
+        using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var createRequest = GetCapturedRequestParams(capture.RootElement, "session.create");
+        Assert.False(createRequest.GetProperty("customAgentsLocalOnly").GetBoolean());
+
+        await session.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Should_Forward_CustomAgentsLocalOnly_In_Resume_Wire_Request()
+    {
+        var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
+
+        await using var client = Ctx.CreateClient(options: new CopilotClientOptions
+        {
+            Connection = RuntimeConnection.ForStdio(path: cliPath, args: ["--capture-file", capturePath]),
+            UseLoggedInUser = false,
+        });
+
+        await client.StartAsync();
+
+        var createSession = await client.CreateSessionAsync(new SessionConfig
+        {
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+        var sessionId = createSession.SessionId;
+        await createSession.DisposeAsync();
+
+        var resumeSession = await client.ResumeSessionAsync(sessionId, new ResumeSessionConfig
+        {
+            CustomAgentsLocalOnly = false,
+            OnPermissionRequest = PermissionHandler.ApproveAll,
+        });
+
+        using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
+        var resumeRequest = GetCapturedRequestParams(capture.RootElement, "session.resume");
+        Assert.False(resumeRequest.GetProperty("customAgentsLocalOnly").GetBoolean());
+
+        await resumeSession.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Should_Forward_Granular_Multitenancy_Fields_In_Create_Wire_Request()
     {
         var (cliPath, capturePath) = await CreateFakeCliCaptureAsync();
@@ -237,7 +296,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
             ClientName = "advanced-create-client",
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             ReasoningEffort = "medium",
             ReasoningSummary = ReasoningSummary.Detailed,
             ContextTier = ContextTier.LongContext,
@@ -320,7 +379,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                     Provider = "create-provider",
                     Id = "create-model",
                     Name = "Create Model",
-                    ModelId = "claude-sonnet-4.5",
+                    ModelId = "claude-sonnet-5",
                     WireModel = "create-wire-model",
                     MaxContextWindowTokens = 12_000,
                     MaxPromptTokens = 10_000,
@@ -333,7 +392,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         using var capture = JsonDocument.Parse(await File.ReadAllTextAsync(capturePath));
         var createRequest = GetCapturedRequestParams(capture.RootElement, "session.create");
         Assert.Equal("advanced-create-client", createRequest.GetProperty("clientName").GetString());
-        Assert.Equal("claude-sonnet-4.5", createRequest.GetProperty("model").GetString());
+        Assert.Equal("claude-sonnet-5", createRequest.GetProperty("model").GetString());
         Assert.Equal("medium", createRequest.GetProperty("reasoningEffort").GetString());
         Assert.Equal("detailed", createRequest.GetProperty("reasoningSummary").GetString());
         Assert.Equal("long_context", createRequest.GetProperty("contextTier").GetString());
@@ -383,7 +442,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             Provider = new ProviderConfig
             {
                 Type = "azure",
@@ -394,7 +453,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                 BearerToken = "provider-bearer-token",
                 Azure = new AzureOptions { ApiVersion = "2024-02-15-preview" },
                 Headers = new Dictionary<string, string> { ["X-Provider-Wire"] = "yes" },
-                ModelId = "claude-sonnet-4.5",
+                ModelId = "claude-sonnet-5",
                 WireModel = "azure-deployment",
                 MaxPromptTokens = 8192,
                 MaxOutputTokens = 1024,
@@ -412,7 +471,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.Equal("provider-bearer-token", provider.GetProperty("bearerToken").GetString());
         Assert.Equal("2024-02-15-preview", provider.GetProperty("azure").GetProperty("apiVersion").GetString());
         Assert.Equal("yes", provider.GetProperty("headers").GetProperty("X-Provider-Wire").GetString());
-        Assert.Equal("claude-sonnet-4.5", provider.GetProperty("modelId").GetString());
+        Assert.Equal("claude-sonnet-5", provider.GetProperty("modelId").GetString());
         Assert.Equal("azure-deployment", provider.GetProperty("wireModel").GetString());
         Assert.Equal(8192, provider.GetProperty("maxPromptTokens").GetInt32());
         Assert.Equal(1024, provider.GetProperty("maxOutputTokens").GetInt32());
@@ -451,6 +510,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.False(createRequest.GetProperty("enableHostGitOperations").GetBoolean());
         Assert.False(createRequest.GetProperty("enableSessionStore").GetBoolean());
         Assert.False(createRequest.GetProperty("enableSkills").GetBoolean());
+        Assert.True(createRequest.GetProperty("customAgentsLocalOnly").GetBoolean());
         Assert.False(createRequest.TryGetProperty("organizationCustomInstructions", out _));
 
         await session.DisposeAsync();
@@ -725,6 +785,7 @@ public class ClientOptionsE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.False(resumeRequest.GetProperty("enableHostGitOperations").GetBoolean());
         Assert.False(resumeRequest.GetProperty("enableSessionStore").GetBoolean());
         Assert.False(resumeRequest.GetProperty("enableSkills").GetBoolean());
+        Assert.True(resumeRequest.GetProperty("customAgentsLocalOnly").GetBoolean());
         Assert.False(resumeRequest.TryGetProperty("organizationCustomInstructions", out _));
 
         await session.DisposeAsync();

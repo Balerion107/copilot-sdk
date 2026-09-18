@@ -36,8 +36,10 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -144,19 +146,23 @@ func validateEnvironmentOptions(connection RuntimeConnection, opts *ClientOption
 //	}
 //	defer client.Stop()
 type Client struct {
-	options          ClientOptions
-	process          *exec.Cmd
-	client           *jsonrpc2.Client
-	actualPort       int
-	actualHost       string
-	state            connectionState
-	sessions         map[string]*Session
-	sessionsMux      sync.Mutex
-	isExternalServer bool
-	conn             net.Conn // stores net.Conn for external TCP connections
-	useStdio         bool     // resolved value from options
-	useInProcess     bool     // true for InProcessConnection (FFI transport)
-	ffiHost          inProcessHost
+	options                 ClientOptions
+	process                 *exec.Cmd
+	client                  *jsonrpc2.Client
+	actualPort              int
+	actualHost              string
+	state                   connectionState
+	sessions                map[string]*Session
+	sessionsMux             sync.Mutex
+	gitHubTokenProviders    map[string]GitHubTokenProvider
+	gitHubTokenProvidersMux sync.RWMutex
+	sessionOperations       map[string]*sessionOperation
+	sessionOperationsMux    sync.Mutex
+	isExternalServer        bool
+	conn                    net.Conn // stores net.Conn for external TCP connections
+	useStdio                bool     // resolved value from options
+	useInProcess            bool     // true for InProcessConnection (FFI transport)
+	ffiHost                 inProcessHost
 	// resolved process options for the spawned runtime (zero values for URIConnection)
 	cliPath            string
 	cliArgs            []string
@@ -188,6 +194,11 @@ type Client struct {
 	internalRPC *rpc.InternalServerRPC
 }
 
+type sessionOperation struct {
+	mutex sync.Mutex
+	users int
+}
+
 // NewClient creates a new Copilot runtime client with the given options.
 //
 // If options is nil, default options are used (spawns the bundled runtime over
@@ -214,17 +225,24 @@ func NewClient(options *ClientOptions) *Client {
 	opts := ClientOptions{}
 
 	client := &Client{
-		options:          opts,
-		state:            stateDisconnected,
-		sessions:         make(map[string]*Session),
-		actualHost:       "localhost",
-		isExternalServer: false,
-		useStdio:         true,
+		options:              opts,
+		state:                stateDisconnected,
+		sessions:             make(map[string]*Session),
+		gitHubTokenProviders: make(map[string]GitHubTokenProvider),
+		actualHost:           "localhost",
+		isExternalServer:     false,
+		useStdio:             true,
 	}
 
 	if options != nil {
 		opts = *options
 	}
+	for _, path := range opts.BuiltinPluginDirectories {
+		if !filepath.IsAbs(path) {
+			panic(fmt.Sprintf("BuiltinPluginDirectories must contain only absolute paths: %s", path))
+		}
+	}
+	opts.BuiltinPluginDirectories = append([]string(nil), opts.BuiltinPluginDirectories...)
 
 	// Resolve the connection. An explicit connection always wins; otherwise
 	// honor the same process/environment override as the other SDKs.
@@ -324,6 +342,18 @@ func NewClient(options *ClientOptions) *Client {
 	return client
 }
 
+func resolveRuntimeExecutable(explicitPath, bundledRuntimePath string) (string, error) {
+	if explicitPath != "" {
+		return explicitPath, nil
+	}
+	if bundledRuntimePath == "" {
+		return "", errors.New(
+			"managed Copilot runtime unavailable: the embedded bundle does not contain copilot-runtime and adjacent runtime.node; regenerate the bundle, provide an explicit path, or set COPILOT_CLI_PATH",
+		)
+	}
+	return bundledRuntimePath, nil
+}
+
 const defaultConnectionEnvVar = "COPILOT_SDK_DEFAULT_CONNECTION"
 
 // resolveDefaultConnection selects the transport when no explicit connection
@@ -372,12 +402,30 @@ func setEnvValue(env []string, key string, value string) []string {
 
 // parseCLIURL parses a CLI URL into host and port components.
 //
-// Supports formats: "host:port", "http://host:port", "https://host:port", or just "port".
+// Supports formats: "host:port", "[ipv6]:port", "http://host:port", "https://host:port", or just "port".
 // Panics if the URL format is invalid or the port is out of range.
 func parseCLIURL(url string) (string, int) {
 	// Remove protocol if present
 	cleanURL, _ := strings.CutPrefix(url, "https://")
 	cleanURL, _ = strings.CutPrefix(cleanURL, "http://")
+
+	// Use the standard parser only for the bracketed IPv6 form. Keep the
+	// existing host:port parsing behavior for all other inputs.
+	if strings.HasPrefix(cleanURL, "[") {
+		host, portStr, err := net.SplitHostPort(cleanURL)
+		if err != nil {
+			panic(fmt.Sprintf("Invalid port in URIConnection: %s", url))
+		}
+		addr, err := netip.ParseAddr(host)
+		if err != nil || !addr.Is6() {
+			panic(fmt.Sprintf("Invalid URIConnection format: %s", url))
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil || port <= 0 || port > 65535 {
+			panic(fmt.Sprintf("Invalid port in URIConnection: %s", url))
+		}
+		return host, port
+	}
 
 	// Parse host:port or port format
 	var host string
@@ -386,15 +434,13 @@ func parseCLIURL(url string) (string, int) {
 		host = before
 		portStr = after
 	} else {
-		// Only port provided
-		portStr = before
+		portStr = cleanURL
 	}
 
 	if host == "" {
 		host = "localhost"
 	}
 
-	// Validate port
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port <= 0 || port > 65535 {
 		panic(fmt.Sprintf("Invalid port in URIConnection: %s", url))
@@ -451,6 +497,21 @@ func (c *Client) Start(ctx context.Context) error {
 		killErr := c.killProcess()
 		c.state = stateError
 		return errors.Join(err, killErr)
+	}
+
+	if len(c.options.BuiltinPluginDirectories) > 0 {
+		if _, err := c.client.Request(ctx, "plugins.builtin.set", map[string]any{
+			"paths": c.options.BuiltinPluginDirectories,
+		}); err != nil {
+			c.client.Stop()
+			c.client = nil
+			c.conn = nil
+			c.RPC = nil
+			c.internalRPC = nil
+			killErr := c.killProcess()
+			c.state = stateError
+			return errors.Join(err, killErr)
+		}
 	}
 
 	// If a session filesystem provider was configured, register it.
@@ -526,6 +587,7 @@ func (c *Client) Stop() error {
 	c.sessionsMux.Lock()
 	c.sessions = make(map[string]*Session)
 	c.sessionsMux.Unlock()
+	c.clearGitHubTokenProviders()
 
 	c.startStopMux.Lock()
 	defer c.startStopMux.Unlock()
@@ -639,8 +701,16 @@ func (c *Client) ForceStop() {
 
 	// Clear sessions immediately without trying to destroy them
 	c.sessionsMux.Lock()
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, session := range c.sessions {
+		sessions = append(sessions, session)
+	}
 	c.sessions = make(map[string]*Session)
 	c.sessionsMux.Unlock()
+	for _, session := range sessions {
+		session.cancelPendingExternalTools()
+	}
+	c.clearGitHubTokenProviders()
 
 	c.startStopMux.Lock()
 	defer c.startStopMux.Unlock()
@@ -750,9 +820,26 @@ func extractTransformCallbacks(config *SystemMessageConfig) (*SystemMessageConfi
 	return wireConfig, callbacks
 }
 
+func hasManagedSettings(enableManagedSettings *bool, managedSettings *ManagedSettings) bool {
+	return (enableManagedSettings != nil && *enableManagedSettings) || managedSettings != nil
+}
+
+func validateAskUserVariant(variant AskUserVariant) error {
+	if variant != "" && variant != AskUserVariantLegacy && variant != AskUserVariantElicitation {
+		return fmt.Errorf("invalid AskUserVariant %q: expected %q, %q, or unset", variant, AskUserVariantLegacy, AskUserVariantElicitation)
+	}
+	return nil
+}
+
 func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Session, error) {
 	if config == nil {
 		config = &SessionConfig{}
+	}
+	if config.GitHubToken != "" && config.GitHubTokenProvider != nil {
+		return nil, fmt.Errorf("GitHubToken and GitHubTokenProvider cannot be used together")
+	}
+	if err := validateAskUserVariant(config.AskUserVariant); err != nil {
+		return nil, err
 	}
 
 	if err := c.ensureConnected(ctx); err != nil {
@@ -760,6 +847,14 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	}
 
 	c.applyConfigDefaultsForMode(config)
+
+	registrationID := c.registerGitHubTokenProvider(config.GitHubTokenProvider)
+	registrationTransferred := false
+	defer func() {
+		if !registrationTransferred {
+			c.unregisterGitHubTokenProvider(registrationID)
+		}
+	}()
 
 	req := createSessionRequest{}
 	req.Model = config.Model
@@ -793,17 +888,22 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	req.Capi = config.Capi
 	req.Providers = config.Providers
 	req.Models = config.Models
+	req.AskUserVariant = config.AskUserVariant
 	req.EnableSessionTelemetry = config.EnableSessionTelemetry
 	req.EnableCitations = config.EnableCitations
+	req.EnableFileChangeTracking = config.EnableFileChangeTracking
 	req.SessionLimits = config.SessionLimits
+	req.IsExperimentalMode = config.EnableExperimentalMode
 	req.SkipCustomInstructions = config.SkipCustomInstructions
 	req.CustomAgentsLocalOnly = config.CustomAgentsLocalOnly
 	req.CoauthorEnabled = config.CoauthorEnabled
 	req.ManageScheduleEnabled = config.ManageScheduleEnabled
 	req.ModelCapabilities = config.ModelCapabilities
 	req.WorkingDirectory = config.WorkingDirectory
+	req.AdditionalDirectories = config.AdditionalDirectories
 	req.MCPServers = config.MCPServers
 	req.MCPOAuthTokenStorage = config.MCPOAuthTokenStorage
+	req.AuthClientIDMetadataURL = config.AuthClientIDMetadataURL
 	req.EnvValueMode = "direct"
 	req.CustomAgents = config.CustomAgents
 	req.DefaultAgent = config.DefaultAgent
@@ -812,11 +912,15 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	req.PluginDirectories = config.PluginDirectories
 	req.InstructionDirectories = config.InstructionDirectories
 	req.DisabledSkills = config.DisabledSkills
+	if config.DisabledMCPServers != nil {
+		req.DisabledMCPServers = &config.DisabledMCPServers
+	}
 	req.InfiniteSessions = config.InfiniteSessions
 	req.LargeOutput = config.LargeOutput
 	req.ToolSearch = config.ToolSearch
 	req.Memory = config.Memory
 	req.GitHubToken = config.GitHubToken
+	req.GitHubTokenProviderRegistrationID = registrationID
 	req.RemoteSession = config.RemoteSession
 	req.Cloud = config.Cloud
 	req.Canvases = config.Canvases
@@ -827,7 +931,11 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	req.ExtensionSDKPath = config.ExtensionSDKPath
 	req.ExtensionInfo = config.ExtensionInfo
 	req.ExpAssignments = config.ExpAssignments
+	if config.FeatureFlags != nil {
+		req.FeatureFlags = &config.FeatureFlags
+	}
 	req.EnableManagedSettings = config.EnableManagedSettings
+	req.ManagedSettings = config.ManagedSettings
 
 	if len(config.Commands) > 0 {
 		cmds := make([]wireCommand, 0, len(config.Commands))
@@ -848,6 +956,7 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	if config.EnableMCPApps {
 		req.RequestMCPApps = Bool(true)
 	}
+	req.GitHubMCPToolConfig = config.GitHubMCPToolConfig
 
 	if config.Streaming != nil {
 		req.Streaming = config.Streaming
@@ -868,9 +977,11 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 		config.Hooks.OnPostToolUse != nil ||
 		config.Hooks.OnPostToolUseFailure != nil ||
 		config.Hooks.OnUserPromptSubmitted != nil ||
+		config.Hooks.OnUserPromptTransformed != nil ||
 		config.Hooks.OnSessionStart != nil ||
 		config.Hooks.OnSessionEnd != nil ||
-		config.Hooks.OnErrorOccurred != nil) {
+		config.Hooks.OnErrorOccurred != nil ||
+		config.Hooks.OnAgentStop != nil) {
 		req.Hooks = Bool(true)
 	}
 	if config.OnPermissionRequest != nil {
@@ -899,13 +1010,32 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	}
 	req.SessionID = localSessionID
 
+	// unregisterSession removes only the session created by this call and stops
+	// its event consumer. The latter is essential on CreateSession error paths:
+	// newSession starts processEvents eagerly, and no caller receives the failed
+	// session to disconnect it.
+	unregisterSession := func(sessionID string, s *Session) {
+		c.sessionsMux.Lock()
+		if c.sessions[sessionID] == s {
+			delete(c.sessions, sessionID)
+		}
+		c.sessionsMux.Unlock()
+		s.cancelPendingExternalTools()
+		s.stopEventProcessing()
+	}
+
 	// initializeSession creates the session, wires up handlers, and registers
 	// it in the sessions map. Invoked from the read loop the instant the
 	// session.create response arrives (synchronously, before the next
 	// message is dispatched) so notifications for the new session id are
 	// routed to a registered session.
 	initializeSession := func(sessionID string) (*Session, error) {
-		s := newSession(sessionID, c.client, "")
+		s := newSession(
+			sessionID,
+			c.client,
+			"",
+			hasManagedSettings(config.EnableManagedSettings, config.ManagedSettings),
+		)
 
 		s.registerTools(config.Tools)
 		s.registerPermissionHandler(config.OnPermissionRequest)
@@ -947,17 +1077,13 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 
 		if c.options.SessionFS != nil {
 			if config.CreateSessionFSProvider == nil {
-				c.sessionsMux.Lock()
-				delete(c.sessions, sessionID)
-				c.sessionsMux.Unlock()
+				unregisterSession(sessionID, s)
 				return nil, fmt.Errorf("CreateSessionFSProvider is required in session config when SessionFS is enabled in client options")
 			}
 			provider := config.CreateSessionFSProvider(s)
 			if c.options.SessionFS.Capabilities != nil && c.options.SessionFS.Capabilities.Sqlite {
 				if _, ok := provider.(SessionFSSqliteProvider); !ok {
-					c.sessionsMux.Lock()
-					delete(c.sessions, sessionID)
-					c.sessionsMux.Unlock()
+					unregisterSession(sessionID, s)
 					return nil, fmt.Errorf("SessionFS capabilities declare SQLite support but the provider does not implement SessionFSSqliteProvider")
 				}
 			}
@@ -1014,9 +1140,7 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	result, err := c.client.RequestWithInlineResponse(ctx, "session.create", req, inlineCb)
 	if err != nil {
 		if registeredSessionID != "" {
-			c.sessionsMux.Lock()
-			delete(c.sessions, registeredSessionID)
-			c.sessionsMux.Unlock()
+			unregisterSession(registeredSessionID, session)
 		}
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
@@ -1024,9 +1148,7 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	var response createSessionResponse
 	if err := json.Unmarshal(result, &response); err != nil {
 		if registeredSessionID != "" {
-			c.sessionsMux.Lock()
-			delete(c.sessions, registeredSessionID)
-			c.sessionsMux.Unlock()
+			unregisterSession(registeredSessionID, session)
 		}
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
@@ -1036,9 +1158,7 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	}
 
 	if localSessionID != "" && response.SessionID != "" && response.SessionID != localSessionID {
-		c.sessionsMux.Lock()
-		delete(c.sessions, registeredSessionID)
-		c.sessionsMux.Unlock()
+		unregisterSession(registeredSessionID, session)
 		return nil, fmt.Errorf("session.create returned sessionId %s but the caller requested %s", response.SessionID, localSessionID)
 	}
 	if config.OnMCPAuthRequest != nil {
@@ -1046,6 +1166,7 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 			"sessionId": session.SessionID,
 			"eventType": "mcp.oauth_required",
 		}); err != nil {
+			unregisterSession(registeredSessionID, session)
 			return nil, err
 		}
 	}
@@ -1058,10 +1179,18 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 		CustomAgentsLocalOnly:  config.CustomAgentsLocalOnly,
 		CoauthorEnabled:        config.CoauthorEnabled,
 		ManageScheduleEnabled:  config.ManageScheduleEnabled,
+		IncludedBuiltinSkills:  config.IncludedBuiltinSkills,
 	}); err != nil {
+		unregisterSession(registeredSessionID, session)
 		return nil, err
 	}
 
+	if registrationID != "" {
+		session.setGitHubTokenProviderRegistrationRelease(func() {
+			c.unregisterGitHubTokenProvider(registrationID)
+		})
+		registrationTransferred = true
+	}
 	return session, nil
 }
 
@@ -1089,8 +1218,17 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID string, config *Re
 //	    Tools: []copilot.Tool{myNewTool},
 //	})
 func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string, config *ResumeSessionConfig) (*Session, error) {
+	unlockSession := c.lockSessionOperation(sessionID)
+	defer unlockSession()
+
 	if config == nil {
 		config = &ResumeSessionConfig{}
+	}
+	if config.GitHubToken != "" && config.GitHubTokenProvider != nil {
+		return nil, fmt.Errorf("GitHubToken and GitHubTokenProvider cannot be used together")
+	}
+	if err := validateAskUserVariant(config.AskUserVariant); err != nil {
+		return nil, err
 	}
 
 	if err := c.ensureConnected(ctx); err != nil {
@@ -1098,6 +1236,14 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	}
 
 	c.applyResumeDefaultsForMode(config)
+
+	registrationID := c.registerGitHubTokenProvider(config.GitHubTokenProvider)
+	registrationTransferred := false
+	defer func() {
+		if !registrationTransferred {
+			c.unregisterGitHubTokenProvider(registrationID)
+		}
+	}()
 
 	var req resumeSessionRequest
 	req.SessionID = sessionID
@@ -1114,7 +1260,9 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	req.Capi = config.Capi
 	req.Providers = config.Providers
 	req.Models = config.Models
+	req.AskUserVariant = config.AskUserVariant
 	req.EnableSessionTelemetry = config.EnableSessionTelemetry
+	req.IsExperimentalMode = config.EnableExperimentalMode
 	req.SkipCustomInstructions = config.SkipCustomInstructions
 	req.CustomAgentsLocalOnly = config.CustomAgentsLocalOnly
 	req.CoauthorEnabled = config.CoauthorEnabled
@@ -1129,6 +1277,7 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	req.ToolFilterPrecedence = precedence
 	req.ExcludedBuiltInAgents = config.ExcludedBuiltInAgents
 	req.EnableCitations = config.EnableCitations
+	req.EnableFileChangeTracking = config.EnableFileChangeTracking
 	req.SessionLimits = config.SessionLimits
 	if config.Streaming != nil {
 		req.Streaming = config.Streaming
@@ -1149,12 +1298,15 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 		config.Hooks.OnPostToolUse != nil ||
 		config.Hooks.OnPostToolUseFailure != nil ||
 		config.Hooks.OnUserPromptSubmitted != nil ||
+		config.Hooks.OnUserPromptTransformed != nil ||
 		config.Hooks.OnSessionStart != nil ||
 		config.Hooks.OnSessionEnd != nil ||
-		config.Hooks.OnErrorOccurred != nil) {
+		config.Hooks.OnErrorOccurred != nil ||
+		config.Hooks.OnAgentStop != nil) {
 		req.Hooks = Bool(true)
 	}
 	req.WorkingDirectory = config.WorkingDirectory
+	req.AdditionalDirectories = config.AdditionalDirectories
 	req.ConfigDir = config.ConfigDirectory
 	req.EnableConfigDiscovery = config.EnableConfigDiscovery
 	req.SkipEmbeddingRetrieval = config.SkipEmbeddingRetrieval
@@ -1171,6 +1323,7 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	req.ContinuePendingWork = config.ContinuePendingWork
 	req.MCPServers = config.MCPServers
 	req.MCPOAuthTokenStorage = config.MCPOAuthTokenStorage
+	req.AuthClientIDMetadataURL = config.AuthClientIDMetadataURL
 	req.EnvValueMode = "direct"
 	req.CustomAgents = config.CustomAgents
 	req.DefaultAgent = config.DefaultAgent
@@ -1179,11 +1332,15 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	req.PluginDirectories = config.PluginDirectories
 	req.InstructionDirectories = config.InstructionDirectories
 	req.DisabledSkills = config.DisabledSkills
+	if config.DisabledMCPServers != nil {
+		req.DisabledMCPServers = &config.DisabledMCPServers
+	}
 	req.InfiniteSessions = config.InfiniteSessions
 	req.LargeOutput = config.LargeOutput
 	req.ToolSearch = config.ToolSearch
 	req.Memory = config.Memory
 	req.GitHubToken = config.GitHubToken
+	req.GitHubTokenProviderRegistrationID = registrationID
 	req.RemoteSession = config.RemoteSession
 	req.Canvases = config.Canvases
 	req.OpenCanvases = config.OpenCanvases
@@ -1194,7 +1351,11 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	req.ExtensionSDKPath = config.ExtensionSDKPath
 	req.ExtensionInfo = config.ExtensionInfo
 	req.ExpAssignments = config.ExpAssignments
+	if config.FeatureFlags != nil {
+		req.FeatureFlags = &config.FeatureFlags
+	}
 	req.EnableManagedSettings = config.EnableManagedSettings
+	req.ManagedSettings = config.ManagedSettings
 	if config.OnPermissionRequest != nil {
 		req.RequestPermission = Bool(true)
 	}
@@ -1218,6 +1379,7 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	if config.EnableMCPApps {
 		req.RequestMCPApps = Bool(true)
 	}
+	req.GitHubMCPToolConfig = config.GitHubMCPToolConfig
 
 	traceparent, tracestate := getTraceContext(ctx)
 	req.Traceparent = traceparent
@@ -1225,7 +1387,12 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 
 	// Create and register the session before issuing the RPC so that
 	// events emitted by the CLI (e.g. session.start) are not dropped.
-	session := newSession(sessionID, c.client, "")
+	session := newSession(
+		sessionID,
+		c.client,
+		"",
+		hasManagedSettings(config.EnableManagedSettings, config.ManagedSettings),
+	)
 
 	session.registerTools(config.Tools)
 	session.registerPermissionHandler(config.OnPermissionRequest)
@@ -1262,22 +1429,37 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	}
 
 	c.sessionsMux.Lock()
+	replacedSession := c.sessions[sessionID]
 	c.sessions[sessionID] = session
 	c.sessionsMux.Unlock()
 
+	restoreReplacedSession := func() {
+		c.sessionsMux.Lock()
+		if current := c.sessions[sessionID]; current == nil || current == session {
+			if replacedSession != nil {
+				c.sessions[sessionID] = replacedSession
+			} else {
+				delete(c.sessions, sessionID)
+			}
+		}
+		c.sessionsMux.Unlock()
+		session.cancelPendingExternalTools()
+		// newSession starts processEvents eagerly, before the RPC confirms the
+		// resume; every failure path here restores the previously-registered
+		// session (if any) but never returns this failed one to the caller, so
+		// its event consumer must be stopped here or it leaks forever.
+		session.stopEventProcessing()
+	}
+
 	if c.options.SessionFS != nil {
 		if config.CreateSessionFSProvider == nil {
-			c.sessionsMux.Lock()
-			delete(c.sessions, sessionID)
-			c.sessionsMux.Unlock()
+			restoreReplacedSession()
 			return nil, fmt.Errorf("CreateSessionFSProvider is required in session config when SessionFS is enabled in client options")
 		}
 		provider := config.CreateSessionFSProvider(session)
 		if c.options.SessionFS.Capabilities != nil && c.options.SessionFS.Capabilities.Sqlite {
 			if _, ok := provider.(SessionFSSqliteProvider); !ok {
-				c.sessionsMux.Lock()
-				delete(c.sessions, sessionID)
-				c.sessionsMux.Unlock()
+				restoreReplacedSession()
 				return nil, fmt.Errorf("SessionFS capabilities declare SQLite support but the provider does not implement SessionFSSqliteProvider")
 			}
 		}
@@ -1286,17 +1468,13 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 
 	result, err := c.client.Request(ctx, "session.resume", req)
 	if err != nil {
-		c.sessionsMux.Lock()
-		delete(c.sessions, sessionID)
-		c.sessionsMux.Unlock()
+		restoreReplacedSession()
 		return nil, fmt.Errorf("failed to resume session: %w", err)
 	}
 
 	var response resumeSessionResponse
 	if err := json.Unmarshal(result, &response); err != nil {
-		c.sessionsMux.Lock()
-		delete(c.sessions, sessionID)
-		c.sessionsMux.Unlock()
+		restoreReplacedSession()
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
@@ -1305,9 +1483,7 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 			"sessionId": sessionID,
 			"eventType": "mcp.oauth_required",
 		}); err != nil {
-			c.sessionsMux.Lock()
-			delete(c.sessions, sessionID)
-			c.sessionsMux.Unlock()
+			restoreReplacedSession()
 			return nil, err
 		}
 	}
@@ -1321,10 +1497,21 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 		CustomAgentsLocalOnly:  config.CustomAgentsLocalOnly,
 		CoauthorEnabled:        config.CoauthorEnabled,
 		ManageScheduleEnabled:  config.ManageScheduleEnabled,
+		IncludedBuiltinSkills:  config.IncludedBuiltinSkills,
 	}); err != nil {
+		restoreReplacedSession()
 		return nil, err
 	}
 
+	if registrationID != "" {
+		session.setGitHubTokenProviderRegistrationRelease(func() {
+			c.unregisterGitHubTokenProvider(registrationID)
+		})
+		registrationTransferred = true
+	}
+	if replacedSession != nil && replacedSession != session {
+		replacedSession.releaseGitHubTokenProviderRegistration()
+	}
 	return session, nil
 }
 
@@ -1416,6 +1603,9 @@ func (c *Client) GetSessionMetadata(ctx context.Context, sessionID string) (*Ses
 //	    log.Fatal(err)
 //	}
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
+	unlockSession := c.lockSessionOperation(sessionID)
+	defer unlockSession()
+
 	if err := c.ensureConnected(ctx); err != nil {
 		return err
 	}
@@ -1440,8 +1630,12 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 
 	// Remove from local sessions map if present
 	c.sessionsMux.Lock()
+	session := c.sessions[sessionID]
 	delete(c.sessions, sessionID)
 	c.sessionsMux.Unlock()
+	if session != nil {
+		session.releaseGitHubTokenProviderRegistration()
+	}
 
 	return nil
 }
@@ -1787,7 +1981,14 @@ func (c *Client) verifyProtocolVersion(ctx context.Context) error {
 		t := c.effectiveConnectionToken
 		tokenPtr = &t
 	}
-	connectReq := &connectHandshakeRequest{Token: tokenPtr}
+	connectReq := &connectHandshakeRequest{
+		Token: tokenPtr,
+		SupportedTaskKinds: []rpc.TaskKind{
+			rpc.TaskKindAgent,
+			rpc.TaskKindClient,
+			rpc.TaskKindShell,
+		},
+	}
 	// Opt in to GitHub telemetry forwarding at the connection level when a handler is
 	// registered (mirrors the runtime, which reads this flag on the `connect` handshake
 	// so the first session's un-replayable `session.start` event is forwarded). Also
@@ -1795,6 +1996,10 @@ func (c *Client) verifyProtocolVersion(ctx context.Context) error {
 	if c.options.OnGitHubTelemetry != nil {
 		connectReq.EnableGitHubTelemetryForwarding = Bool(true)
 	}
+	// Declare the integrating host's identity so the runtime attributes the
+	// telemetry it emits on this connection to a consistent surface instead of
+	// its own build. Nil when the app didn't supply it.
+	connectReq.ClientInfo = c.options.ClientInfo.toWire()
 	rawConnectResult, err := c.client.Request(ctx, "connect", connectReq)
 	if err != nil {
 		var rpcErr *jsonrpc2.Error
@@ -1831,8 +2036,10 @@ func (c *Client) verifyProtocolVersion(ctx context.Context) error {
 }
 
 type connectHandshakeRequest struct {
-	Token                           *string `json:"token,omitempty"`
-	EnableGitHubTelemetryForwarding *bool   `json:"enableGitHubTelemetryForwarding,omitempty"`
+	Token                           *string                `json:"token,omitempty"`
+	EnableGitHubTelemetryForwarding *bool                  `json:"enableGitHubTelemetryForwarding,omitempty"`
+	ClientInfo                      *rpc.ConnectClientInfo `json:"clientInfo,omitempty"`
+	SupportedTaskKinds              []rpc.TaskKind         `json:"supportedTaskKinds,omitempty"`
 }
 
 // stderrBufferSize is the maximum number of bytes kept from the CLI process's
@@ -1849,14 +2056,13 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 		return c.startInProcess(ctx)
 	}
 
-	cliPath := c.cliPath
-	if cliPath == "" {
-		// If no CLI path is provided, attempt to use the embedded CLI if available
-		cliPath = embeddedcli.Path()
+	bundledRuntimePath := ""
+	if c.cliPath == "" {
+		bundledRuntimePath = embeddedcli.RuntimePath()
 	}
-	if cliPath == "" {
-		// Default to "copilot" in PATH if no embedded CLI is available and no custom path is set
-		cliPath = "copilot"
+	cliPath, err := resolveRuntimeExecutable(c.cliPath, bundledRuntimePath)
+	if err != nil {
+		return err
 	}
 
 	// Start with user-provided CLIArgs, then add SDK-managed args
@@ -1983,15 +2189,7 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 		// Create JSON-RPC client immediately
 		c.client = jsonrpc2.NewClient(stdin, stdout)
 		c.client.SetProcessDone(c.processDone, c.processErrorPtr)
-		c.client.SetOnClose(func() {
-			// Run in a goroutine to avoid deadlocking with Stop/ForceStop,
-			// which hold startStopMux while waiting for readLoop to finish.
-			go func() {
-				c.startStopMux.Lock()
-				defer c.startStopMux.Unlock()
-				c.state = stateDisconnected
-			}()
-		})
+		c.client.SetOnClose(c.handleConnectionClose)
 		c.RPC = rpc.NewServerRPC(c.client)
 		c.internalRPC = rpc.NewInternalServerRPC(c.client)
 		c.setupNotificationHandler()
@@ -2065,24 +2263,21 @@ func (c *Client) startInProcess(ctx context.Context) error {
 		return errors.New("in-process transport unavailable: rebuild with -tags copilot_inprocess on a supported platform")
 	}
 
-	runtimePath := c.cliPath
+	cliEntrypoint := c.cliPath
+	if cliEntrypoint == "" {
+		cliEntrypoint = getEnvValue(c.options.Env, "COPILOT_CLI_PATH")
+	}
+	runtimePath := cliEntrypoint
 	if runtimePath == "" {
-		// The in-process transport does not resolve a bare command name from PATH
-		// (unlike the child-process transport).
-		if p := getEnvValue(c.options.Env, "COPILOT_CLI_PATH"); p != "" {
-			runtimePath = p
-		}
+		runtimePath = embeddedcli.RuntimePath()
 	}
 	if runtimePath == "" {
-		runtimePath = embeddedcli.Path()
-	}
-	if runtimePath == "" {
-		return errors.New("in-process runtime unavailable: set COPILOT_CLI_PATH to a compatible runtime package or build with the bundled embedded runtime")
+		return errors.New("in-process runtime unavailable: build with the bundled embedded runtime or set COPILOT_CLI_PATH to a compatible runtime package")
 	}
 
 	config := c.inProcessHostConfig()
 
-	host, err := createInProcessHost(runtimePath, config)
+	host, err := createInProcessHost(runtimePath, cliEntrypoint, config)
 	if err != nil {
 		return err
 	}
@@ -2110,15 +2305,7 @@ func (c *Client) startInProcess(ctx context.Context) error {
 	}
 
 	c.client = jsonrpc2.NewClient(host.Writer(), host.Reader())
-	c.client.SetOnClose(func() {
-		// Run in a goroutine to avoid deadlocking with Stop/ForceStop, which hold
-		// startStopMux while waiting for readLoop to finish.
-		go func() {
-			c.startStopMux.Lock()
-			defer c.startStopMux.Unlock()
-			c.state = stateDisconnected
-		}()
-	})
+	c.client.SetOnClose(c.handleConnectionClose)
 	c.RPC = rpc.NewServerRPC(c.client)
 	c.internalRPC = rpc.NewInternalServerRPC(c.client)
 	c.setupNotificationHandler()
@@ -2268,13 +2455,7 @@ func (c *Client) connectViaTCP(ctx context.Context) error {
 	if c.processDone != nil {
 		c.client.SetProcessDone(c.processDone, c.processErrorPtr)
 	}
-	c.client.SetOnClose(func() {
-		go func() {
-			c.startStopMux.Lock()
-			defer c.startStopMux.Unlock()
-			c.state = stateDisconnected
-		}()
-	})
+	c.client.SetOnClose(c.handleConnectionClose)
 	c.RPC = rpc.NewServerRPC(c.client)
 	c.internalRPC = rpc.NewInternalServerRPC(c.client)
 	c.setupNotificationHandler()
@@ -2305,20 +2486,130 @@ func (c *Client) setupNotificationHandler() {
 	// payload's sessionId. Always register the global handlers so the generated
 	// hooks.invoke handler is wired to our dispatcher.
 	handlers := &rpc.ClientGlobalAPIHandlers{
-		Hooks: &hooksAdapter{client: c},
+		Hooks:       &hooksAdapter{client: c},
+		GitHubToken: &gitHubTokenAdapter{client: c},
 	}
+
 	if c.options.RequestHandler != nil {
+		llmInference := c.RPC.LlmInference
 		handlers.LlmInference = newCopilotRequestAdapter(c.options.RequestHandler, func() *rpc.ServerLlmInferenceAPI {
-			if c.RPC == nil {
-				return nil
-			}
-			return c.RPC.LlmInference
+			return llmInference
 		})
 	}
 	if c.options.OnGitHubTelemetry != nil {
 		handlers.GitHubTelemetry = &gitHubTelemetryAdapter{callback: c.options.OnGitHubTelemetry}
 	}
 	rpc.RegisterClientGlobalAPIHandlers(c.client, handlers)
+}
+
+func (c *Client) registerGitHubTokenProvider(provider GitHubTokenProvider) string {
+	if provider == nil {
+		return ""
+	}
+	registrationID := uuid.NewString()
+	c.gitHubTokenProvidersMux.Lock()
+	if c.gitHubTokenProviders == nil {
+		c.gitHubTokenProviders = make(map[string]GitHubTokenProvider)
+	}
+	c.gitHubTokenProviders[registrationID] = provider
+	c.gitHubTokenProvidersMux.Unlock()
+	return registrationID
+}
+
+func (c *Client) unregisterGitHubTokenProvider(registrationID string) {
+	if registrationID == "" {
+		return
+	}
+	c.gitHubTokenProvidersMux.Lock()
+	delete(c.gitHubTokenProviders, registrationID)
+	c.gitHubTokenProvidersMux.Unlock()
+}
+
+func (c *Client) clearGitHubTokenProviders() {
+	c.gitHubTokenProvidersMux.Lock()
+	c.gitHubTokenProviders = make(map[string]GitHubTokenProvider)
+	c.gitHubTokenProvidersMux.Unlock()
+}
+
+func (c *Client) handleConnectionClose() {
+	c.clearGitHubTokenProviders()
+	c.sessionsMux.Lock()
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, session := range c.sessions {
+		sessions = append(sessions, session)
+	}
+	c.sessionsMux.Unlock()
+	for _, session := range sessions {
+		session.cancelPendingExternalTools()
+	}
+	// Avoid deadlocking with Stop/ForceStop, which hold startStopMux while
+	// waiting for the JSON-RPC read loop to finish.
+	go func() {
+		c.startStopMux.Lock()
+		defer c.startStopMux.Unlock()
+		c.state = stateDisconnected
+	}()
+}
+
+func (c *Client) lockSessionOperation(sessionID string) func() {
+	c.sessionOperationsMux.Lock()
+	if c.sessionOperations == nil {
+		c.sessionOperations = make(map[string]*sessionOperation)
+	}
+	operation := c.sessionOperations[sessionID]
+	if operation == nil {
+		operation = &sessionOperation{}
+		c.sessionOperations[sessionID] = operation
+	}
+	operation.users++
+	c.sessionOperationsMux.Unlock()
+
+	operation.mutex.Lock()
+	return func() {
+		operation.mutex.Unlock()
+		c.sessionOperationsMux.Lock()
+		operation.users--
+		if operation.users == 0 {
+			delete(c.sessionOperations, sessionID)
+		}
+		c.sessionOperationsMux.Unlock()
+	}
+}
+
+type gitHubTokenAdapter struct {
+	client *Client
+}
+
+func (a *gitHubTokenAdapter) GetToken(request *rpc.GitHubTokenAcquireRequest) (rpc.GitHubTokenAcquireResult, error) {
+	if request == nil {
+		return nil, fmt.Errorf("missing GitHub token acquire request")
+	}
+	a.client.gitHubTokenProvidersMux.RLock()
+	provider := a.client.gitHubTokenProviders[request.RegistrationID]
+	a.client.gitHubTokenProvidersMux.RUnlock()
+	if provider == nil {
+		return nil, fmt.Errorf("unknown GitHub token provider registration ID %q", request.RegistrationID)
+	}
+
+	result, err := provider(GitHubTokenProviderArgs{
+		Host:      request.Host,
+		SessionID: request.SessionID,
+		Reason:    request.Reason,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && result.Cancelled {
+		return &rpc.GitHubTokenAcquireResultCancelled{}, nil
+	}
+	if result == nil || result.Token == nil {
+		return nil, fmt.Errorf("GitHub token provider returned neither a token nor cancellation")
+	}
+	return &rpc.GitHubTokenAcquireResultToken{
+		AccessToken: result.Token.AccessToken,
+		TokenType:   result.Token.TokenType,
+		ExpiresIn:   result.Token.ExpiresIn,
+	}, nil
 }
 
 // gitHubTelemetryAdapter adapts the OnGitHubTelemetry option to the generated

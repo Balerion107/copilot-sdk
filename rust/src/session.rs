@@ -1,23 +1,26 @@
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::FutureExt;
 use parking_lot::Mutex as ParkingLotMutex;
 use serde_json::Value;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, warn};
+use tracing::{Instrument, error, warn};
 
 use crate::canvas::CanvasHandler;
 use crate::generated::api_types::{
-    LogRequest, ModelSwitchToRequest, OpenCanvasInstance, RegisterEventInterestParams,
+    LogRequest, ModelSwitchAutoTierRequest, ModelSwitchAutoTierResult, ModelSwitchToRequest,
+    OpenCanvasInstance, PermissionDecisionRequest, RegisterEventInterestParams,
     ToolsGetCurrentMetadataResult, rpc_methods,
 };
 use crate::generated::session_events::{
     CommandExecuteData, ElicitationRequestedData, ExternalToolRequestedData, McpOauthRequiredData,
-    SessionCanvasClosedData, SessionErrorData, SessionEventType,
+    SessionCanvasClosedData, SessionErrorData, SessionEventType, SessionIdleData, SessionMode,
 };
 use crate::handler::{
     AutoModeSwitchHandler, AutoModeSwitchResponse, ElicitationHandler, ExitPlanModeHandler,
@@ -30,12 +33,12 @@ use crate::session_fs::SessionFsProvider;
 use crate::trace_context::inject_trace_context;
 use crate::transforms::SystemMessageTransform;
 use crate::types::{
-    CommandContext, CommandDefinition, CommandHandler, CreateSessionResult, ElicitationRequest,
-    ElicitationResult, ExitPlanModeData, GetMessagesResponse, MessageOptions,
-    PermissionRequestData, RequestId, ResumeSessionConfig, ResumeSessionResult, SectionOverride,
-    SessionCapabilities, SessionConfig, SessionEvent, SessionId, SetModelOptions,
-    SystemMessageConfig, ToolInvocation, ToolResult, ToolResultExpanded, TraceContext,
-    UiInputOptions, ensure_attachment_display_names,
+    AutoTier, AutoTierPreference, CommandContext, CommandDefinition, CommandHandler,
+    CreateSessionResult, ElicitationRequest, ElicitationResult, ExitPlanModeData,
+    GetMessagesResponse, MessageOptions, PermissionRequestData, RequestId, ResumeSessionConfig,
+    ResumeSessionResult, SectionOverride, SessionCapabilities, SessionConfig, SessionEvent,
+    SessionId, SetModelOptions, SystemMessageConfig, ToolInvocation, ToolResult,
+    ToolResultExpanded, TraceContext, UiInputOptions, ensure_attachment_display_names,
 };
 use crate::{
     Client, Error, ErrorKind, JsonRpcResponse, SessionErrorKind, SessionEventNotification,
@@ -47,6 +50,31 @@ use crate::{
 /// `overrides_built_in_tool` set to `true`.
 const TOOL_SEARCH_TOOL_NAME: &str = "tool_search_tool";
 
+/// Default capacity of the per-session event broadcast buffer backing
+/// [`Session::subscribe`] and [`PreparedSession::subscribe`].
+///
+/// Override per session with
+/// [`SessionConfig::event_buffer_capacity`](crate::types::SessionConfig::event_buffer_capacity)
+/// or
+/// [`ResumeSessionConfig::event_buffer_capacity`](crate::types::ResumeSessionConfig::event_buffer_capacity).
+pub const DEFAULT_EVENT_BUFFER_CAPACITY: usize = 512;
+
+/// Validate a caller-supplied event buffer capacity and resolve the default.
+///
+/// Zero is rejected rather than clamped: a zero-capacity broadcast channel
+/// cannot exist, and silently substituting a different capacity would hide a
+/// caller bug.
+fn resolve_event_buffer_capacity(capacity: Option<usize>) -> Result<usize, Error> {
+    match capacity {
+        Some(0) => Err(Error::with_message(
+            ErrorKind::InvalidConfig,
+            "event_buffer_capacity must be greater than zero",
+        )),
+        Some(capacity) => Ok(capacity),
+        None => Ok(DEFAULT_EVENT_BUFFER_CAPACITY),
+    }
+}
+
 /// Bundle of the per-session callbacks the SDK dispatches to. Built from a
 /// [`SessionConfig`] / [`ResumeSessionConfig`] at
 /// [`Client::create_session`] / [`Client::resume_session`] time. Each
@@ -57,6 +85,7 @@ const TOOL_SEARCH_TOOL_NAME: &str = "tool_search_tool";
 #[derive(Clone)]
 pub(crate) struct SessionHandlers {
     pub permission: Option<Arc<dyn PermissionHandler>>,
+    pub managed_settings_enabled: bool,
     pub elicitation: Option<Arc<dyn ElicitationHandler>>,
     pub mcp_auth: Option<Arc<dyn McpAuthHandler>>,
     pub user_input: Option<Arc<dyn UserInputHandler>>,
@@ -65,12 +94,138 @@ pub(crate) struct SessionHandlers {
     pub tools: Arc<HashMap<String, Arc<dyn crate::tool::ToolHandler>>>,
 }
 
+type PendingExternalTools = Arc<ParkingLotMutex<HashMap<RequestId, Arc<CancellationToken>>>>;
+
+struct PendingExternalToolGuard {
+    request_id: RequestId,
+    token: Arc<CancellationToken>,
+    pending: PendingExternalTools,
+}
+
+impl Drop for PendingExternalToolGuard {
+    fn drop(&mut self) {
+        let mut pending = self.pending.lock();
+        if pending
+            .get(&self.request_id)
+            .is_some_and(|token| Arc::ptr_eq(token, &self.token))
+        {
+            pending.remove(&self.request_id);
+        }
+    }
+}
+
+impl PendingExternalToolGuard {
+    fn claim(&self) -> bool {
+        let mut pending = self.pending.lock();
+        if pending
+            .get(&self.request_id)
+            .is_some_and(|token| Arc::ptr_eq(token, &self.token))
+        {
+            pending.remove(&self.request_id);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn has_managed_settings(
+    enable_managed_settings: Option<bool>,
+    managed_settings: Option<&crate::types::ManagedSettings>,
+) -> bool {
+    enable_managed_settings == Some(true) || managed_settings.is_some()
+}
+
 /// Shared state between a [`Session`] and its event loop, used by [`Session::send_and_wait`].
 struct IdleWaiter {
     tx: oneshot::Sender<Result<Option<SessionEvent>, Error>>,
     last_assistant_message: Option<SessionEvent>,
     started_at: Instant,
     first_assistant_message_seen: bool,
+}
+
+fn structured_output_error(message: impl Into<String>) -> Error {
+    Error::with_message(
+        ErrorKind::Session(SessionErrorKind::AgentError),
+        message.into(),
+    )
+}
+
+fn is_structured_output_event(event: &SessionEvent) -> bool {
+    matches!(
+        event.parsed_type(),
+        SessionEventType::UserMessage
+            | SessionEventType::AssistantMessage
+            | SessionEventType::SessionIdle
+            | SessionEventType::SessionError
+    )
+}
+
+struct StructuredOutputState {
+    message_id: String,
+    started: bool,
+    final_message: Option<SessionEvent>,
+}
+
+impl StructuredOutputState {
+    fn observe(&mut self, event: SessionEvent) -> Result<Option<SessionEvent>, Error> {
+        if event.agent_id.as_deref().is_some_and(|id| !id.is_empty()) {
+            return Ok(None);
+        }
+        match event.parsed_type() {
+            SessionEventType::UserMessage => {
+                let data: crate::session_events::UserMessageData =
+                    serde_json::from_value(event.data)?;
+                if data.message_id.as_deref() == Some(self.message_id.as_str()) {
+                    self.started = true;
+                }
+            }
+            SessionEventType::AssistantMessage => {
+                let data: crate::session_events::AssistantMessageData =
+                    serde_json::from_value(event.data.clone())?;
+                if data.originating_message_id.as_deref() == Some(self.message_id.as_str()) {
+                    self.started = true;
+                    self.final_message =
+                        if data.tool_requests.is_some_and(|tools| !tools.is_empty()) {
+                            None
+                        } else {
+                            Some(event)
+                        };
+                }
+            }
+            SessionEventType::SessionIdle if self.started => {
+                let data: SessionIdleData = serde_json::from_value(event.data)?;
+                if data.mode == Some(SessionMode::Autopilot) {
+                    return Ok(None);
+                }
+                if data.aborted == Some(true) {
+                    return Err(structured_output_error(
+                        "session aborted before structured output completed",
+                    ));
+                }
+                let result = self.final_message.take().ok_or_else(|| {
+                    structured_output_error("run completed without a structured assistant response")
+                })?;
+                let data: crate::session_events::AssistantMessageData =
+                    serde_json::from_value(result.data.clone())?;
+                if data.content.trim().is_empty() {
+                    return Err(structured_output_error(
+                        "run completed without a structured assistant response",
+                    ));
+                }
+                return Ok(Some(result));
+            }
+            SessionEventType::SessionError if self.started => {
+                let data: SessionErrorData = serde_json::from_value(event.data)?;
+                return Err(structured_output_error(format!(
+                    "session error: {}",
+                    data.message
+                )));
+            }
+            _ => {}
+        }
+        Ok(None)
+    }
 }
 
 /// RAII guard that clears the [`Session::idle_waiter`] slot on drop. Used
@@ -96,25 +251,88 @@ impl Drop for WaiterGuard {
 
 struct PendingSessionRegistration {
     client: Client,
-    session_id: SessionId,
+    session_id: PendingSessionId,
     shutdown: CancellationToken,
+    external_tools_shutdown: CancellationToken,
     disarmed: bool,
 }
 
+/// Which session ID a [`PendingSessionRegistration`] should unregister on
+/// cleanup.
+///
+/// `session.create` for cloud sessions without a caller-pinned ID does not
+/// know the ID until the response arrives, at which point the inline
+/// response callback registers it and stashes it. The guard therefore reads
+/// the stash at cleanup time instead of capturing an ID up front.
+enum PendingSessionId {
+    /// The ID was known before the RPC was issued (resume, and create with a
+    /// client- or caller-supplied ID).
+    Known(SessionId, crate::router::RegistrationToken),
+    /// Server-assigned ID, populated by the `session.create` inline response
+    /// callback. `None` in the stash means nothing was ever registered.
+    Deferred(Arc<ParkingLotMutex<Option<(SessionId, crate::router::SessionRegistration)>>>),
+}
+
 impl PendingSessionRegistration {
-    fn new(client: Client, session_id: SessionId, shutdown: CancellationToken) -> Self {
+    fn new(
+        client: Client,
+        session_id: SessionId,
+        token: crate::router::RegistrationToken,
+        shutdown: CancellationToken,
+        external_tools_shutdown: CancellationToken,
+    ) -> Self {
         Self {
             client,
-            session_id,
+            session_id: PendingSessionId::Known(session_id, token),
             shutdown,
+            external_tools_shutdown,
             disarmed: false,
         }
     }
 
+    /// Guard for a registration whose session ID is assigned by the server.
+    fn deferred(
+        client: Client,
+        stash: Arc<ParkingLotMutex<Option<(SessionId, crate::router::SessionRegistration)>>>,
+        shutdown: CancellationToken,
+        external_tools_shutdown: CancellationToken,
+    ) -> Self {
+        Self {
+            client,
+            session_id: PendingSessionId::Deferred(stash),
+            shutdown,
+            external_tools_shutdown,
+            disarmed: false,
+        }
+    }
+
+    fn registered_id(&self) -> Option<SessionId> {
+        match &self.session_id {
+            PendingSessionId::Known(id, _) => Some(id.clone()),
+            PendingSessionId::Deferred(stash) => stash.lock().as_ref().map(|(id, _)| id.clone()),
+        }
+    }
+
+    /// Re-target the guard at a now-known session ID. Used by
+    /// `session.create` once the response has been parsed and the stash has
+    /// been drained into the event loop.
+    fn resolve_to(&mut self, session_id: SessionId, token: crate::router::RegistrationToken) {
+        self.session_id = PendingSessionId::Known(session_id, token);
+    }
+
     async fn cleanup(mut self, event_loop: JoinHandle<()>) {
+        self.external_tools_shutdown.cancel();
         self.shutdown.cancel();
         let _ = event_loop.await;
-        self.client.unregister_session(&self.session_id);
+        if let Some(id) = self.registered_id() {
+            if let PendingSessionId::Known(_, token) = self.session_id {
+                self.client.unregister_session_owned(&id, token);
+            } else if let PendingSessionId::Deferred(stash) = &self.session_id
+                && let Some((id, registration)) = stash.lock().as_ref()
+            {
+                self.client.unregister_session_owned(id, registration.token);
+            }
+        }
         self.disarmed = true;
     }
 
@@ -126,8 +344,17 @@ impl PendingSessionRegistration {
 impl Drop for PendingSessionRegistration {
     fn drop(&mut self) {
         if !self.disarmed {
+            self.external_tools_shutdown.cancel();
             self.shutdown.cancel();
-            self.client.unregister_session(&self.session_id);
+            if let Some(id) = self.registered_id() {
+                if let PendingSessionId::Known(_, token) = self.session_id {
+                    self.client.unregister_session_owned(&id, token);
+                } else if let PendingSessionId::Deferred(stash) = &self.session_id
+                    && let Some((id, registration)) = stash.lock().as_ref()
+                {
+                    self.client.unregister_session_owned(id, registration.token);
+                }
+            }
         }
     }
 }
@@ -169,6 +396,9 @@ pub struct Session {
     /// via [`Session::cancellation_token`] to bind their own work to
     /// the session lifetime.
     shutdown: CancellationToken,
+    /// Cancels only host-owned external tool callbacks. Disconnect signals this
+    /// before the destroy RPC without stopping unrelated event delivery.
+    external_tools_shutdown: CancellationToken,
     /// Only populated while a `send_and_wait` call is in flight.
     ///
     /// Sync `parking_lot::Mutex` because the lock is never held across an
@@ -182,6 +412,10 @@ pub struct Session {
     open_canvases: Arc<parking_lot::RwLock<Vec<OpenCanvasInstance>>>,
     /// Broadcast channel for runtime event subscribers — see [`Session::subscribe`].
     event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
+    github_token_registration:
+        ParkingLotMutex<Option<crate::github_token::GitHubTokenRegistration>>,
+    /// Identity of this session's router registration.
+    registration_token: crate::router::RegistrationToken,
 }
 
 impl Session {
@@ -313,10 +547,15 @@ impl Session {
     /// Stop the internal event loop. Called automatically on [`destroy`](Self::destroy).
     ///
     /// Cooperative: signals shutdown via the session's [`CancellationToken`]
-    /// and awaits the loop's natural exit rather than aborting the task.
-    /// Any in-flight handler (permission callback, tool call, elicitation
-    /// response) completes before the loop exits, so the CLI never sees a
-    /// half-handled request. See RFD-400 review finding #3.
+    /// and awaits the loop's natural exit rather than aborting the task, so
+    /// the loop always stops between iterations instead of at an arbitrary
+    /// await point. See RFD-400 review finding #3.
+    ///
+    /// Inbound requests are dispatched to their own spawned tasks, which this
+    /// call does not await. A handler (permission callback, tool call,
+    /// elicitation response) still running at teardown may therefore outlive
+    /// the loop, and its response can be lost if the connection closes first.
+    /// Await your own handler work before calling this if it must complete.
     pub async fn stop_event_loop(&self) {
         self.shutdown.cancel();
         let handle = self.event_loop.lock().take();
@@ -367,6 +606,9 @@ impl Session {
             "sessionId": self.id,
             "prompt": opts.prompt,
         });
+        if let Some(source) = opts.source {
+            params["source"] = serde_json::to_value(source)?;
+        }
         if let Some(m) = opts.mode {
             params["mode"] = serde_json::to_value(m)?;
         }
@@ -384,6 +626,12 @@ impl Session {
         }
         if let Some(display_prompt) = opts.display_prompt {
             params["displayPrompt"] = serde_json::to_value(display_prompt)?;
+        }
+        if let Some(schema) = opts.response_schema {
+            params["responseFormat"] = serde_json::json!({
+                "type": "json_schema",
+                "jsonSchema": { "name": "response", "strict": true, "schema": schema }
+            });
         }
         let trace_ctx = if opts.traceparent.is_some() || opts.tracestate.is_some() {
             TraceContext {
@@ -418,9 +666,11 @@ impl Session {
     /// returning the last `assistant.message` event captured during streaming.
     /// Times out after `MessageOptions::wait_timeout` (default 60 seconds).
     ///
-    /// Only one `send_and_wait` call may be active per session at a time.
-    /// Calling [`send`](Self::send) while a `send_and_wait`
-    /// is in flight will also return an error.
+    /// Only one unformatted `send_and_wait` may be active per session. Calling
+    /// [`send`](Self::send) during that wait also returns an error. Schema-bearing
+    /// waits instead correlate by originating message ID and support concurrency.
+    /// They select the last root message without tool requests at non-autopilot
+    /// idle, failing on aborted idle, session errors after starting, or no result.
     ///
     /// # Cancel safety
     ///
@@ -435,6 +685,9 @@ impl Session {
     ) -> Result<Option<SessionEvent>, Error> {
         let total_start = Instant::now();
         let opts = opts.into();
+        if opts.response_schema.is_some() {
+            return self.send_and_wait_structured(opts).await.map(Some);
+        }
         let timeout_duration = opts.wait_timeout.unwrap_or(Duration::from_secs(60));
         let (tx, rx) = oneshot::channel();
 
@@ -490,6 +743,82 @@ impl Session {
         }
     }
 
+    /// Infer an output schema with the same `schemars` integration as custom tools,
+    /// then deserialize the final correlated root response at non-autopilot idle.
+    ///
+    /// Requires the `derive` feature. Provider schema restrictions apply. Serde
+    /// validates JSON/type compatibility, not every JSON Schema constraint.
+    /// Options must not specify a schema or immediate delivery. Dropping this
+    /// future or timing out unsubscribes the wait without aborting agent work.
+    #[cfg(feature = "derive")]
+    pub async fn send_and_wait_typed<T>(&self, opts: impl Into<MessageOptions>) -> Result<T, Error>
+    where
+        T: schemars::JsonSchema + serde::de::DeserializeOwned,
+    {
+        let mut opts = opts.into();
+        if opts.response_schema.is_some()
+            || opts.mode == Some(crate::types::DeliveryMode::Immediate)
+        {
+            return Err(Error::with_message(
+                ErrorKind::InvalidConfig,
+                "typed structured output cannot specify a response schema or immediate delivery",
+            ));
+        }
+        opts.response_schema = Some(crate::tool::schema_for::<T>());
+        let event = self.send_and_wait_structured(opts).await?;
+        let data: crate::session_events::AssistantMessageData = serde_json::from_value(event.data)?;
+        serde_json::from_str::<Option<T>>(&data.content)?.ok_or_else(|| {
+            structured_output_error("structured response was JSON null, not a result")
+        })
+    }
+
+    async fn send_and_wait_structured(&self, opts: MessageOptions) -> Result<SessionEvent, Error> {
+        let duration = opts.wait_timeout.unwrap_or(Duration::from_secs(60));
+        let mut events = self.subscribe();
+        let wait = async {
+            let mut admission = Box::pin(self.send(opts));
+            let mut pending = Vec::new();
+            let message_id = loop {
+                tokio::select! {
+                    result = &mut admission => break result?,
+                    event = events.recv() => {
+                        let event = event.map_err(|err| structured_output_error(err.to_string()))?;
+                        if is_structured_output_event(&event) {
+                            pending.push(event);
+                        }
+                    }
+                    _ = self.shutdown.cancelled() =>
+                        return Err(structured_output_error("session closed before structured output completed")),
+                }
+            };
+            let mut state = StructuredOutputState {
+                message_id,
+                started: false,
+                final_message: None,
+            };
+            for event in pending {
+                if let Some(result) = state.observe(event)? {
+                    return Ok(result);
+                }
+            }
+            loop {
+                tokio::select! {
+                    event = events.recv() => {
+                        let event = event.map_err(|err| structured_output_error(err.to_string()))?;
+                        if let Some(result) = state.observe(event)? {
+                            return Ok(result);
+                        }
+                    }
+                    _ = self.shutdown.cancelled() =>
+                        return Err(structured_output_error("session closed before structured output completed")),
+                }
+            }
+        };
+        tokio::time::timeout(duration, wait)
+            .await
+            .map_err(|_| Error::from(ErrorKind::Session(SessionErrorKind::Timeout(duration))))?
+    }
+
     /// Retrieve the session's timeline events.
     pub async fn get_events(&self) -> Result<Vec<SessionEvent>, Error> {
         let result = self
@@ -531,21 +860,89 @@ impl Session {
     /// Pass `None` for `opts` if no extra configuration is needed.
     pub async fn set_model(&self, model: &str, opts: Option<SetModelOptions>) -> Result<(), Error> {
         let opts = opts.unwrap_or_default();
+        let auto_tier = opts.auto_tier.clone();
         let request = ModelSwitchToRequest {
+            auto_tier: match &auto_tier {
+                Some(AutoTierPreference::Tier(tier)) => Some(tier.clone()),
+                _ => None,
+            },
+            compaction_decision: None,
+            context_tier: opts.context_tier,
+            defer_if_model_change_queued: None,
+            model_capabilities: opts.model_capabilities,
+            model_change_scope: None,
             model_id: model.to_string(),
+            picker_persistence: None,
             reasoning_effort: opts.reasoning_effort,
             reasoning_summary: opts.reasoning_summary,
+            repo_scope: None,
+            require_available: None,
+            run_compaction_preflight: None,
+            source: None,
             verbosity: None,
-            context_tier: opts.context_tier,
-            model_capabilities: opts.model_capabilities,
         };
+
+        if matches!(auto_tier, Some(AutoTierPreference::Reset)) {
+            // The generated request skips a `None` tier, which the runtime reads
+            // as "leave the preference alone" rather than "use provider-default
+            // routing", so send an explicit null instead.
+            let mut wire_params = serde_json::to_value(request)?;
+            wire_params["sessionId"] = serde_json::Value::String(self.id.to_string());
+            wire_params["autoTier"] = serde_json::Value::Null;
+            self.client
+                .call("session.model.switchTo", Some(wire_params))
+                .await?;
+            return Ok(());
+        }
+
         self.rpc().model().switch_to(request).await?;
         Ok(())
     }
 
+    /// Change the Auto routing preference without changing the selected model.
+    ///
+    /// The runtime does not apply the preference immediately. It records the
+    /// request and commits it only when a later user turn using the `auto`
+    /// model successfully obtains a usable model from the provider. A
+    /// [`ModelSwitchAutoTierStatus::Pending`] status therefore confirms that the
+    /// request was accepted, not that it took effect.
+    ///
+    /// Watch for the outcome through the `session.model_change` event on
+    /// success, or the ephemeral `session.auto_tier_switch_failed` event on
+    /// failure. You can also read the current committed and in-flight state at
+    /// any time through `session.rpc().model().get_current()`.
+    ///
+    /// Only the most recent request survives: issuing a new request replaces any
+    /// earlier one that has not yet been claimed by a turn.
+    ///
+    /// Pass `None` to return to the provider's default Auto routing.
+    ///
+    /// **Experimental.** Part of an experimental Auto routing surface and may
+    /// change or be removed in a future release.
+    ///
+    /// # Cancel safety
+    ///
+    /// **Cancel-safe.** Single `session.model.switchAutoTier` RPC; the
+    /// underlying [`Client::call`](crate::Client::call) is cancel-safe via the
+    /// writer-actor.
+    ///
+    /// [`ModelSwitchAutoTierStatus::Pending`]: crate::generated::api_types::ModelSwitchAutoTierStatus::Pending
+    pub async fn set_auto_tier(
+        &self,
+        auto_tier: Option<AutoTier>,
+    ) -> Result<ModelSwitchAutoTierResult, Error> {
+        self.rpc()
+            .model()
+            .switch_auto_tier(ModelSwitchAutoTierRequest {
+                auto_tier,
+                source: None,
+            })
+            .await
+    }
+
     /// Disconnect this session from the CLI.
     ///
-    /// Sends the `session.destroy` RPC, stops the event loop, and unregisters
+    /// Sends the `session.detach` RPC, stops the event loop, and unregisters
     /// the session from the client. **Session state on disk** (conversation
     /// history, planning state, artifacts) is **preserved**, so the
     /// conversation can be resumed later via [`Client::resume_session`]
@@ -560,20 +957,16 @@ impl Session {
     /// [`Client::delete_session`]: crate::Client::delete_session
     /// [`send_and_wait`]: Self::send_and_wait
     pub async fn disconnect(&self) -> Result<(), Error> {
-        self.client
-            .call(
-                "session.destroy",
-                Some(serde_json::json!({ "sessionId": self.id })),
-            )
-            .await?;
+        self.client.detach_session(&self.id).await?;
+        self.external_tools_shutdown.cancel();
         self.stop_event_loop().await;
-        self.client.unregister_session(&self.id);
+        self.github_token_registration.lock().take();
+        self.client
+            .unregister_session_owned(&self.id, self.registration_token);
         Ok(())
     }
 
-    /// Deprecated alias for [`disconnect`](Self::disconnect). The
-    /// underlying wire RPC happens to be named `session.destroy`, but it
-    /// only severs the connection — on-disk session state is preserved.
+    /// Deprecated alias for [`disconnect`](Self::disconnect).
     /// Prefer `disconnect` in new code.
     #[deprecated(since = "0.1.0", note = "Use `disconnect()` instead")]
     pub async fn destroy(&self) -> Result<(), Error> {
@@ -634,17 +1027,20 @@ impl Drop for Session {
     fn drop(&mut self) {
         // Cooperative shutdown: cancel the event loop's token to signal
         // exit between iterations. The loop will see the cancellation on
-        // its next select poll and break cleanly without interrupting an
-        // in-flight handler. We do NOT abort the JoinHandle — that would
-        // land at any await point in the loop body, potentially leaving
-        // the CLI with an unanswered request id. RFD-400 review finding
-        // #3.
+        // its next select poll and break cleanly. We do NOT abort the
+        // JoinHandle — that would land at any await point in the loop body,
+        // potentially leaving the CLI with an unanswered request id.
+        // RFD-400 review finding #3. Requests already dispatched to their
+        // own tasks are not tracked here and may outlive the session.
         //
         // The handle itself is left in `event_loop` to be reaped by the
         // tokio runtime when it next polls; we intentionally don't await
         // it here because Drop is sync.
         self.shutdown.cancel();
-        self.client.unregister_session(&self.id);
+        self.external_tools_shutdown.cancel();
+        self.github_token_registration.lock().take();
+        self.client
+            .unregister_session_owned(&self.id, self.registration_token);
     }
 }
 
@@ -786,6 +1182,102 @@ impl<'a> SessionUi<'a> {
 }
 
 impl Client {
+    /// Prepare a new session without touching the transport.
+    ///
+    /// Returns a [`PreparedSession`] that owns the session's event broadcast
+    /// channel, so callers can install an
+    /// [`EventSubscription`](crate::subscription::EventSubscription) via
+    /// [`PreparedSession::subscribe`] *before* any protocol activity starts.
+    /// Call [`PreparedSession::start`] to actually create the session.
+    ///
+    /// This is the loss-free entry point for consumers that must observe
+    /// every *routed* event a session emits, including events the CLI emits
+    /// while `session.create` is still in flight and ephemeral events (such
+    /// as `session.idle`) that cannot be recovered from
+    /// [`Session::get_messages`]. [`create_session`](Self::create_session)
+    /// is a thin wrapper over `prepare_session(...)?.start()` and cannot
+    /// offer the same guarantee, because the subscription can only be
+    /// installed after the returned `Session` exists.
+    ///
+    /// Routing requires a known session ID. When the server assigns the ID,
+    /// the SDK cannot register the session on its notification router until
+    /// the `session.create` response arrives, so notifications emitted
+    /// before that point are not routable and stay unobservable. Pin
+    /// [`SessionConfig::session_id`](crate::types::SessionConfig::session_id)
+    /// for complete pre-response coverage — see the "Server-assigned session
+    /// IDs" section on [`PreparedSession`].
+    ///
+    /// # Inertness
+    ///
+    /// `prepare_session` performs no router registration, spawns no task,
+    /// and writes nothing to the wire. It only validates
+    /// [`event_buffer_capacity`](SessionConfig::event_buffer_capacity),
+    /// allocates a local broadcast channel and cancellation token, and
+    /// stores the config. Dropping the returned handle without starting it
+    /// leaves no client-side or server-side state behind and closes every
+    /// subscription taken from it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidConfig`] if
+    /// [`event_buffer_capacity`](SessionConfig::event_buffer_capacity) is
+    /// `Some(0)`. All other configuration and protocol errors surface from
+    /// [`PreparedSession::start`], with the same
+    /// [`ErrorKind`]s [`create_session`](Self::create_session) has always
+    /// returned.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use github_copilot_sdk::{Client, SessionConfig};
+    /// # async fn example(client: Client) -> Result<(), github_copilot_sdk::Error> {
+    /// let prepared = client.prepare_session(SessionConfig::default())?;
+    /// let mut events = prepared.subscribe();
+    /// let drain = tokio::spawn(async move {
+    ///     while let Ok(event) = events.recv().await {
+    ///         println!("{}", event.event_type);
+    ///     }
+    /// });
+    /// let session = prepared.start().await?;
+    /// # let _ = (session, drain);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn prepare_session(&self, config: SessionConfig) -> Result<PreparedSession, Error> {
+        let capacity = resolve_event_buffer_capacity(config.event_buffer_capacity)?;
+        Ok(PreparedSession::new(
+            self.clone(),
+            PreparedKind::Create(Box::new(config)),
+            capacity,
+        ))
+    }
+
+    /// Prepare a session resume without touching the transport.
+    ///
+    /// The resume counterpart of [`prepare_session`](Self::prepare_session);
+    /// see that method for the inertness guarantee, error semantics, and
+    /// rationale. Particularly relevant on resume with
+    /// [`continue_pending_work`](ResumeSessionConfig::continue_pending_work),
+    /// where the runtime can start emitting events (and reach
+    /// `session.idle`) while `session.resume` is still in flight.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorKind::InvalidConfig`] if
+    /// [`event_buffer_capacity`](ResumeSessionConfig::event_buffer_capacity)
+    /// is `Some(0)`.
+    pub fn prepare_resume_session(
+        &self,
+        config: ResumeSessionConfig,
+    ) -> Result<PreparedSession, Error> {
+        let capacity = resolve_event_buffer_capacity(config.event_buffer_capacity)?;
+        Ok(PreparedSession::new(
+            self.clone(),
+            PreparedKind::Resume(Box::new(config)),
+            capacity,
+        ))
+    }
+
     /// Create a new session on the CLI.
     ///
     /// Sends `session.create`, registers the session on the router,
@@ -807,7 +1299,48 @@ impl Client {
     /// Each per-event handler is independently optional. If a handler is
     /// not installed, the SDK signals the runtime not to emit the matching
     /// broadcast (and silently skips dispatch if one arrives anyway).
-    pub async fn create_session(&self, mut config: SessionConfig) -> Result<Session, Error> {
+    ///
+    /// # Event delivery
+    ///
+    /// Equivalent to `prepare_session(config)?.start().await`. Because the
+    /// first subscription can only be taken from the returned [`Session`],
+    /// events the runtime emits before this call returns are broadcast with
+    /// no receiver installed and are therefore not delivered to
+    /// [`Session::subscribe`]. Use
+    /// [`prepare_session`](Self::prepare_session) when startup events
+    /// matter.
+    pub async fn create_session(&self, config: SessionConfig) -> Result<Session, Error> {
+        self.prepare_session(config)?.start().await
+    }
+
+    /// Resume an existing session on the CLI.
+    ///
+    /// Sends `session.resume` and `session.skills.reload`, registers the
+    /// session on the router, and spawns the event loop.
+    ///
+    /// All callbacks (event handler, hooks, transform) are configured
+    /// via [`ResumeSessionConfig`] using its `with_*` builder methods.
+    ///
+    /// See [`Self::create_session`] for the defaults applied when callback
+    /// fields are unset.
+    ///
+    /// # Event delivery
+    ///
+    /// Equivalent to `prepare_resume_session(config)?.start().await`, and
+    /// carries the same startup-event caveat documented on
+    /// [`create_session`](Self::create_session). Use
+    /// [`prepare_resume_session`](Self::prepare_resume_session) when
+    /// startup events matter.
+    pub async fn resume_session(&self, config: ResumeSessionConfig) -> Result<Session, Error> {
+        self.prepare_resume_session(config)?.start().await
+    }
+
+    async fn start_prepared_create(
+        &self,
+        mut config: SessionConfig,
+        event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
+        shutdown: CancellationToken,
+    ) -> Result<Session, Error> {
         let total_start = Instant::now();
         // For cloud sessions, let the CLI/server assign the session id and
         // register the session lazily once the response arrives. For non-cloud
@@ -850,6 +1383,8 @@ impl Client {
         config.system_message =
             crate::mode::system_message_for_mode(mode, config.system_message.take());
         config.memory = crate::mode::memory_for_mode(mode, config.memory.take());
+        config.enable_experimental_mode =
+            crate::mode::experimental_mode_for_mode(mode, config.enable_experimental_mode);
         if mode == crate::ClientMode::Empty {
             if config.enable_session_telemetry.is_none() {
                 config.enable_session_telemetry = Some(false);
@@ -879,10 +1414,13 @@ impl Client {
         if mode == crate::ClientMode::Empty && config.embedding_cache_storage.is_none() {
             config.embedding_cache_storage = Some("in-memory".into());
         }
+        config.custom_agents_local_only =
+            crate::mode::resolve_custom_agents_local_only(mode, config.custom_agents_local_only);
         let opt_skip_custom_instructions = config.skip_custom_instructions;
         let opt_custom_agents_local_only = config.custom_agents_local_only;
         let opt_coauthor_enabled = config.coauthor_enabled;
         let opt_manage_schedule_enabled = config.manage_schedule_enabled;
+        let opt_included_builtin_skills = config.included_builtin_skills.take();
         let (mut wire, mut runtime) = config.into_wire(local_session_id.clone())?;
         wire.enable_github_telemetry_forwarding =
             self.inner.on_github_telemetry.is_some().then_some(true);
@@ -893,6 +1431,10 @@ impl Client {
         );
         let handlers = SessionHandlers {
             permission: permission_handler,
+            managed_settings_enabled: has_managed_settings(
+                wire.enable_managed_settings,
+                wire.managed_settings.as_ref(),
+            ),
             elicitation: runtime.elicitation_handler.take(),
             mcp_auth: runtime.mcp_auth_handler.take(),
             user_input: runtime.user_input_handler.take(),
@@ -909,6 +1451,13 @@ impl Client {
         let canvas_handler = runtime.canvas_handler.take();
         let session_fs_provider = runtime.session_fs_provider.take();
         let bearer_token_providers = std::mem::take(&mut runtime.bearer_token_providers);
+        let github_token_registration = runtime
+            .github_token_provider
+            .take()
+            .map(|provider| self.register_github_token_provider(provider));
+        wire.github_token_provider_registration_id = github_token_registration
+            .as_ref()
+            .map(|registration| registration.id().to_string());
         let has_mcp_auth_handler = handlers.mcp_auth.is_some();
         if self.inner.session_fs_configured && session_fs_provider.is_none() {
             return Err(ErrorKind::Session(SessionErrorKind::SessionFsProviderRequired).into());
@@ -932,8 +1481,7 @@ impl Client {
         let capabilities = Arc::new(parking_lot::RwLock::new(SessionCapabilities::default()));
         let idle_waiter = Arc::new(ParkingLotMutex::new(None));
         let open_canvases = Arc::new(parking_lot::RwLock::new(Vec::new()));
-        let shutdown = CancellationToken::new();
-        let (event_tx, _) = tokio::sync::broadcast::channel(512);
+        let external_tools_shutdown = self.inner.rpc.connection_closed_token();
 
         // For cloud sessions (use_server_generated_id), defer session
         // registration to the inline callback so the read task registers
@@ -941,7 +1489,7 @@ impl Client {
         // For non-cloud sessions, register up-front so the CLI can issue
         // session-scoped requests during session.create processing.
         let inline_stash: Arc<
-            ParkingLotMutex<Option<(SessionId, crate::router::SessionChannels)>>,
+            ParkingLotMutex<Option<(SessionId, crate::router::SessionRegistration)>>,
         > = Arc::new(ParkingLotMutex::new(None));
 
         let inline_callback: Option<crate::jsonrpc::InlineResponseCallback> = if let Some(ref sid) =
@@ -969,45 +1517,62 @@ impl Client {
                     })
                     .into());
                 }
-                let channels = client.register_session(&parsed.session_id);
-                *stash.lock() = Some((parsed.session_id, channels));
+                // Register and stash under a single stash-lock hold. The
+                // cancellation guard identifies the session to unregister by
+                // peeking this stash, so registering outside the lock would
+                // leave a window where a concurrent guard drop (caller
+                // cancellation) sees `None` and leaks the registration.
+                // `register_session` takes the router lock, never the stash
+                // lock, so there is no lock-order inversion here.
+                let mut stashed = stash.lock();
+                let registration = client.register_session(&parsed.session_id);
+                *stashed = Some((parsed.session_id, registration));
                 Ok(())
             }))
         };
 
-        let rpc_start = Instant::now();
-        let result = match self
-            .call_with_inline_callback("session.create", Some(params), inline_callback)
-            .await
-        {
-            Ok(result) => result,
-            Err(error) => {
-                if let Some((id, _channels)) = inline_stash.lock().take() {
-                    self.unregister_session(&id);
-                }
-                return Err(error);
+        // Armed for the whole startup sequence: any early return, and any
+        // drop of this future (caller cancellation), cancels the session
+        // token and unregisters whatever was registered on the router. For
+        // the cloud path the ID is only known once the inline callback has
+        // run, so the guard reads the stash at cleanup time.
+        let mut pending_registration = match local_session_id {
+            Some(ref sid) => {
+                let token = inline_stash
+                    .lock()
+                    .as_ref()
+                    .expect("session registration must exist")
+                    .1
+                    .token;
+                PendingSessionRegistration::new(
+                    self.clone(),
+                    sid.clone(),
+                    token,
+                    shutdown.clone(),
+                    external_tools_shutdown.clone(),
+                )
             }
+            None => PendingSessionRegistration::deferred(
+                self.clone(),
+                inline_stash.clone(),
+                shutdown.clone(),
+                external_tools_shutdown.clone(),
+            ),
         };
+
+        let rpc_start = Instant::now();
+        let result = self
+            .call_with_inline_callback("session.create", Some(params), inline_callback)
+            .await?;
         tracing::debug!(
             elapsed_ms = rpc_start.elapsed().as_millis(),
             "Client::create_session session creation request completed successfully"
         );
-        let create_result: CreateSessionResult = match serde_json::from_value(result) {
-            Ok(result) => result,
-            Err(error) => {
-                if let Some((id, _channels)) = inline_stash.lock().take() {
-                    self.unregister_session(&id);
-                }
-                return Err(error.into());
-            }
-        };
+        let create_result: CreateSessionResult = serde_json::from_value(result)?;
 
         if let Some(ref requested) = local_session_id
             && create_result.session_id != *requested
         {
-            if let Some((id, _channels)) = inline_stash.lock().take() {
-                self.unregister_session(&id);
-            }
             return Err(ErrorKind::Session(SessionErrorKind::SessionIdMismatch {
                 requested: requested.clone(),
                 returned: create_result.session_id.clone(),
@@ -1015,10 +1580,13 @@ impl Client {
             .into());
         }
 
-        let (session_id, channels) = inline_stash
+        let (session_id, registration) = inline_stash
             .lock()
             .take()
             .expect("session registration must have populated stash on success");
+        let channels = registration.channels;
+        let registration_token = registration.token;
+        pending_registration.resolve_to(session_id.clone(), registration_token);
         let event_loop = spawn_event_loop(
             session_id.clone(),
             self.clone(),
@@ -1035,6 +1603,7 @@ impl Client {
             open_canvases.clone(),
             event_tx.clone(),
             shutdown.clone(),
+            external_tools_shutdown.clone(),
         );
         tracing::debug!(
             elapsed_ms = setup_start.elapsed().as_millis(),
@@ -1045,8 +1614,11 @@ impl Client {
             "Client::create_session local setup complete"
         );
         *capabilities.write() = create_result.capabilities.unwrap_or_default();
-        if has_mcp_auth_handler {
-            register_mcp_auth_interest(self, &session_id).await?;
+        if has_mcp_auth_handler
+            && let Err(error) = register_mcp_auth_interest(self, &session_id).await
+        {
+            pending_registration.cleanup(event_loop).await;
+            return Err(error);
         }
 
         tracing::debug!(
@@ -1054,6 +1626,7 @@ impl Client {
             session_id = %session_id,
             "Client::create_session complete"
         );
+        pending_registration.disarm();
         let session = Session {
             id: session_id,
             cwd: self.cwd().clone(),
@@ -1062,10 +1635,13 @@ impl Client {
             client: self.clone(),
             event_loop: ParkingLotMutex::new(Some(event_loop)),
             shutdown,
+            external_tools_shutdown,
             idle_waiter,
             capabilities,
             open_canvases,
             event_tx,
+            github_token_registration: ParkingLotMutex::new(github_token_registration),
+            registration_token,
         };
         apply_mode_post_create_patch(
             &session,
@@ -1074,8 +1650,14 @@ impl Client {
             opt_custom_agents_local_only,
             opt_coauthor_enabled,
             opt_manage_schedule_enabled,
+            opt_included_builtin_skills,
         )
         .await?;
+        if let Some(registration) = session.github_token_registration.lock().as_ref() {
+            registration.claim(session.id.clone());
+        } else {
+            self.retire_github_token_provider(&session.id);
+        }
         Ok(session)
     }
 
@@ -1089,7 +1671,12 @@ impl Client {
     ///
     /// See [`Self::create_session`] for the defaults applied when callback
     /// fields are unset.
-    pub async fn resume_session(&self, mut config: ResumeSessionConfig) -> Result<Session, Error> {
+    async fn start_prepared_resume(
+        &self,
+        mut config: ResumeSessionConfig,
+        event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
+        shutdown: CancellationToken,
+    ) -> Result<Session, Error> {
         let total_start = Instant::now();
         let session_id = config.session_id.clone();
         if config.hooks_handler.is_some() && config.hooks.is_none() {
@@ -1115,6 +1702,8 @@ impl Client {
         config.system_message =
             crate::mode::system_message_for_mode(mode, config.system_message.take());
         config.memory = crate::mode::memory_for_mode(mode, config.memory.take());
+        config.enable_experimental_mode =
+            crate::mode::experimental_mode_for_mode(mode, config.enable_experimental_mode);
         if mode == crate::ClientMode::Empty {
             if config.enable_session_telemetry.is_none() {
                 config.enable_session_telemetry = Some(false);
@@ -1144,10 +1733,13 @@ impl Client {
         if mode == crate::ClientMode::Empty && config.embedding_cache_storage.is_none() {
             config.embedding_cache_storage = Some("in-memory".into());
         }
+        config.custom_agents_local_only =
+            crate::mode::resolve_custom_agents_local_only(mode, config.custom_agents_local_only);
         let opt_skip_custom_instructions = config.skip_custom_instructions;
         let opt_custom_agents_local_only = config.custom_agents_local_only;
         let opt_coauthor_enabled = config.coauthor_enabled;
         let opt_manage_schedule_enabled = config.manage_schedule_enabled;
+        let opt_included_builtin_skills = config.included_builtin_skills.take();
         let (mut wire, mut runtime) = config.into_wire()?;
         wire.enable_github_telemetry_forwarding =
             self.inner.on_github_telemetry.is_some().then_some(true);
@@ -1158,6 +1750,10 @@ impl Client {
         );
         let handlers = SessionHandlers {
             permission: permission_handler,
+            managed_settings_enabled: has_managed_settings(
+                wire.enable_managed_settings,
+                wire.managed_settings.as_ref(),
+            ),
             elicitation: runtime.elicitation_handler.take(),
             mcp_auth: runtime.mcp_auth_handler.take(),
             user_input: runtime.user_input_handler.take(),
@@ -1174,6 +1770,13 @@ impl Client {
         let canvas_handler = runtime.canvas_handler.take();
         let session_fs_provider = runtime.session_fs_provider.take();
         let bearer_token_providers = std::mem::take(&mut runtime.bearer_token_providers);
+        let github_token_registration = runtime
+            .github_token_provider
+            .take()
+            .map(|provider| self.register_github_token_provider(provider));
+        wire.github_token_provider_registration_id = github_token_registration
+            .as_ref()
+            .map(|registration| registration.id().to_string());
         let has_mcp_auth_handler = handlers.mcp_auth.is_some();
         if self.inner.session_fs_configured && session_fs_provider.is_none() {
             return Err(ErrorKind::Session(SessionErrorKind::SessionFsProviderRequired).into());
@@ -1195,11 +1798,12 @@ impl Client {
 
         let capabilities = Arc::new(parking_lot::RwLock::new(SessionCapabilities::default()));
         let setup_start = Instant::now();
-        let channels = self.register_session(&session_id);
+        let registration = self.register_session(&session_id);
+        let registration_token = registration.token;
+        let channels = registration.channels;
         let idle_waiter = Arc::new(ParkingLotMutex::new(None));
         let open_canvases = Arc::new(parking_lot::RwLock::new(Vec::new()));
-        let shutdown = CancellationToken::new();
-        let (event_tx, _) = tokio::sync::broadcast::channel(512);
+        let external_tools_shutdown = self.inner.rpc.connection_closed_token();
         let event_loop = spawn_event_loop(
             session_id.clone(),
             self.clone(),
@@ -1216,9 +1820,15 @@ impl Client {
             open_canvases.clone(),
             event_tx.clone(),
             shutdown.clone(),
+            external_tools_shutdown.clone(),
         );
-        let mut registration =
-            PendingSessionRegistration::new(self.clone(), session_id.clone(), shutdown.clone());
+        let mut registration = PendingSessionRegistration::new(
+            self.clone(),
+            session_id.clone(),
+            registration_token,
+            shutdown.clone(),
+            external_tools_shutdown.clone(),
+        );
         tracing::debug!(
             elapsed_ms = setup_start.elapsed().as_millis(),
             session_id = %session_id,
@@ -1261,10 +1871,12 @@ impl Client {
             })
             .into());
         }
-        if has_mcp_auth_handler {
-            register_mcp_auth_interest(self, &session_id).await?;
+        if has_mcp_auth_handler
+            && let Err(error) = register_mcp_auth_interest(self, &session_id).await
+        {
+            registration.cleanup(event_loop).await;
+            return Err(error);
         }
-
         // Reload skills after resume (best-effort).
         let skills_reload_start = Instant::now();
         if let Err(e) = self
@@ -1314,10 +1926,13 @@ impl Client {
             client: self.clone(),
             event_loop: ParkingLotMutex::new(Some(event_loop)),
             shutdown,
+            external_tools_shutdown,
             idle_waiter,
             capabilities,
             open_canvases,
             event_tx,
+            github_token_registration: ParkingLotMutex::new(github_token_registration),
+            registration_token,
         };
         apply_mode_post_create_patch(
             &session,
@@ -1326,9 +1941,158 @@ impl Client {
             opt_custom_agents_local_only,
             opt_coauthor_enabled,
             opt_manage_schedule_enabled,
+            opt_included_builtin_skills,
         )
         .await?;
+        if let Some(registration) = session.github_token_registration.lock().as_ref() {
+            registration.claim(session.id.clone());
+        } else {
+            self.retire_github_token_provider(&session.id);
+        }
         Ok(session)
+    }
+}
+
+/// A session that has been configured but not yet created on the CLI.
+///
+/// Returned by [`Client::prepare_session`] and
+/// [`Client::prepare_resume_session`]. Its purpose is to make the session's
+/// event stream observable *before* any protocol activity starts:
+/// [`subscribe`](Self::subscribe) installs a receiver on the same broadcast
+/// channel the eventual [`Session`] uses, so events the runtime emits while
+/// `session.create` / `session.resume` is still in flight are delivered
+/// rather than dropped for lack of a receiver.
+///
+/// # Lifecycle
+///
+/// A prepared handle is inert. It holds only a broadcast sender, a
+/// cancellation token, the client handle, and the config — it performs no
+/// router registration, spawns no task, and writes nothing to the wire
+/// until [`start`](Self::start) is first polled.
+///
+/// * Dropping it without starting leaves no client-side or server-side
+///   state, and closes every subscription taken from it.
+/// * Dropping the [`start`](Self::start) future mid-flight cancels the
+///   session token, unregisters the session from the router if it was
+///   registered, and closes early subscriptions. A retry with the same
+///   session ID succeeds. Cleanup of already-spawned tasks is signalled,
+///   not awaited: `Drop` is synchronous and cannot await, so the event loop
+///   terminates promptly but not synchronously.
+/// * A startup error from [`start`](Self::start) performs the same cleanup
+///   and preserves the [`ErrorKind`] the equivalent
+///   [`Client::create_session`] / [`Client::resume_session`] call has always
+///   returned.
+///
+/// [`start`](Self::start) consumes `self` and the type is deliberately not
+/// [`Clone`], so a prepared session can be started at most once and can
+/// never produce two event loops.
+///
+/// # Buffering
+///
+/// The broadcast buffer is finite —
+/// [`DEFAULT_EVENT_BUFFER_CAPACITY`] unless
+/// [`SessionConfig::event_buffer_capacity`] /
+/// [`ResumeSessionConfig::event_buffer_capacity`] overrides it. Subscribers
+/// that fall behind observe
+/// [`Lagged`](crate::subscription::Lagged) instead of applying backpressure
+/// to the event loop. Consumers that need a lossless view of a large
+/// startup burst must either configure a capacity that covers it or drain
+/// the subscription concurrently with [`start`](Self::start).
+///
+/// # Server-assigned session IDs
+///
+/// For cloud sessions without a caller-supplied session ID, the CLI assigns
+/// the ID and the SDK can only register the session on its notification
+/// router once the `session.create` response arrives. Notifications the
+/// server emits before that point are not routable to any session and are
+/// therefore not observable. The guarantee this type provides is narrower
+/// and precise: **routed** events are never dropped for lack of an
+/// installed receiver. Pin
+/// [`SessionConfig::session_id`](crate::types::SessionConfig::session_id)
+/// to get registration before the RPC and full pre-response coverage.
+#[must_use = "a PreparedSession does nothing until started"]
+pub struct PreparedSession {
+    client: Client,
+    kind: PreparedKind,
+    event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
+    shutdown: CancellationToken,
+}
+
+/// Which startup path a [`PreparedSession`] runs when started. Boxed
+/// because the two config types are large and differently sized.
+enum PreparedKind {
+    Create(Box<SessionConfig>),
+    Resume(Box<ResumeSessionConfig>),
+}
+
+impl PreparedSession {
+    fn new(client: Client, kind: PreparedKind, event_buffer_capacity: usize) -> Self {
+        let (event_tx, _) = tokio::sync::broadcast::channel(event_buffer_capacity);
+        Self {
+            client,
+            kind,
+            event_tx,
+            shutdown: CancellationToken::new(),
+        }
+    }
+
+    /// Subscribe to this session's events before it starts.
+    ///
+    /// The returned [`EventSubscription`](crate::subscription::EventSubscription)
+    /// is backed by the same broadcast channel
+    /// [`Session::subscribe`] returns after [`start`](Self::start)
+    /// succeeds, so a subscription taken here observes the full event
+    /// stream from the session's first routed event onward — including
+    /// ephemeral events such as `session.idle` that
+    /// [`Session::get_messages`] cannot recover.
+    ///
+    /// May be called any number of times, and each subscriber receives its
+    /// own copy of the stream — subject to the buffering contract above. A
+    /// subscriber that falls further behind than the configured capacity
+    /// observes [`Lagged`](crate::subscription::Lagged) and skips the
+    /// events it missed, rather than stalling the session's event loop.
+    /// Subscriptions taken here close if the prepared session is dropped
+    /// without starting, or if startup fails.
+    pub fn subscribe(&self) -> crate::subscription::EventSubscription {
+        crate::subscription::EventSubscription::new(self.event_tx.subscribe())
+    }
+
+    /// Create or resume the session on the CLI.
+    ///
+    /// This is where all protocol activity happens: config validation,
+    /// router registration, the `session.create` / `session.resume` RPC,
+    /// and the event loop spawn. Nothing observable occurs until this
+    /// future is first polled.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Client::create_session`] /
+    /// [`Client::resume_session`] — including
+    /// [`ErrorKind::InvalidConfig`] for invalid configs, transport and RPC
+    /// failures, and
+    /// [`SessionIdMismatch`](crate::SessionErrorKind::SessionIdMismatch)
+    /// when the CLI returns a different session ID than the one requested.
+    /// Every error path unregisters the session and closes subscriptions
+    /// taken from this handle.
+    pub async fn start(self) -> Result<Session, Error> {
+        let Self {
+            client,
+            kind,
+            event_tx,
+            shutdown,
+        } = self;
+        match kind {
+            PreparedKind::Create(config) => {
+                client
+                    .start_prepared_create(*config, event_tx, shutdown)
+                    .await
+            }
+            PreparedKind::Resume(config) => {
+                client
+                    .start_prepared_resume(*config, event_tx, shutdown)
+                    .await
+            }
+        }
     }
 }
 
@@ -1341,7 +2105,42 @@ async fn apply_mode_post_create_patch(
     opt_custom_agents_local_only: Option<bool>,
     opt_coauthor_enabled: Option<bool>,
     opt_manage_schedule_enabled: Option<bool>,
+    opt_included_builtin_skills: Option<Vec<String>>,
 ) -> Result<(), Error> {
+    let Some(patch) = build_mode_post_create_patch(
+        mode,
+        opt_skip_custom_instructions,
+        opt_custom_agents_local_only,
+        opt_coauthor_enabled,
+        opt_manage_schedule_enabled,
+        opt_included_builtin_skills,
+    ) else {
+        return Ok(());
+    };
+    if let Err(error) = session.rpc().options().update(patch).await {
+        let _ = session.disconnect().await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Builds the `session.options.update` patch applied immediately after a session
+/// is created or resumed, or returns `None` when no patch should be sent.
+///
+/// Under [`ClientMode::Empty`](crate::ClientMode::Empty) the overridable feature
+/// flags fall back to safe defaults (caller values win), while
+/// `installed_plugins` is unconditionally empty. `included_builtin_skills`
+/// defaults to an empty list, but callers can explicitly allow selected
+/// runtime-bundled skills. Under other modes only explicitly-set fields are
+/// forwarded.
+fn build_mode_post_create_patch(
+    mode: crate::ClientMode,
+    opt_skip_custom_instructions: Option<bool>,
+    opt_custom_agents_local_only: Option<bool>,
+    opt_coauthor_enabled: Option<bool>,
+    opt_manage_schedule_enabled: Option<bool>,
+    opt_included_builtin_skills: Option<Vec<String>>,
+) -> Option<crate::generated::api_types::SessionUpdateOptionsParams> {
     use crate::generated::api_types::SessionUpdateOptionsParams;
     let mut patch = SessionUpdateOptionsParams::default();
     let should_send = if mode == crate::ClientMode::Empty {
@@ -1350,6 +2149,7 @@ async fn apply_mode_post_create_patch(
         patch.coauthor_enabled = Some(opt_coauthor_enabled.unwrap_or(false));
         patch.manage_schedule_enabled = Some(opt_manage_schedule_enabled.unwrap_or(false));
         patch.installed_plugins = Some(Vec::new());
+        patch.included_builtin_skills = Some(opt_included_builtin_skills.unwrap_or_default());
         true
     } else {
         let mut any = false;
@@ -1369,16 +2169,16 @@ async fn apply_mode_post_create_patch(
             patch.manage_schedule_enabled = Some(v);
             any = true;
         }
+        if let Some(v) = opt_included_builtin_skills {
+            patch.included_builtin_skills = Some(v);
+            any = true;
+        }
         any
     };
     if !should_send {
-        return Ok(());
+        return None;
     }
-    if let Err(error) = session.rpc().options().update(patch).await {
-        let _ = session.disconnect().await;
-        return Err(error);
-    }
-    Ok(())
+    Some(patch)
 }
 
 fn build_command_handler_map(commands: Option<&[CommandDefinition]>) -> Arc<CommandHandlerMap> {
@@ -1428,11 +2228,14 @@ fn spawn_event_loop(
     open_canvases: Arc<parking_lot::RwLock<Vec<OpenCanvasInstance>>>,
     event_tx: tokio::sync::broadcast::Sender<SessionEvent>,
     shutdown: CancellationToken,
+    external_tools_shutdown: CancellationToken,
 ) -> JoinHandle<()> {
     let crate::router::SessionChannels {
         mut notifications,
         mut requests,
     } = channels;
+    let pending_external_tools: PendingExternalTools =
+        Arc::new(ParkingLotMutex::new(HashMap::new()));
 
     let span = tracing::error_span!("session_event_loop", session_id = %session_id);
     tokio::spawn(
@@ -1440,32 +2243,76 @@ fn spawn_event_loop(
             loop {
                 // `mpsc::UnboundedReceiver::recv` and
                 // `CancellationToken::cancelled` are both cancel-safe per
-                // RFD 400. The selected branch's `await`'d handler is
-                // *not* mid-cancelled by the select — once a branch fires
-                // it runs to completion within the loop's iteration.
-                // Spawned child tasks inside `handle_notification`
-                // (permission/tool/elicitation callbacks) intentionally
-                // outlive the parent loop and own their own cleanup;
-                // this is RFD 400's "spawn background tasks to perform
-                // cancel-unsafe operations" pattern and is correct as-is.
+                // RFD 400.
+                //
+                // Inbound JSON-RPC *requests* are dispatched fire-and-forget:
+                // each `handle_request` runs in its own spawned task that
+                // awaits the handler and sends that request's response. This
+                // mirrors the other Copilot SDKs and moves concurrency to the
+                // request-dispatch boundary, so any slow handler — not just
+                // `userInput.request` (which can stay pending for the full
+                // input backstop of several minutes), but also `exitPlanMode`,
+                // `autoModeSwitch`, hooks, transforms, or canvas/session-FS
+                // providers — cannot park the reader loop and starve sibling
+                // requests or co-emitted notifications. JSON-RPC permits
+                // concurrent requests and out-of-order responses, so the SDK
+                // does not serialize them.
+                //
+                // `handle_notification` is awaited inline because it only
+                // performs fast dispatch work; its slow interactive callbacks
+                // (permission/tool/elicitation) are themselves spawned as child
+                // tasks. All of these spawned tasks intentionally outlive the
+                // parent loop and own their own cleanup — RFD 400's "spawn
+                // background tasks to perform cancel-unsafe operations" pattern.
                 tokio::select! {
                     _ = shutdown.cancelled() => break,
                     Some(notification) = notifications.recv() => {
                         handle_notification(
-                            &session_id, &client, &handlers, &command_handlers, notification, &idle_waiter, &capabilities, &open_canvases, &event_tx,
+                            &session_id, &client, &handlers, &command_handlers, notification, &idle_waiter, &capabilities, &open_canvases, &event_tx, &shutdown, &external_tools_shutdown, &pending_external_tools,
                         ).await;
                     }
                     Some(request) = requests.recv() => {
-                        let ctx = RequestDispatchContext {
-                            client: &client,
-                            handlers: &handlers,
-                            hooks: hooks.as_deref(),
-                            transforms: transforms.as_deref(),
-                            canvas_handler: canvas_handler.as_ref(),
-                            session_fs_provider: session_fs_provider.as_ref(),
-                            bearer_token_providers: &bearer_token_providers,
-                        };
-                        handle_request(&session_id, ctx, request).await;
+                        // Clone the Arc-backed dispatch context into the task so
+                        // the spawned `handle_request` future is `'static`. All
+                        // clones are cheap (Arc refcount bumps / small maps).
+                        let span = tracing::error_span!("session_request_handler", session_id = %session_id);
+                        let session_id = session_id.clone();
+                        let client = client.clone();
+                        let handlers = handlers.clone();
+                        let hooks = hooks.clone();
+                        let transforms = transforms.clone();
+                        let canvas_handler = canvas_handler.clone();
+                        let session_fs_provider = session_fs_provider.clone();
+                        let bearer_token_providers = bearer_token_providers.clone();
+                        let request_id = request.id;
+                        let method = request.method.clone();
+                        tokio::spawn(
+                            async move {
+                                let ctx = RequestDispatchContext {
+                                    client: &client,
+                                    handlers: &handlers,
+                                    hooks: hooks.as_deref(),
+                                    transforms: transforms.as_deref(),
+                                    canvas_handler: canvas_handler.as_ref(),
+                                    session_fs_provider: session_fs_provider.as_ref(),
+                                    bearer_token_providers: &bearer_token_providers,
+                                };
+                                let dispatch = handle_request(&session_id, ctx, request);
+                                if AssertUnwindSafe(dispatch).catch_unwind().await.is_err() {
+                                    // Tokio isolates the panic to this task, so without a
+                                    // reply the CLI waits out its own timeout on this id.
+                                    error!(method = %method, "request handler panicked");
+                                    let _ = send_error_response(
+                                        &client,
+                                        request_id,
+                                        error_codes::INTERNAL_ERROR,
+                                        "request handler panicked",
+                                    )
+                                    .await;
+                                }
+                            }
+                            .instrument(span),
+                        );
                     }
                     else => break,
                 }
@@ -1489,17 +2336,60 @@ fn extract_request_id(data: &Value) -> Option<RequestId> {
         .map(RequestId::new)
 }
 
-/// Map a [`PermissionResult`] to the `result` payload sent back to the
-/// server via `session.permissions.handlePendingPermissionRequest`.
+fn permission_request_data(
+    event_data: &Value,
+    managed_settings_enabled: bool,
+) -> PermissionRequestData {
+    let request_data = event_data
+        .get("permissionRequest")
+        .cloned()
+        .unwrap_or_else(|| event_data.clone());
+    let managed_approval_required = match request_data.get("managedApprovalRequired") {
+        None => None,
+        Some(Value::Bool(value)) => Some(*value),
+        Some(_) => Some(true),
+    };
+    match serde_json::from_value::<PermissionRequestData>(request_data) {
+        Ok(mut data) => {
+            data.extra = event_data.clone();
+            data.managed_settings_enabled = managed_settings_enabled;
+            data
+        }
+        Err(_) => PermissionRequestData {
+            kind: None,
+            tool_call_id: None,
+            managed_approval_required,
+            managed_settings_enabled,
+            extra: event_data.clone(),
+        },
+    }
+}
+
+/// Build the full `session.permissions.handlePendingPermissionRequest`
+/// params for a permission result.
+///
+/// `decisionContext` is a sibling of `result` and is only present when the
+/// handler attributed the decision — omitting it preserves legacy behavior.
 ///
 /// Returns `None` when the SDK must not send a response.
-fn notification_permission_payload(result: &PermissionResult) -> Option<Value> {
-    match result {
-        PermissionResult::NoResult => None,
-        PermissionResult::Decision(decision) => Some(
-            serde_json::to_value(decision).expect("serializing permission decision should succeed"),
-        ),
-    }
+fn permission_response_params(
+    session_id: &SessionId,
+    request_id: &RequestId,
+    result: &PermissionResult,
+) -> Option<Value> {
+    let (decision, decision_context) = match result {
+        PermissionResult::Decision { decision, context } => (decision, context.clone()),
+        PermissionResult::NoResult => return None,
+    };
+    let mut params = serde_json::to_value(PermissionDecisionRequest {
+        decision_context,
+        request_id: request_id.clone(),
+        result: decision.clone(),
+    })
+    .expect("serializing permission response should succeed");
+    params["sessionId"] =
+        serde_json::to_value(session_id).expect("serializing session ID should succeed");
+    Some(params)
 }
 
 async fn register_mcp_auth_interest(client: &Client, session_id: &SessionId) -> Result<(), Error> {
@@ -1526,6 +2416,12 @@ fn tool_failure_result(message: impl Into<String>) -> ToolResult {
     })
 }
 
+fn is_autopilot_continuation_idle(event: &SessionEvent) -> bool {
+    event
+        .typed_data::<SessionIdleData>()
+        .is_some_and(|data| data.mode == Some(SessionMode::Autopilot))
+}
+
 /// Process a notification from the CLI's broadcast channel.
 #[allow(clippy::too_many_arguments)]
 async fn handle_notification(
@@ -1538,6 +2434,9 @@ async fn handle_notification(
     capabilities: &Arc<parking_lot::RwLock<SessionCapabilities>>,
     open_canvases: &Arc<parking_lot::RwLock<Vec<OpenCanvasInstance>>>,
     event_tx: &tokio::sync::broadcast::Sender<SessionEvent>,
+    shutdown: &CancellationToken,
+    external_tools_shutdown: &CancellationToken,
+    pending_external_tools: &PendingExternalTools,
 ) {
     let dispatch_start = Instant::now();
     let event = notification.event.clone();
@@ -1570,6 +2469,7 @@ async fn handle_notification(
                         }
                         waiter.last_assistant_message = Some(event.clone());
                     }
+                    SessionEventType::SessionIdle if is_autopilot_continuation_idle(&event) => {}
                     SessionEventType::SessionIdle | SessionEventType::SessionError => {
                         if let Some(waiter) = guard.take() {
                             if event_type == SessionEventType::SessionIdle {
@@ -1650,6 +2550,13 @@ async fn handle_notification(
     // Notification-based permission/tool/elicitation requests require a
     // separate RPC callback. Spawn concurrently since the CLI doesn't block.
     match event_type {
+        SessionEventType::ExternalToolCompleted => {
+            if let Some(request_id) = extract_request_id(&notification.event.data)
+                && let Some(token) = pending_external_tools.lock().remove(&request_id)
+            {
+                token.cancel();
+            }
+        }
         SessionEventType::PermissionRequested => {
             let Some(request_id) = extract_request_id(&notification.event.data) else {
                 return;
@@ -1674,14 +2581,11 @@ async fn handle_notification(
             };
             let client = client.clone();
             let sid = session_id.clone();
-            let data: PermissionRequestData =
-                serde_json::from_value(notification.event.data.clone()).unwrap_or_else(|_| {
-                    PermissionRequestData {
-                        kind: None,
-                        tool_call_id: None,
-                        extra: notification.event.data.clone(),
-                    }
-                });
+            let shutdown = shutdown.clone();
+            let data = permission_request_data(
+                &notification.event.data,
+                handlers.managed_settings_enabled,
+            );
             let span = tracing::error_span!(
                 "permission_request_handler",
                 session_id = %sid,
@@ -1699,29 +2603,47 @@ async fn handle_notification(
                         request_id = %request_id,
                         "PermissionHandler::handle dispatch"
                     );
-                    let Some(result_value) = notification_permission_payload(&result) else {
+                    let Some(params) = permission_response_params(&sid, &request_id, &result)
+                    else {
                         // Handler returned Deferred / NoResult — it will
                         // call handlePendingPermissionRequest itself (or
                         // leave the request unanswered).
                         return;
                     };
                     let rpc_start = Instant::now();
-                    let _ = client
-                        .call(
-                            "session.permissions.handlePendingPermissionRequest",
-                            Some(serde_json::json!({
-                                "sessionId": sid,
-                                "requestId": request_id,
-                                "result": result_value,
-                            })),
-                        )
-                        .await;
-                    tracing::debug!(
-                        elapsed_ms = rpc_start.elapsed().as_millis(),
-                        session_id = %sid,
-                        request_id = %request_id,
-                        "Session::handle_notification response sent successfully"
-                    );
+                    let method =
+                        rpc_methods::SESSION_PERMISSIONS_HANDLEPENDINGPERMISSIONREQUEST;
+                    tokio::select! {
+                        biased;
+                        response = client.call(method, Some(params)) => {
+                            match response {
+                                Ok(_) => tracing::debug!(
+                                    elapsed_ms = rpc_start.elapsed().as_millis(),
+                                    session_id = %sid,
+                                    request_id = %request_id,
+                                    method,
+                                    "Session::handle_notification response sent successfully"
+                                ),
+                                Err(error) => warn!(
+                                    error = %error,
+                                    session_id = %sid,
+                                    request_id = %request_id,
+                                    method,
+                                    "failed to deliver permission decision back to the runtime"
+                                ),
+                            }
+                        }
+                        _ = shutdown.cancelled() => {
+                            warn!(
+                                elapsed_ms = rpc_start.elapsed().as_millis(),
+                                session_id = %sid,
+                                request_id = %request_id,
+                                method,
+                                delivery_outcome = "unknown",
+                                "permission confirmation acknowledgement wait cancelled during session shutdown"
+                            );
+                        }
+                    }
                 }
                 .instrument(span),
             );
@@ -1778,8 +2700,19 @@ async fn handle_notification(
             let Some(tool_handler) = tool_handler else {
                 return;
             };
+            let cancellation = Arc::new(external_tools_shutdown.child_token());
+            {
+                let mut pending = pending_external_tools.lock();
+                if external_tools_shutdown.is_cancelled() || pending.contains_key(&request_id) {
+                    return;
+                }
+                pending.insert(request_id.clone(), cancellation.clone());
+            }
             let client = client.clone();
             let sid = session_id.clone();
+            let pending_external_tools = pending_external_tools.clone();
+            let guard_request_id = request_id.clone();
+            let guard_cancellation = cancellation.clone();
             let span = tracing::error_span!(
                 "external_tool_handler",
                 session_id = %sid,
@@ -1787,11 +2720,22 @@ async fn handle_notification(
             );
             tokio::spawn(
                 async move {
+                    let guard = PendingExternalToolGuard {
+                        request_id: guard_request_id,
+                        token: guard_cancellation,
+                        pending: pending_external_tools,
+                    };
+                    if cancellation.is_cancelled() {
+                        return;
+                    }
                     // `tool_name.is_empty()` would have produced a `None`
                     // lookup in `handlers.tools` and short-circuited at the
                     // outer guard above, so only the tool_call_id check is
                     // reachable here.
                     if data.tool_call_id.is_empty() {
+                        if !guard.claim() {
+                            return;
+                        }
                         let error_msg = "Missing toolCallId";
                         let rpc_start = Instant::now();
                         let _ = client
@@ -1821,13 +2765,15 @@ async fn handle_notification(
                     // call; a failed fetch leaves the snapshot `None` rather than
                     // failing the tool.
                     let available_tools = if tool_name == TOOL_SEARCH_TOOL_NAME {
-                        match client
-                            .call(
+                        let metadata_result = tokio::select! {
+                            biased;
+                            _ = cancellation.cancelled() => return,
+                            result = client.call(
                                 rpc_methods::SESSION_TOOLS_GETCURRENTMETADATA,
                                 Some(serde_json::json!({ "sessionId": sid })),
-                            )
-                            .await
-                        {
+                            ) => result,
+                        };
+                        match metadata_result {
                             Ok(value) => {
                                 serde_json::from_value::<ToolsGetCurrentMetadataResult>(value)
                                     .ok()
@@ -1850,9 +2796,13 @@ async fn handle_notification(
                         tracestate: data.tracestate,
                     };
                     let handler_start = Instant::now();
-                    let tool_result = match tool_handler.call(invocation).await {
-                        Ok(r) => r,
-                        Err(e) => tool_failure_result(e.to_string()),
+                    let tool_result = tokio::select! {
+                        biased;
+                        _ = cancellation.cancelled() => return,
+                        result = tool_handler.call(invocation) => match result {
+                            Ok(r) => r,
+                            Err(e) => tool_failure_result(e.to_string()),
+                        },
                     };
                     tracing::debug!(
                         elapsed_ms = handler_start.elapsed().as_millis(),
@@ -1862,6 +2812,9 @@ async fn handle_notification(
                         tool_name = %tool_name,
                         "ToolHandler::call dispatch"
                     );
+                    if !guard.claim() {
+                        return;
+                    }
                     let result_value = serde_json::to_value(tool_result).unwrap_or(Value::Null);
                     let rpc_start = Instant::now();
                     let _ = client
@@ -2483,31 +3436,305 @@ fn inject_transform_sections_resume(
 mod tests {
     use serde_json::json;
 
-    use super::notification_permission_payload;
+    use super::{
+        build_mode_post_create_patch, has_managed_settings, is_autopilot_continuation_idle,
+        permission_request_data, permission_response_params,
+    };
     use crate::handler::PermissionResult;
+    use crate::types::{
+        PermissionDecisionContext, PermissionDecisionOutcome, PermissionDecisionSource,
+        PermissionDecisionSurface, RequestId, SessionEvent, SessionId,
+    };
 
     #[test]
-    fn notification_payload_suppresses_no_result() {
-        assert!(notification_permission_payload(&PermissionResult::NoResult).is_none());
+    fn identifies_only_autopilot_continuation_idles() {
+        let mut event = SessionEvent {
+            id: "event-1".to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            parent_id: None,
+            ephemeral: None,
+            agent_id: None,
+            debug_cli_received_at_ms: None,
+            debug_ws_forwarded_at_ms: None,
+            event_type: "session.idle".to_string(),
+            data: json!({ "mode": "autopilot" }),
+        };
+
+        assert!(is_autopilot_continuation_idle(&event));
+
+        event.data = json!({ "mode": "interactive" });
+        assert!(!is_autopilot_continuation_idle(&event));
+
+        event.data = json!({});
+        assert!(!is_autopilot_continuation_idle(&event));
     }
 
     #[test]
-    fn notification_payload_serializes_decisions() {
+    fn empty_mode_post_patch_sets_empty_included_builtin_skills() {
+        let patch =
+            build_mode_post_create_patch(crate::ClientMode::Empty, None, None, None, None, None)
+                .expect("empty mode always sends a patch");
         assert_eq!(
-            notification_permission_payload(&PermissionResult::approve_once()),
-            Some(json!({ "kind": "approve-once" }))
+            patch.included_builtin_skills,
+            Some(Vec::new()),
+            "empty mode must fail closed with an empty includedBuiltinSkills list"
         );
+        assert_eq!(patch.installed_plugins.as_ref().map(|p| p.len()), Some(0));
+        // Serializes as an explicit empty array (not omitted).
+        let value = serde_json::to_value(&patch).expect("serialize patch");
+        assert_eq!(value["includedBuiltinSkills"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn empty_mode_post_patch_preserves_explicit_builtin_skill_allowlist() {
+        let patch = build_mode_post_create_patch(
+            crate::ClientMode::Empty,
+            Some(false),
+            Some(false),
+            Some(true),
+            Some(true),
+            Some(vec!["code-review".to_string()]),
+        )
+        .expect("empty mode always sends a patch");
         assert_eq!(
-            notification_permission_payload(&PermissionResult::reject(None)),
-            Some(json!({ "kind": "reject" }))
+            patch.included_builtin_skills,
+            Some(vec!["code-review".to_string()])
         );
+    }
+
+    #[test]
+    fn copilot_cli_mode_does_not_inject_included_builtin_skills() {
+        // No fields set -> no patch at all.
+        assert!(
+            build_mode_post_create_patch(
+                crate::ClientMode::CopilotCli,
+                None,
+                None,
+                None,
+                None,
+                None
+            )
+            .is_none()
+        );
+        // A field set -> patch sent, but skills field stays absent.
+        let patch = build_mode_post_create_patch(
+            crate::ClientMode::CopilotCli,
+            Some(true),
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("a set field triggers a patch");
+        assert_eq!(patch.included_builtin_skills, None);
+        assert!(patch.installed_plugins.is_none());
+        let value = serde_json::to_value(&patch).expect("serialize patch");
+        assert!(value.get("includedBuiltinSkills").is_none());
+
+        let patch = build_mode_post_create_patch(
+            crate::ClientMode::CopilotCli,
+            None,
+            None,
+            None,
+            None,
+            Some(vec!["code-review".to_string()]),
+        )
+        .expect("an explicit allowlist triggers a patch");
         assert_eq!(
-            notification_permission_payload(&PermissionResult::reject(Some("bad".to_string()))),
-            Some(json!({ "kind": "reject", "feedback": "bad" }))
+            patch.included_builtin_skills,
+            Some(vec!["code-review".to_string()])
         );
+    }
+
+    #[test]
+    fn direct_injection_enables_managed_safeguards() {
+        let settings = crate::types::ManagedSettings::default();
+        assert!(has_managed_settings(None, Some(&settings)));
+        assert!(!has_managed_settings(None, None));
+    }
+
+    fn attribution_context() -> PermissionDecisionContext {
+        PermissionDecisionContext {
+            outcome: PermissionDecisionOutcome::AutoApproved,
+            response_capability: None,
+            source: PermissionDecisionSource::AssistedApproval,
+            surface: PermissionDecisionSurface::CopilotApp,
+        }
+    }
+
+    #[test]
+    fn response_params_omit_decision_context_without_attribution() {
+        for (result, expected) in [
+            (
+                PermissionResult::approve_once(),
+                json!({ "kind": "approve-once" }),
+            ),
+            (PermissionResult::reject(None), json!({ "kind": "reject" })),
+            (
+                PermissionResult::reject(Some("bad".to_string())),
+                json!({ "kind": "reject", "feedback": "bad" }),
+            ),
+            (
+                PermissionResult::user_not_available(),
+                json!({ "kind": "user-not-available" }),
+            ),
+        ] {
+            let params = permission_response_params(
+                &SessionId::from("session-1"),
+                &RequestId::from("permission-1"),
+                &result,
+            )
+            .unwrap();
+            assert_eq!(
+                params,
+                json!({
+                    "sessionId": "session-1",
+                    "requestId": "permission-1",
+                    "result": expected,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn response_params_forward_decision_context_alongside_result() {
+        let params = permission_response_params(
+            &SessionId::from("session-1"),
+            &RequestId::from("permission-1"),
+            &PermissionResult::approve_once().with_context(attribution_context()),
+        )
+        .unwrap();
         assert_eq!(
-            notification_permission_payload(&PermissionResult::user_not_available()),
-            Some(json!({ "kind": "user-not-available" }))
+            params,
+            json!({
+                "sessionId": "session-1",
+                "requestId": "permission-1",
+                "result": { "kind": "approve-once" },
+                "decisionContext": {
+                    "outcome": "auto_approved",
+                    "source": "assisted_approval",
+                    "surface": "copilot_app",
+                },
+            })
         );
+        // The context is a sibling of `result`, never nested inside it.
+        assert!(params["result"].get("decisionContext").is_none());
+    }
+
+    #[test]
+    fn response_params_suppressed_for_no_result() {
+        assert!(
+            permission_response_params(
+                &SessionId::from("session-1"),
+                &RequestId::from("permission-1"),
+                &PermissionResult::NoResult,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn with_context_is_a_no_op_on_no_result() {
+        let result = PermissionResult::no_result().with_context(attribution_context());
+        assert!(matches!(result, PermissionResult::NoResult));
+    }
+
+    #[test]
+    fn with_context_replaces_rather_than_nests() {
+        let result = PermissionResult::approve_once()
+            .with_context(attribution_context())
+            .with_context(PermissionDecisionContext {
+                outcome: PermissionDecisionOutcome::PromptedUser,
+                response_capability: None,
+                source: PermissionDecisionSource::HumanResponse,
+                surface: PermissionDecisionSurface::Sdk,
+            });
+        let params = permission_response_params(
+            &SessionId::from("session-1"),
+            &RequestId::from("permission-1"),
+            &result,
+        )
+        .unwrap();
+        assert_eq!(
+            params["decisionContext"],
+            json!({
+                "outcome": "prompted_user",
+                "source": "human_response",
+                "surface": "sdk",
+            })
+        );
+    }
+
+    #[test]
+    fn permission_request_data_reads_nested_managed_approval_metadata() {
+        let data = permission_request_data(
+            &json!({
+                "requestId": "permission-1",
+                "permissionRequest": {
+                    "kind": "read",
+                    "managedApprovalRequired": true,
+                    "path": "/workspace/file.txt"
+                }
+            }),
+            false,
+        );
+
+        assert_eq!(data.managed_approval_required, Some(true));
+        assert_eq!(
+            data.extra["permissionRequest"]["path"],
+            "/workspace/file.txt"
+        );
+    }
+
+    #[test]
+    fn permission_request_data_preserves_managed_flag_when_other_fields_are_malformed() {
+        let data = permission_request_data(
+            &json!({
+                "requestId": "permission-1",
+                "permissionRequest": {
+                    "kind": "read",
+                    "managedApprovalRequired": true,
+                    "toolCallId": 42
+                }
+            }),
+            false,
+        );
+
+        assert_eq!(data.managed_approval_required, Some(true));
+        assert_eq!(data.extra["requestId"], "permission-1");
+    }
+
+    #[test]
+    fn permission_request_data_fails_closed_for_malformed_managed_flag() {
+        let data = permission_request_data(
+            &json!({
+                "requestId": "permission-1",
+                "permissionRequest": {
+                    "kind": "read",
+                    "managedApprovalRequired": "yes",
+                    "path": "/workspace/file.txt"
+                }
+            }),
+            false,
+        );
+
+        assert_eq!(data.managed_approval_required, Some(true));
+    }
+
+    #[test]
+    fn permission_request_data_preserves_valid_false_managed_flag() {
+        let data = permission_request_data(
+            &json!({
+                "requestId": "permission-1",
+                "permissionRequest": {
+                    "kind": "read",
+                    "managedApprovalRequired": false,
+                    "path": "/workspace/file.txt"
+                }
+            }),
+            false,
+        );
+
+        assert_eq!(data.managed_approval_required, Some(false));
     }
 }

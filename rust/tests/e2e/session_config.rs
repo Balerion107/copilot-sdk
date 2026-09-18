@@ -15,9 +15,10 @@ use http::{HeaderMap, HeaderValue};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
 
-use super::support::{
-    DEFAULT_TEST_TOKEN, E2eContext, with_e2e_context, with_e2e_context_no_snapshot,
-};
+use super::support::{DEFAULT_TEST_TOKEN, E2eContext, with_e2e_context_no_snapshot};
+
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("session_config", 4);
 
 const SYNTHETIC_TEXT: &str = "OK from the synthetic stream.";
 const CITATION_PROMPT: &str = "Summarize the attached PDF with citations enabled.";
@@ -90,7 +91,8 @@ fn task_agent_types(exchange: &Value) -> Vec<String> {
 
 #[tokio::test]
 async fn should_apply_session_limits_on_create() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "session_config",
         "should_apply_session_limits_on_create",
         |ctx| {
@@ -123,7 +125,8 @@ async fn should_apply_session_limits_on_create() {
 
 #[tokio::test]
 async fn should_apply_session_limits_on_resume() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "session_config",
         "should_apply_session_limits_on_resume",
         |ctx| {
@@ -169,7 +172,8 @@ async fn should_apply_session_limits_on_resume() {
 
 #[tokio::test]
 async fn should_apply_excluded_built_in_agents_on_create() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "session_config",
         "should_apply_excluded_built_in_agents_on_create",
         |ctx| {
@@ -222,7 +226,8 @@ async fn should_apply_excluded_built_in_agents_on_create() {
 
 #[tokio::test]
 async fn should_apply_excluded_built_in_agents_on_resume() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "session_config",
         "should_apply_excluded_built_in_agents_on_resume",
         |ctx| {
@@ -357,7 +362,7 @@ fn anthropic_message_stream_body(text: &str) -> String {
                     "id": "msg_stub_1",
                     "type": "message",
                     "role": "assistant",
-                    "model": "claude-sonnet-4.5",
+                    "model": "claude-sonnet-5",
                     "content": [],
                     "stop_reason": null,
                     "stop_sequence": null,
@@ -409,8 +414,8 @@ fn synth_non_inference_response(url: &str) -> CopilotHttpResponse {
             json_headers(),
             json!({
                 "data": [{
-                    "id": "claude-sonnet-4.5",
-                    "name": "Claude Sonnet 4.5",
+                    "id": "claude-sonnet-5",
+                    "name": "Claude Sonnet 5",
                     "object": "model",
                     "vendor": "Anthropic",
                     "version": "1",
@@ -418,7 +423,7 @@ fn synth_non_inference_response(url: &str) -> CopilotHttpResponse {
                     "model_picker_enabled": true,
                     "capabilities": {
                         "type": "chat",
-                        "family": "claude-sonnet-4.5",
+                        "family": "claude-sonnet-5",
                         "tokenizer": "o200k_base",
                         "limits": {
                             "max_context_window_tokens": 200000,
@@ -454,7 +459,7 @@ fn synth_inference_response(url: &str, body: &[u8]) -> CopilotHttpResponse {
                 "id": "msg_stub_1",
                 "type": "message",
                 "role": "assistant",
-                "model": "claude-sonnet-4.5",
+                "model": "claude-sonnet-5",
                 "content": [{ "type": "text", "text": SYNTHETIC_TEXT }],
                 "stop_reason": "end_turn",
                 "stop_sequence": null,
@@ -469,7 +474,7 @@ fn synth_inference_response(url: &str, body: &[u8]) -> CopilotHttpResponse {
             "id": "chatcmpl-stub-1",
             "object": "chat.completion",
             "created": 1,
-            "model": "claude-sonnet-4.5",
+            "model": "claude-sonnet-5",
             "choices": [{
                 "index": 0,
                 "message": { "role": "assistant", "content": SYNTHETIC_TEXT },
@@ -484,8 +489,8 @@ fn anthropic_provider() -> ProviderConfig {
     ProviderConfig::new("https://anthropic-citations.invalid/v1")
         .with_provider_type("anthropic")
         .with_api_key("test-provider-key")
-        .with_model_id("claude-sonnet-4.5")
-        .with_wire_model("claude-sonnet-4.5")
+        .with_model_id("claude-sonnet-5")
+        .with_wire_model("claude-sonnet-5")
 }
 
 fn pdf_attachment() -> Attachment {
@@ -527,7 +532,7 @@ async fn should_enable_citations_for_anthropic_file_attachments_on_create() {
                 .create_session(
                     SessionConfig::default()
                         .with_permission_handler(Arc::new(ApproveAllHandler))
-                        .with_model("claude-sonnet-4.5")
+                        .with_model("claude-sonnet-5")
                         .with_enable_citations(true)
                         .with_provider(anthropic_provider()),
                 )
@@ -556,6 +561,9 @@ async fn should_enable_citations_for_anthropic_file_attachments_on_create() {
 
 #[tokio::test]
 async fn should_enable_citations_for_anthropic_file_attachments_on_resume() {
+    if super::support::skip_inprocess("LLM inference providers are process-global in-process") {
+        return;
+    }
     with_e2e_context_no_snapshot(|ctx| {
         Box::pin(async move {
             ctx.set_default_copilot_user();
@@ -587,7 +595,7 @@ async fn should_enable_citations_for_anthropic_file_attachments_on_resume() {
                 .resume_session(
                     ResumeSessionConfig::new(session1.id().clone())
                         .with_permission_handler(Arc::new(ApproveAllHandler))
-                        .with_model("claude-sonnet-4.5")
+                        .with_model("claude-sonnet-5")
                         .with_enable_citations(true)
                         .with_provider(anthropic_provider()),
                 )

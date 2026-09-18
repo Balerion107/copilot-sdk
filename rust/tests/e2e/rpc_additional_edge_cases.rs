@@ -1,14 +1,16 @@
 use github_copilot_sdk::rpc::{
-    ModeSetRequest, NameSetRequest, PermissionsSetApproveAllRequest, PlanUpdateRequest,
-    ShellExecRequest, WorkspacesCreateFileRequest, WorkspacesReadFileRequest,
+    ModeSetRequest, NameSetRequest, PermissionsResetSessionApprovalsRequest,
+    PermissionsSetApproveAllRequest, PlanUpdateRequest, ShellExecRequest, ShellKillRequest,
+    WorkspacesCreateFileRequest, WorkspacesReadFileRequest,
 };
 use github_copilot_sdk::session_events::SessionMode;
 
-use super::support::{wait_for_condition, with_e2e_context};
+use super::support::wait_for_condition;
 
 #[tokio::test]
 async fn shell_exec_with_zero_timeout_does_not_kill_long_running_command() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "shell_exec_with_zero_timeout_does_not_kill_long_running_command",
         |ctx| {
@@ -37,6 +39,16 @@ async fn shell_exec_with_zero_timeout_does_not_kill_long_running_command() {
                     marker_path.exists()
                 })
                 .await;
+                let killed = session
+                    .rpc()
+                    .shell()
+                    .kill(ShellKillRequest {
+                        process_id: result.process_id,
+                        signal: None,
+                    })
+                    .await
+                    .expect("kill zero-timeout shell process");
+                assert!(killed.killed);
 
                 session.disconnect().await.expect("disconnect session");
                 client.stop().await.expect("stop client");
@@ -48,7 +60,8 @@ async fn shell_exec_with_zero_timeout_does_not_kill_long_running_command() {
 
 #[tokio::test]
 async fn workspaces_create_file_with_empty_content_round_trips() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "workspaces_create_file_with_empty_content_round_trips",
         |ctx| {
@@ -97,7 +110,8 @@ async fn workspaces_create_file_with_empty_content_round_trips() {
 
 #[tokio::test]
 async fn workspaces_create_file_with_unicode_content_round_trips() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "workspaces_create_file_with_unicode_content_round_trips",
         |ctx| {
@@ -140,7 +154,8 @@ async fn workspaces_create_file_with_unicode_content_round_trips() {
 
 #[tokio::test]
 async fn workspaces_create_file_with_large_content_round_trips() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "workspaces_create_file_with_large_content_round_trips",
         |ctx| {
@@ -186,7 +201,8 @@ async fn workspaces_create_file_with_large_content_round_trips() {
 
 #[tokio::test]
 async fn plan_update_with_empty_content_then_read_returns_empty() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "plan_update_with_empty_content_then_read_returns_empty",
         |ctx| {
@@ -219,7 +235,8 @@ async fn plan_update_with_empty_content_then_read_returns_empty() {
 
 #[tokio::test]
 async fn plan_delete_when_none_exists_is_idempotent() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "plan_delete_when_none_exists_is_idempotent",
         |ctx| {
@@ -251,7 +268,8 @@ async fn plan_delete_when_none_exists_is_idempotent() {
 
 #[tokio::test]
 async fn mode_set_to_same_value_multiple_times_stays_stable() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "mode_set_to_same_value_multiple_times_stays_stable",
         |ctx| {
@@ -269,6 +287,7 @@ async fn mode_set_to_same_value_multiple_times_stays_stable() {
                         .mode()
                         .set(ModeSetRequest {
                             mode: SessionMode::Plan,
+                            ..Default::default()
                         })
                         .await
                         .expect("set mode");
@@ -288,7 +307,8 @@ async fn mode_set_to_same_value_multiple_times_stays_stable() {
 
 #[tokio::test]
 async fn name_set_with_unicode_round_trips() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "name_set_with_unicode_round_trips",
         |ctx| {
@@ -322,7 +342,8 @@ async fn name_set_with_unicode_round_trips() {
 
 #[tokio::test]
 async fn usage_get_metrics_on_fresh_session_returns_zero_tokens() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "usage_get_metrics_on_fresh_session_returns_zero_tokens",
         |ctx| {
@@ -350,7 +371,8 @@ async fn usage_get_metrics_on_fresh_session_returns_zero_tokens() {
 
 #[tokio::test]
 async fn permissions_reset_session_approvals_on_fresh_session_is_noop() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "permissions_reset_session_approvals_on_fresh_session_is_noop",
         |ctx| {
@@ -365,7 +387,7 @@ async fn permissions_reset_session_approvals_on_fresh_session_is_noop() {
                 let result = session
                     .rpc()
                     .permissions()
-                    .reset_session_approvals()
+                    .reset_session_approvals(PermissionsResetSessionApprovalsRequest::default())
                     .await
                     .expect("reset approvals");
                 assert!(result.success);
@@ -380,7 +402,8 @@ async fn permissions_reset_session_approvals_on_fresh_session_is_noop() {
 
 #[tokio::test]
 async fn permissions_set_approve_all_toggle_round_trips() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "permissions_set_approve_all_toggle_round_trips",
         |ctx| {
@@ -439,7 +462,8 @@ async fn permissions_set_approve_all_toggle_round_trips() {
 
 #[tokio::test]
 async fn workspaces_createfile_then_listfiles_returns_all_files() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "workspaces_createfile_then_listfiles_returns_all_files",
         |ctx| {
@@ -491,7 +515,8 @@ async fn workspaces_createfile_then_listfiles_returns_all_files() {
 
 #[tokio::test]
 async fn workspaces_getworkspace_returns_stable_result_across_calls() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_additional_edge_cases",
         "workspaces_getworkspace_returns_stable_result_across_calls",
         |ctx| {
@@ -532,7 +557,7 @@ async fn workspaces_getworkspace_returns_stable_result_across_calls() {
 #[cfg(windows)]
 fn delayed_marker_command(marker_path: &std::path::Path) -> String {
     format!(
-        "powershell -NoLogo -NoProfile -Command \"Start-Sleep -Seconds 2; Set-Content -LiteralPath '{}' -Value done\"",
+        "ping 127.0.0.1 -n 3 >nul & echo done>\"{}\" & ping 127.0.0.1 -n 61 >nul",
         marker_path.display()
     )
 }
@@ -540,7 +565,9 @@ fn delayed_marker_command(marker_path: &std::path::Path) -> String {
 #[cfg(not(windows))]
 fn delayed_marker_command(marker_path: &std::path::Path) -> String {
     format!(
-        "sh -c \"sleep 2; printf done > '{}'\"",
+        "sh -c \"sleep 2; printf done > '{}'; sleep 60\"",
         marker_path.display()
     )
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_additional_edge_cases", 13);

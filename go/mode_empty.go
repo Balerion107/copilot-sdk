@@ -122,6 +122,10 @@ func (c *Client) applyConfigDefaultsForMode(config *SessionConfig) {
 	if c.options.Mode != ModeEmpty {
 		return
 	}
+	if config.EnableExperimentalMode == nil {
+		f := false
+		config.EnableExperimentalMode = &f
+	}
 	if config.EnableSessionTelemetry == nil {
 		f := false
 		config.EnableSessionTelemetry = &f
@@ -159,6 +163,10 @@ func (c *Client) applyConfigDefaultsForMode(config *SessionConfig) {
 	}
 	if config.MCPOAuthTokenStorage == "" {
 		config.MCPOAuthTokenStorage = "in-memory"
+	}
+	if config.CustomAgentsLocalOnly == nil {
+		localOnly := true
+		config.CustomAgentsLocalOnly = &localOnly
 	}
 }
 
@@ -166,6 +174,10 @@ func (c *Client) applyResumeDefaultsForMode(config *ResumeSessionConfig) {
 	if c.options.Mode != ModeEmpty {
 		return
 	}
+	if config.EnableExperimentalMode == nil {
+		f := false
+		config.EnableExperimentalMode = &f
+	}
 	if config.EnableSessionTelemetry == nil {
 		f := false
 		config.EnableSessionTelemetry = &f
@@ -204,12 +216,17 @@ func (c *Client) applyResumeDefaultsForMode(config *ResumeSessionConfig) {
 	if config.MCPOAuthTokenStorage == "" {
 		config.MCPOAuthTokenStorage = "in-memory"
 	}
+	if config.CustomAgentsLocalOnly == nil {
+		localOnly := true
+		config.CustomAgentsLocalOnly = &localOnly
+	}
 }
 
 // updateSessionOptionsForMode applies the per-mode safe-defaults patch via
 // session.options.update after create/resume succeeds. In empty mode the
 // four overridable feature flags default to safe values; caller values win.
-// installedPlugins=[] is unconditional in empty mode.
+// installedPlugins=[] is unconditional in empty mode. IncludedBuiltinSkills
+// defaults to [] but callers can explicitly allow selected runtime-bundled skills.
 func (c *Client) updateSessionOptionsForMode(ctx context.Context, session *Session, base optBackInFields) error {
 	patch := &rpc.SessionUpdateOptionsParams{}
 	hasAny := false
@@ -239,6 +256,11 @@ func (c *Client) updateSessionOptionsForMode(ctx context.Context, session *Sessi
 			patch.ManageScheduleEnabled = &f
 		}
 		patch.InstalledPlugins = []rpc.SessionInstalledPlugin{}
+		if base.IncludedBuiltinSkills != nil {
+			patch.IncludedBuiltinSkills = base.IncludedBuiltinSkills
+		} else {
+			patch.IncludedBuiltinSkills = []string{}
+		}
 		hasAny = true
 	} else {
 		if base.SkipCustomInstructions != nil {
@@ -255,6 +277,10 @@ func (c *Client) updateSessionOptionsForMode(ctx context.Context, session *Sessi
 		}
 		if base.ManageScheduleEnabled != nil {
 			patch.ManageScheduleEnabled = base.ManageScheduleEnabled
+			hasAny = true
+		}
+		if base.IncludedBuiltinSkills != nil {
+			patch.IncludedBuiltinSkills = base.IncludedBuiltinSkills
 			hasAny = true
 		}
 	}
@@ -281,4 +307,5 @@ type optBackInFields struct {
 	CustomAgentsLocalOnly  *bool
 	CoauthorEnabled        *bool
 	ManageScheduleEnabled  *bool
+	IncludedBuiltinSkills  []string
 }

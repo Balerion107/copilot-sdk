@@ -19,8 +19,7 @@ Copilot: In Tokyo it's 75°F and sunny. Great day to be outside!
 Before you begin, make sure you have:
 
 * **GitHub Copilot CLI** installed and authenticated (the Node.js, Python, and .NET SDKs provide the CLI automatically—see [Bundled CLI](./setup/bundled-cli.md). Required for Go, Java, and Rust unless using their application-level CLI bundling features.)
-* Your preferred language runtime:
-  * **Node.js** 20+ or **Python** 3.11+ or **Go** 1.24+ or **Rust** 1.94+ or **Java** 17+ or **.NET** 8.0+
+* Your preferred language runtime, at or above the version its SDK requires. Each SDK states its own floor in the Prerequisites section of its README: [Node.js](../nodejs/README.md#prerequisites), [Python](../python/README.md#prerequisites), [Go](../go/README.md#prerequisites), [Rust](../rust/README.md#prerequisites), [Java](../java/README.md#prerequisites), [.NET](../dotnet/README.md#prerequisites).
 
 Verify the CLI is working:
 
@@ -2053,6 +2052,7 @@ let mut options = ClientOptions::default();
 options.transport = Transport::External {
     host: "localhost".to_string(),
     port: 4321,
+    connection_token: None,
 };
 let client = Client::start(options).await?;
 
@@ -2158,7 +2158,7 @@ Install with telemetry extras: `pip install copilot-sdk[telemetry]` (provides `o
 
 <!-- docs-validate: skip -->
 ```go
-client, err := copilot.NewClient(copilot.ClientOptions{
+client := copilot.NewClient(&copilot.ClientOptions{
     Telemetry: &copilot.TelemetryConfig{
         OTLPEndpoint: "http://localhost:4318",
     },
@@ -2263,7 +2263,7 @@ Trace context is propagated automatically—no manual instrumentation is needed:
 ## Learn more
 
 * [Authentication Guide](./auth/authenticate.md) - GitHub OAuth, environment variables, and BYOK
-* [BYOK (Bring Your Own Key)](./auth/byok.md) - Use your own API keys from Azure AI Foundry, OpenAI, etc.
+* [BYOK (Bring Your Own Key)](./auth/byok.md) - Use your own API keys from Microsoft Foundry, OpenAI, etc.
 * [Node.js SDK Reference](../nodejs/README.md)
 * [Python SDK Reference](../python/README.md)
 * [Go SDK Reference](../go/README.md)

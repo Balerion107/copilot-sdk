@@ -7,18 +7,24 @@
  * @module session
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { MessageConnection } from "vscode-jsonrpc/node.js";
 import { ConnectionError, ErrorCodes, ResponseError } from "vscode-jsonrpc/node.js";
-import { createSessionRpc } from "./generated/rpc.js";
+import { createInternalSessionRpc, createSessionRpc } from "./generated/rpc.js";
 import type {
     ClientSessionApiHandlers,
     CanvasActionInvokeResult,
     CurrentToolMetadata,
     McpOauthPendingRequestResponse,
+    FactoryLogLine,
+    FactoryRunResult as WireFactoryRunResult,
+    ModelSwitchAutoTierResult,
 } from "./generated/rpc.js";
 import { type Canvas, CanvasError } from "./canvas.js";
 import type { OpenCanvasInstance } from "./generated/rpc.js";
 import { getTraceContext } from "./telemetry.js";
+import { isResponseSchema, toJsonSchema } from "./schema.js";
+import { isAttributedPermissionResult } from "./types.js";
 import type {
     CommandHandler,
     AutoModeSwitchHandler,
@@ -34,13 +40,16 @@ import type {
     BearerTokenProvider,
     UiInputOptions,
     MessageOptions,
+    ResponseSchema,
     McpAuthHandler,
     McpAuthRequest,
     PermissionHandler,
     PermissionRequest,
+    PermissionRequestResult,
     ContextTier,
     ReasoningEffort,
     ReasoningSummary,
+    AutoTier,
     ModelCapabilitiesOverride,
     SectionTransformFn,
     SessionCapabilities,
@@ -60,6 +69,69 @@ import type {
     UserInputRequest,
     UserInputResponse,
 } from "./types.js";
+import {
+    FACTORY_AGENT_OPTION_KEYS,
+    getFactoryDefinition,
+    FactoryResumeError,
+    isFactoryRunTerminal,
+    type FactoryResumeErrorCode,
+    type FactoryListRunsOptions,
+    type FactoryRunResult,
+    type FactoryAgentOptions,
+    type RunOptions,
+    type SessionFactoryApi,
+    type FactoryContext,
+    type FactoryHandle,
+    type JsonValue,
+    type FactoryStepOptions,
+} from "./factory.js";
+
+function isFactoryResumeErrorCode(value: unknown): value is FactoryResumeErrorCode {
+    return (
+        value === "not_found" ||
+        value === "non_resumable" ||
+        value === "already_active" ||
+        value === "factory_already_running" ||
+        value === "factory_limits_invalid" ||
+        value === "factory_session_disposed" ||
+        value === "factory_storage_unavailable" ||
+        value === "factory_storage_corrupt"
+    );
+}
+
+function copyDefinedFactoryAgentOption<TKey extends keyof FactoryAgentOptions>(
+    source: FactoryAgentOptions,
+    target: FactoryAgentOptions,
+    key: TKey
+): void {
+    const value = source[key];
+    if (value !== undefined) {
+        target[key] = value;
+    }
+}
+
+type FactoryExecutionContext = {
+    active: boolean;
+    helperScope?: "parallel" | "pipeline";
+};
+
+const factoryExecutionStore = new AsyncLocalStorage<FactoryExecutionContext>();
+
+function throwIfFactoryExecutionIsActive(): void {
+    if (factoryExecutionStore.getStore()?.active) {
+        throw new Error(
+            "factory.run, factory.resume, and factory.pause are not allowed while a factory body is running on this call path."
+        );
+    }
+}
+
+function runInFactoryHelperScope<TResult>(
+    helperScope: "parallel" | "pipeline",
+    callback: () => Promise<TResult> | TResult
+): Promise<TResult> | TResult {
+    const current = factoryExecutionStore.getStore();
+    return factoryExecutionStore.run({ active: current?.active ?? false, helperScope }, callback);
+}
 
 /**
  * Convert a raw hook input received over the wire into its public-facing shape.
@@ -74,9 +146,18 @@ function deserializeHookInput(raw: unknown): unknown {
     ) {
         return raw;
     }
-    const obj = raw as Record<string, unknown> & { timestamp: number; cwd?: string };
-    const { cwd, ...rest } = obj;
-    return { ...rest, timestamp: new Date(obj.timestamp), workingDirectory: cwd };
+    const obj = raw as Record<string, unknown> & {
+        timestamp: number;
+        cwd?: string;
+        stop_hook_active?: boolean;
+    };
+    const { cwd, stop_hook_active, ...rest } = obj;
+    return {
+        ...rest,
+        timestamp: new Date(obj.timestamp),
+        workingDirectory: cwd,
+        ...(stop_hook_active === undefined ? {} : { stopHookActive: stop_hook_active }),
+    };
 }
 
 function isOpenCanvasInstance(value: unknown): value is OpenCanvasInstance {
@@ -91,6 +172,229 @@ function isOpenCanvasInstance(value: unknown): value is OpenCanvasInstance {
         instance.extensionId.length > 0 &&
         typeof instance.canvasId === "string" &&
         instance.canvasId.length > 0
+    );
+}
+
+const FACTORY_LOG_FLUSH_DELAY_MS = 10;
+const MAX_FACTORY_FANOUT_ITEMS = 4096;
+
+function assertFactoryFanoutSize(kind: "parallel" | "pipeline", size: number): void {
+    if (size > MAX_FACTORY_FANOUT_ITEMS) {
+        throw new Error(
+            `${kind}() accepts at most ${MAX_FACTORY_FANOUT_ITEMS} items; got ${size}.`
+        );
+    }
+}
+
+async function runFactoryParallel<TResult>(
+    thunks: Array<() => Promise<TResult> | TResult>
+): Promise<Array<TResult | null>> {
+    if (!Array.isArray(thunks)) {
+        throw new Error(
+            "parallel() expects an array of functions, not promises. Wrap each call: () => agent(...)"
+        );
+    }
+    assertFactoryFanoutSize("parallel", thunks.length);
+    if (thunks.some((thunk) => typeof thunk !== "function")) {
+        throw new Error(
+            "parallel() expects an array of functions, not promises. Wrap each call: () => agent(...)"
+        );
+    }
+    return Promise.all(
+        thunks.map((thunk) =>
+            Promise.resolve()
+                .then(() => runInFactoryHelperScope("parallel", thunk))
+                .catch((error) => {
+                    // Cancellation and hard runtime failures must propagate out
+                    // of the combinator rather than be mapped to a successful
+                    // `null`; otherwise an aborted run, or one that hit a
+                    // resource ceiling or durable-state failure, could be
+                    // reported as completed. An ordinary subagent failure never
+                    // rejects — it already resolves `null`.
+                    if (isFactoryFatalError(error)) {
+                        throw error;
+                    }
+                    return null;
+                })
+        )
+    );
+}
+
+async function runFactoryPipeline(
+    items: unknown[],
+    ...stages: Array<
+        (previous: unknown, item: unknown, index: number) => Promise<unknown> | unknown
+    >
+): Promise<unknown[]> {
+    if (!Array.isArray(items)) {
+        throw new Error("pipeline(items, ...stages): items must be an array");
+    }
+    assertFactoryFanoutSize("pipeline", items.length);
+    return Promise.all(
+        items.map(async (item, index) => {
+            let previous = item;
+            for (const stage of stages) {
+                try {
+                    previous = await runInFactoryHelperScope("pipeline", () =>
+                        stage(previous, item, index)
+                    );
+                } catch (error) {
+                    // Propagate cancellation and hard runtime failures instead
+                    // of mapping them to `null`, so an aborted stage — or one
+                    // that hit a resource ceiling or durable-state failure —
+                    // does not let the run report success.
+                    if (isFactoryFatalError(error)) {
+                        throw error;
+                    }
+                    return null;
+                }
+            }
+            return previous;
+        })
+    );
+}
+
+class FactoryProgressBuffer {
+    private nextSeq = 0;
+    private pending: FactoryLogLine[] = [];
+    private flushTimer?: ReturnType<typeof setTimeout>;
+    private flushTail: Promise<void> = Promise.resolve();
+    private flushError: unknown;
+    private flushFailed = false;
+    private closed = false;
+
+    constructor(private readonly send: (lines: FactoryLogLine[]) => Promise<void>) {}
+
+    enqueue(kind: FactoryLogLine["kind"], text: string): void {
+        if (this.closed) {
+            throw new Error("Cannot log after the factory run has settled");
+        }
+
+        this.pending.push({ seq: this.nextSeq++, kind, text });
+        this.scheduleFlush();
+    }
+
+    async flush(): Promise<void> {
+        this.clearFlushTimer();
+        const lines = this.pending.splice(0);
+        if (lines.length > 0) {
+            this.flushTail = this.flushTail.then(async () => {
+                try {
+                    await this.send(lines);
+                } catch (error) {
+                    if (!this.flushFailed) {
+                        this.flushFailed = true;
+                        this.flushError = error;
+                    }
+                }
+            });
+        }
+        await this.flushTail;
+        if (this.flushFailed) {
+            throw this.flushError;
+        }
+    }
+
+    async close(): Promise<void> {
+        this.closed = true;
+        this.clearFlushTimer();
+        const lines = this.pending.splice(0);
+        await this.flushTail;
+        if (this.flushFailed) {
+            console.warn(
+                "Ignoring a background factory progress flush failure after the factory body settled",
+                this.flushError
+            );
+        }
+        if (lines.length > 0) {
+            try {
+                await this.send(lines);
+            } catch (error) {
+                console.warn(
+                    "Failed to flush final factory progress after the factory body settled",
+                    error
+                );
+            }
+        }
+    }
+
+    private scheduleFlush(): void {
+        if (this.flushTimer !== undefined) {
+            return;
+        }
+        this.flushTimer = setTimeout(() => {
+            this.flushTimer = undefined;
+            void this.flush().catch(() => {});
+        }, FACTORY_LOG_FLUSH_DELAY_MS);
+        this.flushTimer.unref?.();
+    }
+
+    private clearFlushTimer(): void {
+        if (this.flushTimer !== undefined) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = undefined;
+        }
+    }
+}
+
+async function awaitFactoryOperation<TResult>(
+    operation: () => Promise<TResult>,
+    signal: AbortSignal
+): Promise<TResult> {
+    // The operation is a thunk so an already-aborted run never dispatches the
+    // RPC at all, rather than sending it and rejecting locally afterwards.
+    let rejectAbort: ((reason?: unknown) => void) | undefined;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+        rejectAbort = reject;
+    });
+    const onAbort = () =>
+        rejectAbort?.(signal.reason ?? new DOMException("Factory run was aborted", "AbortError"));
+    // Register before the abort check and before dispatching, so an abort can
+    // neither be missed by a not-yet-attached listener nor start work on an
+    // already-cancelled run.
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+        throwIfFactoryAborted(signal);
+        return await Promise.race([operation(), abortPromise]);
+    } finally {
+        signal.removeEventListener("abort", onAbort);
+    }
+}
+
+function throwIfFactoryAborted(signal: AbortSignal): void {
+    if (signal.aborted) {
+        throw signal.reason ?? new DOMException("Factory run was aborted", "AbortError");
+    }
+}
+
+/**
+ * Whether an error represents factory run cancellation (an `AbortError`-shaped
+ * rejection from {@link awaitFactoryOperation}). Cancellation must bubble out of
+ * `parallel`/`pipeline` rather than being flattened into a `null` result.
+ */
+function isFactoryAbortError(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError"
+    );
+}
+
+/**
+ * Errors a factory combinator must never swallow into a `null` item.
+ *
+ * Cooperative cancellation aborts the run, and a rejected RPC is a hard
+ * runtime failure — a reached limit, a durable-state failure, or a dropped
+ * transport — that must terminate the run rather than be reported as a
+ * successfully-`null` item. An ordinary subagent failure does not reject; the
+ * runtime already resolves it as `null`.
+ */
+function isFactoryFatalError(error: unknown): boolean {
+    return (
+        isFactoryAbortError(error) ||
+        error instanceof ResponseError ||
+        error instanceof ConnectionError
     );
 }
 
@@ -135,9 +439,12 @@ export class CopilotSession {
     private typedEventHandlers: Map<SessionEventType, Set<(event: SessionEvent) => void>> =
         new Map();
     private toolHandlers: Map<string, ToolHandler> = new Map();
+    private pendingExternalTools: Map<string, AbortController> = new Map();
     private canvases: Map<string, Canvas> = new Map();
     private bearerTokenProviders: Map<string, BearerTokenProvider> = new Map();
     private commandHandlers: Map<string, CommandHandler> = new Map();
+    private factories = new Map<string, ReturnType<typeof getFactoryDefinition>>();
+    private factoryAbortControllers = new Map<string, Map<string, AbortController>>();
     private permissionHandler?: PermissionHandler;
     private mcpAuthHandler?: McpAuthHandler;
     private userInputHandler?: UserInputHandler;
@@ -147,13 +454,192 @@ export class CopilotSession {
     private hooks?: SessionHooks;
     private transformCallbacks?: Map<string, SectionTransformFn>;
     private _rpc: ReturnType<typeof createSessionRpc> | null = null;
+    private _internalRpc: ReturnType<typeof createInternalSessionRpc> | null = null;
     private traceContextProvider?: TraceContextProvider;
+    private readonly managedSettingsEnabled: boolean;
     private _capabilities: SessionCapabilities = {};
     private openCanvasInstances: OpenCanvasInstance[] = [];
     private disconnected = false;
+    private readonly pendingStructuredWaits = new Set<(error: Error) => void>();
+    private disconnecting = false;
+    private onDisconnected?: () => void;
 
     /** @internal Client session API handlers, populated by CopilotClient during create/resume. */
     clientSessionApis: ClientSessionApiHandlers = {};
+
+    /**
+     * Friendly factory API for running registered factories by name or handle.
+     *
+     * @experimental Part of the experimental Agent Factories surface and may
+     * change or be removed in future SDK or CLI releases.
+     */
+    readonly factory: SessionFactoryApi = {
+        run: (async (
+            nameOrHandle: string | FactoryHandle,
+            options?: RunOptions
+        ): Promise<unknown> => {
+            throwIfFactoryExecutionIsActive();
+            const name =
+                typeof nameOrHandle === "string"
+                    ? nameOrHandle
+                    : getFactoryDefinition(nameOrHandle).meta.name;
+            if (options?.resumeFromRunId !== undefined) {
+                return this.factory.resume(options.resumeFromRunId, {
+                    limits: options.limits,
+                    notifyOnComplete: options.notifyOnComplete,
+                    logPhaseNames: options.logPhaseNames,
+                });
+            }
+            const envelope = await this.rpc.factory.run({
+                name,
+                args: options?.args === undefined ? {} : options.args,
+                options: {
+                    limits: options?.limits,
+                    notifyOnComplete: options?.notifyOnComplete,
+                    logPhaseNames: options?.logPhaseNames,
+                },
+            });
+
+            return this.settleFactoryRun(envelope);
+        }) as SessionFactoryApi["run"],
+        resume: (async (runId: string, options?: Parameters<SessionFactoryApi["resume"]>[1]) => {
+            throwIfFactoryExecutionIsActive();
+            let response;
+            try {
+                response = await this.rpc.factory.resume({
+                    runId,
+                    limits: options?.limits,
+                    notifyOnComplete: options?.notifyOnComplete,
+                    logPhaseNames: options?.logPhaseNames,
+                });
+            } catch (error) {
+                if (
+                    error instanceof ResponseError &&
+                    typeof error.data === "object" &&
+                    error.data !== null
+                ) {
+                    const code = (error.data as { code?: unknown }).code;
+                    if (isFactoryResumeErrorCode(code)) {
+                        throw new FactoryResumeError(code, error.message);
+                    }
+                }
+                throw error;
+            }
+            return this.settleFactoryRun(response.run);
+        }) as SessionFactoryApi["resume"],
+        getRun: async (runId) => this.rpc.factory.getRun({ runId }),
+        waitForRun: (runId, options) => this.waitForFactoryRun(runId, options?.signal),
+        listRuns: (async (options?: FactoryListRunsOptions) => {
+            const page = await this.rpc.factory.listRuns(options ?? {});
+            return options === undefined ? page.runs : page;
+        }) as SessionFactoryApi["listRuns"],
+        getRunDetail: (runId) => this.rpc.factory.getRunDetail({ runId }),
+        getRunProgress: (runId, options = {}) =>
+            this.rpc.factory.getRunProgress({ runId, ...options }),
+        pause: async (runId) => {
+            throwIfFactoryExecutionIsActive();
+            return this.rpc.factory.pause({ runId });
+        },
+        cancel: async (runId) => this.rpc.factory.cancel({ runId }),
+    };
+
+    /**
+     * Resolve a start/resume envelope into the terminal envelope callers expect.
+     *
+     * The CLI may answer `session.factory.run` and `session.factory.resume`
+     * before the run settles, so a non-terminal envelope is followed by a wait
+     * on the run's terminal state.
+     */
+    private settleFactoryRun(envelope: WireFactoryRunResult): Promise<FactoryRunResult> {
+        if (isFactoryRunTerminal(envelope.status)) {
+            return Promise.resolve(envelope);
+        }
+        return this.waitForFactoryRun(envelope.runId);
+    }
+
+    /**
+     * Resolve when a factory run reaches a terminal status.
+     *
+     * The subscription is installed *before* the first read so a transition
+     * landing between the two cannot be missed, and re-reads are serialized so
+     * overlapping invalidation events cannot interleave — the run's revision
+     * advances once per operation, so a burst of events is common and must
+     * collapse into a single in-flight read. A bounded periodic re-read keeps a
+     * dropped invalidation from leaving the wait pending forever.
+     */
+    private waitForFactoryRun(runId: string, signal?: AbortSignal): Promise<FactoryRunResult> {
+        const abortError = (): unknown =>
+            signal?.reason ?? new DOMException("Factory run wait was aborted", "AbortError");
+        if (signal?.aborted === true) {
+            return Promise.reject(abortError());
+        }
+
+        return new Promise<FactoryRunResult>((resolve, reject) => {
+            let settled = false;
+            let reading = false;
+            let rereadRequested = false;
+            let pollHandle: ReturnType<typeof setInterval> | undefined;
+            let unsubscribe: (() => void) | undefined;
+            let onAbort: (() => void) | undefined;
+
+            const finish = (complete: () => void): void => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                if (pollHandle !== undefined) {
+                    clearInterval(pollHandle);
+                }
+                unsubscribe?.();
+                if (onAbort !== undefined) {
+                    signal?.removeEventListener("abort", onAbort);
+                }
+                complete();
+            };
+
+            const read = async (): Promise<void> => {
+                if (settled) {
+                    return;
+                }
+                if (reading) {
+                    rereadRequested = true;
+                    return;
+                }
+                reading = true;
+                try {
+                    do {
+                        rereadRequested = false;
+                        const envelope = await this.rpc.factory.getRun({ runId });
+                        if (isFactoryRunTerminal(envelope.status)) {
+                            finish(() => resolve(envelope));
+                            return;
+                        }
+                    } while (rereadRequested && !settled);
+                } catch (error) {
+                    finish(() => reject(error));
+                } finally {
+                    reading = false;
+                }
+            };
+
+            if (signal !== undefined) {
+                onAbort = (): void => finish(() => reject(abortError()));
+                signal.addEventListener("abort", onAbort, { once: true });
+            }
+
+            unsubscribe = this.on("factory.run_updated", (event) => {
+                if (event.data.runId === runId) {
+                    void read();
+                }
+            });
+
+            pollHandle = setInterval(() => void read(), 5_000);
+            // The re-read is a safety net, not work the process owes anyone: an
+            // outstanding wait must never keep Node alive on its own.
+            pollHandle.unref?.();
+            void read();
+        });
+    }
 
     /**
      * Creates a new CopilotSession instance.
@@ -169,10 +655,16 @@ export class CopilotSession {
         private connection: MessageConnection,
         private _workspacePath?: string,
         traceContextProvider?: TraceContextProvider,
-        options?: { mcpAuthHandler?: McpAuthHandler }
+        options?: {
+            mcpAuthHandler?: McpAuthHandler;
+            managedSettingsEnabled?: boolean;
+            onDisconnected?: () => void;
+        }
     ) {
         this.traceContextProvider = traceContextProvider;
         this.mcpAuthHandler = options?.mcpAuthHandler;
+        this.managedSettingsEnabled = options?.managedSettingsEnabled === true;
+        this.onDisconnected = options?.onDisconnected;
     }
 
     /**
@@ -183,6 +675,14 @@ export class CopilotSession {
             this._rpc = createSessionRpc(this.connection, this.sessionId);
         }
         return this._rpc;
+    }
+
+    /** @internal */
+    private get internalRpc(): ReturnType<typeof createInternalSessionRpc> {
+        if (!this._internalRpc) {
+            this._internalRpc = createInternalSessionRpc(this.connection, this.sessionId);
+        }
+        return this._internalRpc;
     }
 
     /**
@@ -224,13 +724,14 @@ export class CopilotSession {
     }
 
     /**
-     * Sends a message to this session and waits for the response.
+     * Sends a message to this session and returns once it is admitted.
      *
      * The message is processed asynchronously. Subscribe to events via {@link on}
      * to receive streaming responses and other session events.
      *
      * @param options - The message options including the prompt and optional attachments
-     * @returns A promise that resolves with the message ID of the response
+     * @returns The submitted user message's ID, not an assistant response ID.
+     *          When this send starts a run, root assistant messages carry it as originatingMessageId.
      * @throws Error if the session has been disconnected or the connection fails
      *
      * @example
@@ -250,11 +751,24 @@ export class CopilotSession {
             ...(await getTraceContext(this.traceContextProvider)),
             sessionId: this.sessionId,
             prompt: options.prompt,
+            source: options.source,
             displayPrompt: options.displayPrompt,
             attachments: options.attachments,
             mode: options.mode,
             agentMode: options.agentMode,
             requestHeaders: options.requestHeaders,
+            ...(options.responseSchema
+                ? {
+                      responseFormat: {
+                          type: "json_schema",
+                          jsonSchema: {
+                              name: "response",
+                              strict: true,
+                              schema: toJsonSchema(options.responseSchema),
+                          },
+                      },
+                  }
+                : {}),
         });
 
         return (response as { messageId: string }).messageId;
@@ -268,6 +782,9 @@ export class CopilotSession {
      * assistant has finished processing the message.
      *
      * Events are still delivered to handlers registered via {@link on} while waiting.
+     * With a schema as the second argument, returns its parsed, validated result.
+     * Structured waits select only root-agent output originating from this send;
+     * other queued work may delay session.idle but cannot replace the result.
      *
      * @param options - The message options including the prompt and optional attachments
      * @param timeout - Timeout in milliseconds (default: 60000). Controls how long to wait; does not abort in-flight agent work.
@@ -284,23 +801,62 @@ export class CopilotSession {
      * ```
      */
     async sendAndWait(prompt: string, timeout?: number): Promise<AssistantMessageEvent | undefined>;
+    async sendAndWait<TResult>(
+        options: MessageOptions | string,
+        responseSchema: ResponseSchema<TResult>,
+        timeout?: number
+    ): Promise<TResult>;
     async sendAndWait(
         options: MessageOptions,
         timeout?: number
     ): Promise<AssistantMessageEvent | undefined>;
     async sendAndWait(
         optionsOrPrompt: MessageOptions | string,
+        schemaOrTimeout?: ResponseSchema | number,
         timeout?: number
-    ): Promise<AssistantMessageEvent | undefined> {
+    ): Promise<unknown> {
         const options: MessageOptions =
             typeof optionsOrPrompt === "string" ? { prompt: optionsOrPrompt } : optionsOrPrompt;
-        const effectiveTimeout = timeout ?? 60_000;
+        const typedSchema = isResponseSchema(schemaOrTimeout) ? schemaOrTimeout : undefined;
+        if (schemaOrTimeout !== undefined && typeof schemaOrTimeout !== "number" && !typedSchema) {
+            throw new TypeError(
+                "The second argument must be a timeout or a schema with toJSONSchema() and parse(). " +
+                    "Pass raw JSON Schema in options.responseSchema instead."
+            );
+        }
+        const effectiveTimeout =
+            (typeof schemaOrTimeout === "number" ? schemaOrTimeout : timeout) ?? 60_000;
 
-        let resolveIdle: () => void;
-        let rejectWithError: (error: Error) => void;
-        const idlePromise = new Promise<void>((resolve, reject) => {
-            resolveIdle = resolve;
-            rejectWithError = reject;
+        if (typedSchema && options.responseSchema) {
+            throw new Error(
+                "Do not specify responseSchema in options when requesting a typed response."
+            );
+        }
+        if (typedSchema && options.mode === "immediate") {
+            throw new Error(
+                "Structured output cannot be requested on an immediate steering message."
+            );
+        }
+        if (typedSchema || options.responseSchema) {
+            const message = await this.sendAndWaitForStructuredMessage(
+                typedSchema ? { ...options, responseSchema: typedSchema } : options,
+                effectiveTimeout
+            );
+            if (typedSchema) {
+                if (!message) {
+                    throw new Error(
+                        "The requested run completed without a structured assistant response."
+                    );
+                }
+                return typedSchema.parse(JSON.parse(message.data.content));
+            }
+            return message;
+        }
+
+        type SessionOutcome = { kind: "idle" } | { kind: "error"; error: Error };
+        let resolveOutcome: (outcome: SessionOutcome) => void;
+        const outcomePromise = new Promise<SessionOutcome>((resolve) => {
+            resolveOutcome = resolve;
         });
 
         let lastAssistantMessage: AssistantMessageEvent | undefined;
@@ -310,12 +866,12 @@ export class CopilotSession {
         const unsubscribe = this.on((event) => {
             if (event.type === "assistant.message") {
                 lastAssistantMessage = event;
-            } else if (event.type === "session.idle") {
-                resolveIdle();
+            } else if (event.type === "session.idle" && event.data.mode !== "autopilot") {
+                resolveOutcome({ kind: "idle" });
             } else if (event.type === "session.error") {
                 const error = new Error(event.data.message);
                 error.stack = event.data.stack;
-                rejectWithError(error);
+                resolveOutcome({ kind: "error", error });
             }
         });
 
@@ -334,7 +890,10 @@ export class CopilotSession {
                     effectiveTimeout
                 );
             });
-            await Promise.race([idlePromise, timeoutPromise]);
+            const outcome = await Promise.race([outcomePromise, timeoutPromise]);
+            if (outcome.kind === "error") {
+                throw outcome.error;
+            }
 
             return lastAssistantMessage;
         } finally {
@@ -345,9 +904,119 @@ export class CopilotSession {
         }
     }
 
+    private async sendAndWaitForStructuredMessage(
+        options: MessageOptions,
+        timeout: number
+    ): Promise<AssistantMessageEvent | undefined> {
+        if (this.disconnected) {
+            throw new Error("Session is disconnected");
+        }
+        type Outcome =
+            | { kind: "idle"; message: AssistantMessageEvent | undefined }
+            | { kind: "error"; error: Error };
+        let resolveOutcome!: (outcome: Outcome) => void;
+        const outcomePromise = new Promise<Outcome>((resolve) => {
+            resolveOutcome = resolve;
+        });
+        const fail = (error: Error) => resolveOutcome({ kind: "error", error });
+        let messageId: string | undefined;
+        let consumed = false;
+        let lastMessage: AssistantMessageEvent | undefined;
+        const buffered: SessionEvent[] = [];
+        const observe = (event: SessionEvent) => {
+            if (event.agentId) return;
+            if (event.type === "user.message" && event.data.messageId === messageId) {
+                consumed = true;
+            } else if (
+                event.type === "assistant.message" &&
+                event.data.originatingMessageId === messageId
+            ) {
+                consumed = true;
+                lastMessage = event.data.toolRequests?.length ? undefined : event;
+            } else if (
+                consumed &&
+                event.type === "session.idle" &&
+                event.data.mode !== "autopilot"
+            ) {
+                if (event.data.aborted) {
+                    fail(
+                        new Error(
+                            "The requested run was aborted before a structured result was completed."
+                        )
+                    );
+                } else {
+                    resolveOutcome({ kind: "idle", message: lastMessage });
+                }
+            } else if (consumed && event.type === "session.error") {
+                const error = new Error(event.data.message);
+                error.stack = event.data.stack;
+                fail(error);
+            }
+        };
+        const unsubscribe = this.on((event) => {
+            if (
+                event.type !== "user.message" &&
+                event.type !== "assistant.message" &&
+                event.type !== "session.idle" &&
+                event.type !== "session.error"
+            ) {
+                return;
+            }
+            if (messageId === undefined) {
+                buffered.push(event);
+            } else {
+                observe(event);
+            }
+        });
+        this.pendingStructuredWaits.add(fail);
+        const timer = setTimeout(
+            () => fail(new Error(`Timeout after ${timeout}ms waiting for the structured response`)),
+            timeout
+        );
+        try {
+            const sendOutcome = this.send(options).then(
+                (id) => {
+                    if (!id) {
+                        throw new Error(
+                            "The runtime did not return a message ID for the structured send."
+                        );
+                    }
+                    messageId = id;
+                    for (const event of buffered) observe(event);
+                    buffered.length = 0;
+                    return outcomePromise;
+                },
+                (error: unknown): Outcome => ({
+                    kind: "error",
+                    error: error instanceof Error ? error : new Error(String(error)),
+                })
+            );
+            const outcome = await Promise.race([sendOutcome, outcomePromise]);
+            if (outcome.kind === "error") throw outcome.error;
+            return outcome.message;
+        } finally {
+            clearTimeout(timer);
+            buffered.length = 0;
+            unsubscribe();
+            this.pendingStructuredWaits.delete(fail);
+        }
+    }
+
     /** @internal */
     _markDisconnected(): void {
+        if (this.disconnected) {
+            return;
+        }
         this.disconnected = true;
+        for (const fail of this.pendingStructuredWaits) {
+            fail(new Error("Session disconnected while waiting for a structured response"));
+        }
+        this.pendingStructuredWaits.clear();
+        for (const controller of this.pendingExternalTools.values()) {
+            controller.abort();
+        }
+        this.pendingExternalTools.clear();
+        this._runOnDisconnected();
         this.eventHandlers.clear();
         this.typedEventHandlers.clear();
         this.toolHandlers.clear();
@@ -358,7 +1027,25 @@ export class CopilotSession {
         this.autoModeSwitchHandler = undefined;
         this.commandHandlers.clear();
         this.canvases.clear();
+        this.factories.clear();
+        for (const controllersForRun of this.factoryAbortControllers.values()) {
+            for (const controller of controllersForRun.values()) {
+                controller.abort();
+            }
+        }
+        this.factoryAbortControllers.clear();
         this.transformCallbacks?.clear();
+    }
+
+    /** @internal */
+    _runOnDisconnected(): void {
+        this.onDisconnected?.();
+        this.onDisconnected = undefined;
+    }
+
+    /** @internal */
+    _setOnDisconnected(callback: () => void): void {
+        this.onDisconnected = callback;
     }
 
     /**
@@ -505,6 +1192,15 @@ export class CopilotSession {
                     tracestate
                 );
             }
+        } else if (event.type === "external_tool.completed") {
+            const { requestId } = event.data as { requestId?: string };
+            if (requestId) {
+                const controller = this.pendingExternalTools.get(requestId);
+                if (controller) {
+                    this.pendingExternalTools.delete(requestId);
+                    controller.abort();
+                }
+            }
         } else if (event.type === "permission.requested") {
             const { requestId, permissionRequest, resolvedByHook } = event.data as {
                 requestId: string;
@@ -614,6 +1310,12 @@ export class CopilotSession {
         traceparent?: string,
         tracestate?: string
     ): Promise<void> {
+        const controller = new AbortController();
+        if (this.disconnected || this.pendingExternalTools.has(requestId)) {
+            return;
+        }
+        this.pendingExternalTools.set(requestId, controller);
+
         try {
             // The built-in tool-search tool receives a snapshot of the session's
             // currently initialized tools so an override can filter the live
@@ -622,12 +1324,26 @@ export class CopilotSession {
             // leaves the snapshot undefined rather than failing the tool.
             let availableTools: CurrentToolMetadata[] | undefined;
             if (toolName === TOOL_SEARCH_TOOL_NAME) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+                const aborted = new Promise<undefined>((resolve) => {
+                    controller.signal.addEventListener("abort", () => resolve(undefined), {
+                        once: true,
+                    });
+                });
                 try {
-                    const metadata = await this.rpc.tools.getCurrentMetadata();
-                    availableTools = metadata.tools ?? undefined;
+                    const metadata = await Promise.race([
+                        this.rpc.tools.getCurrentMetadata(),
+                        aborted,
+                    ]);
+                    availableTools = metadata?.tools ?? undefined;
                 } catch {
                     availableTools = undefined;
                 }
+            }
+            if (controller.signal.aborted) {
+                return;
             }
             const rawResult = await handler(args, {
                 sessionId: this.sessionId,
@@ -637,6 +1353,7 @@ export class CopilotSession {
                 availableTools,
                 traceparent,
                 tracestate,
+                signal: controller.signal,
             });
             let result: ToolResult;
             if (rawResult == null) {
@@ -648,12 +1365,12 @@ export class CopilotSession {
             } else {
                 result = JSON.stringify(rawResult);
             }
-            if (this.disconnected) {
+            if (!this._claimExternalTool(requestId, controller)) {
                 return;
             }
             await this.rpc.tools.handlePendingToolCall({ requestId, result });
         } catch (error) {
-            if (this.disconnected) {
+            if (!this._claimExternalTool(requestId, controller)) {
                 return;
             }
             const message = error instanceof Error ? error.message : String(error);
@@ -665,7 +1382,20 @@ export class CopilotSession {
                 }
                 // Connection lost or RPC error — nothing we can do
             }
+        } finally {
+            if (this.pendingExternalTools.get(requestId) === controller) {
+                this.pendingExternalTools.delete(requestId);
+            }
+            controller.abort();
         }
+    }
+
+    private _claimExternalTool(requestId: string, controller: AbortController): boolean {
+        if (this.disconnected || this.pendingExternalTools.get(requestId) !== controller) {
+            return false;
+        }
+        this.pendingExternalTools.delete(requestId);
+        return true;
     }
 
     /**
@@ -677,20 +1407,35 @@ export class CopilotSession {
         permissionRequest: PermissionRequest
     ): Promise<void> {
         try {
-            const result = await this.permissionHandler!(permissionRequest, {
+            const handlerResult = await this.permissionHandler!(permissionRequest, {
                 sessionId: this.sessionId,
+                managedSettingsEnabled: this.managedSettingsEnabled,
             });
+            const isAttributed = isAttributedPermissionResult(handlerResult);
+            const result: PermissionRequestResult = isAttributed
+                ? handlerResult.result
+                : handlerResult;
+            const decisionContext = isAttributed ? handlerResult.decisionContext : undefined;
             if (result.kind === "no-result") {
                 return;
             }
             if (this.disconnected) {
                 return;
             }
-            await this.rpc.permissions.handlePendingPermissionRequest({ requestId, result });
-        } catch (_error) {
+            await this.rpc.permissions.handlePendingPermissionRequest(
+                decisionContext === undefined
+                    ? { requestId, result }
+                    : { requestId, result, decisionContext }
+            );
+        } catch (error) {
             if (this.disconnected) {
                 return;
             }
+            console.error("Permission handler or response delivery failed", {
+                sessionId: this.sessionId,
+                requestId,
+                error,
+            });
             try {
                 await this.rpc.permissions.handlePendingPermissionRequest({
                     requestId,
@@ -873,6 +1618,213 @@ export class CopilotSession {
     }
 
     /**
+     * Registers factory closures and reverse-RPC handlers for this session.
+     *
+     * @param factories - Factory handles declared by the joining extension.
+     * @internal Called by the SDK when an extension joins a session.
+     */
+    registerFactories(factories?: FactoryHandle[]): void {
+        this.factories.clear();
+        if (!factories || factories.length === 0) {
+            delete this.clientSessionApis.factory;
+            return;
+        }
+
+        for (const handle of factories) {
+            const definition = getFactoryDefinition(handle);
+            if (this.factories.has(definition.meta.name)) {
+                throw new Error(
+                    `Duplicate factory name "${definition.meta.name}". Factory names must be unique within a joinSession call.`
+                );
+            }
+            this.factories.set(definition.meta.name, definition);
+        }
+
+        const self = this;
+        this.clientSessionApis.factory = {
+            async execute(params) {
+                const definition = self.factories.get(params.name);
+                if (!definition) {
+                    const message = `No factory registered with name "${params.name}"`;
+                    throw new ResponseError(ErrorCodes.InvalidParams, message, {
+                        code: "factory_not_found",
+                        name: params.name,
+                    });
+                }
+
+                const controller = new AbortController();
+                // Keyed by execution token as well as run ID so overlapping
+                // attempts for one run stay individually addressable.
+                let controllersForRun = self.factoryAbortControllers.get(params.runId);
+                if (controllersForRun === undefined) {
+                    controllersForRun = new Map();
+                    self.factoryAbortControllers.set(params.runId, controllersForRun);
+                }
+                controllersForRun.set(params.executionToken, controller);
+                const progress = new FactoryProgressBuffer(async (lines) => {
+                    await self.rpc.factory.log({
+                        runId: params.runId,
+                        executionToken: params.executionToken,
+                        lines,
+                    });
+                });
+                try {
+                    const context: FactoryContext = {
+                        runId: params.runId,
+                        args: params.args,
+                        session: self,
+                        signal: controller.signal,
+                        phase: (title: string) => {
+                            throwIfFactoryAborted(controller.signal);
+                            progress.enqueue("phase", title);
+                        },
+                        log: (message: string) => {
+                            throwIfFactoryAborted(controller.signal);
+                            progress.enqueue("log", message);
+                        },
+                        agent: async (prompt, options = {}) => {
+                            await progress.flush();
+                            const opts: FactoryAgentOptions = {};
+                            for (const key of FACTORY_AGENT_OPTION_KEYS) {
+                                copyDefinedFactoryAgentOption(options, opts, key);
+                            }
+                            const response = await awaitFactoryOperation(
+                                () =>
+                                    self.rpc.factory.agent({
+                                        factoryRunId: params.runId,
+                                        executionToken: params.executionToken,
+                                        prompt,
+                                        opts,
+                                    }),
+                                controller.signal
+                            );
+                            return response.result ?? null;
+                        },
+                        step: async (
+                            key: string,
+                            producer: () => Promise<JsonValue> | JsonValue,
+                            options: FactoryStepOptions = {}
+                        ): Promise<JsonValue> => {
+                            await progress.flush();
+                            if (options.volatile) {
+                                // The flush above is an await point, so an abort can land
+                                // between entering step() and running the producer. The
+                                // journaled branch is covered by awaitFactoryOperation;
+                                // this one has to check for itself, or a cancelled run
+                                // would still start new extension work.
+                                throwIfFactoryAborted(controller.signal);
+                                return producer();
+                            }
+                            const cached = await awaitFactoryOperation(
+                                () =>
+                                    self.rpc.factory.journal.get({
+                                        runId: params.runId,
+                                        executionToken: params.executionToken,
+                                        key,
+                                    }),
+                                controller.signal
+                            );
+                            if (cached.hit) {
+                                if (cached.resultJson === undefined) {
+                                    throw new Error(
+                                        `step("${key}") journal returned a hit without a result`
+                                    );
+                                }
+                                assertFactoryStepResult(cached.resultJson, key);
+                                return cached.resultJson;
+                            }
+
+                            // Producers are best-effort at-least-once across crashes or
+                            // concurrent callers, so authors must make side effects idempotent.
+                            const result = await producer();
+                            assertFactoryStepResult(result, key);
+                            await awaitFactoryOperation(
+                                () =>
+                                    self.rpc.factory.journal.put({
+                                        runId: params.runId,
+                                        executionToken: params.executionToken,
+                                        key,
+                                        resultJson: result,
+                                    }),
+                                controller.signal
+                            );
+                            return result;
+                        },
+                        pause: async (key: string): Promise<void> => {
+                            if (typeof key !== "string" || key.length === 0) {
+                                throw new Error("Factory pause checkpoint key must not be empty");
+                            }
+                            const helperScope = factoryExecutionStore.getStore()?.helperScope;
+                            if (helperScope !== undefined) {
+                                throw new Error(
+                                    `Factory pause checkpoints are not allowed inside ${helperScope}() branches`
+                                );
+                            }
+                            await progress.flush();
+                            const response = await awaitFactoryOperation(
+                                () =>
+                                    self.internalRpc.factory.pauseAtCheckpoint({
+                                        runId: params.runId,
+                                        executionToken: params.executionToken,
+                                        key,
+                                    }),
+                                controller.signal
+                            );
+                            switch (response.action) {
+                                case "continue":
+                                    return;
+                                case "pause":
+                                    await awaitFactoryOperation(
+                                        () => new Promise<never>(() => {}),
+                                        controller.signal
+                                    );
+                            }
+                        },
+                        parallel: runFactoryParallel,
+                        pipeline: runFactoryPipeline,
+                        factory: async () => {
+                            throw new Error("nested factories are not supported");
+                        },
+                    };
+                    const execution = { active: true };
+                    const result = await factoryExecutionStore.run(execution, async () => {
+                        try {
+                            return await definition.run(context);
+                        } finally {
+                            execution.active = false;
+                        }
+                    });
+                    if (result === undefined) {
+                        return {};
+                    }
+                    assertFactoryResult(result);
+                    return { result };
+                } finally {
+                    try {
+                        await progress.close();
+                    } finally {
+                        const controllersForRun = self.factoryAbortControllers.get(params.runId);
+                        if (controllersForRun?.get(params.executionToken) === controller) {
+                            controllersForRun.delete(params.executionToken);
+                            if (controllersForRun.size === 0) {
+                                self.factoryAbortControllers.delete(params.runId);
+                            }
+                        }
+                    }
+                }
+            },
+            async abort(params) {
+                const controllersForRun = self.factoryAbortControllers.get(params.runId);
+                const controller = controllersForRun?.get(params.executionToken);
+                if (controller !== undefined) {
+                    controller.abort(new DOMException("Factory run was aborted", "AbortError"));
+                }
+                return {};
+            },
+        };
+    }
+
+    /**
      * Registers per-provider {@link BearerTokenProvider} callbacks for BYOK providers
      * configured with managed-identity / on-demand bearer-token auth.
      *
@@ -969,7 +1921,13 @@ export class CopilotSession {
         }
         try {
             const result = await this.elicitationHandler(context);
-            await this.rpc.ui.handlePendingElicitation({ requestId, result });
+            await this.rpc.ui.handlePendingElicitation({
+                requestId,
+                result: {
+                    action: result.action,
+                    ...(result.content ? { content: result.content } : {}),
+                },
+            });
         } catch {
             // Handler failed — attempt to cancel so the request doesn't hang
             try {
@@ -1255,9 +2213,11 @@ export class CopilotSession {
             postToolUse: this.hooks.onPostToolUse as GenericHandler | undefined,
             postToolUseFailure: this.hooks.onPostToolUseFailure as GenericHandler | undefined,
             userPromptSubmitted: this.hooks.onUserPromptSubmitted as GenericHandler | undefined,
+            userPromptTransformed: this.hooks.onUserPromptTransformed as GenericHandler | undefined,
             sessionStart: this.hooks.onSessionStart as GenericHandler | undefined,
             sessionEnd: this.hooks.onSessionEnd as GenericHandler | undefined,
             errorOccurred: this.hooks.onErrorOccurred as GenericHandler | undefined,
+            agentStop: this.hooks.onAgentStop as GenericHandler | undefined,
         };
 
         const handler = handlerMap[hookType];
@@ -1323,13 +2283,27 @@ export class CopilotSession {
      * ```
      */
     async disconnect(): Promise<void> {
-        if (this.disconnected) {
+        if (this.disconnected || this.disconnecting) {
             return;
         }
-        await this.connection.sendRequest("session.destroy", {
-            sessionId: this.sessionId,
-        });
-        this._markDisconnected();
+        this.disconnecting = true;
+        try {
+            let response: { success: boolean; error?: string } = { success: false };
+            for (let attempt = 0; attempt < 2 && !response.success; attempt++) {
+                response = (await this.connection.sendRequest("session.detach", {
+                    sessionId: this.sessionId,
+                })) as { success: boolean; error?: string };
+            }
+            if (!response.success) {
+                throw new Error(
+                    `Failed to disconnect session ${this.sessionId}: ${response.error || "Unknown error"}`
+                );
+            }
+            this._markDisconnected();
+        } catch (error) {
+            this.disconnecting = false;
+            throw error;
+        }
     }
 
     /** Enables `await using session = ...` syntax for automatic cleanup. */
@@ -1374,6 +2348,9 @@ export class CopilotSession {
      * ```typescript
      * await session.setModel("gpt-5.4");
      * await session.setModel("claude-sonnet-4.6", { reasoningEffort: "high" });
+     *
+     * // Select the Auto model and its routing preference in one call.
+     * await session.setModel("auto", { autoTier: "intelligence" });
      * ```
      */
     async setModel(
@@ -1383,9 +2360,56 @@ export class CopilotSession {
             reasoningSummary?: ReasoningSummary;
             contextTier?: ContextTier;
             modelCapabilities?: ModelCapabilitiesOverride;
+            /**
+             * Routing preference to apply when `model` is `auto`.
+             *
+             * Pass `null` to return to the provider's default Auto routing. The
+             * runtime rejects this option when `model` is anything other than
+             * `auto`; use {@link setAutoTier} to change the preference without
+             * changing the selected model.
+             *
+             * @experimental Part of an experimental Auto routing surface and may
+             * change or be removed in a future release.
+             */
+            autoTier?: AutoTier | null;
         }
     ): Promise<void> {
         await this.rpc.model.switchTo({ modelId: model, ...options });
+    }
+
+    /**
+     * Change the Auto routing preference without changing the selected model.
+     *
+     * The runtime does not apply the preference immediately. It records the
+     * request and commits it only when a later user turn using the `auto` model
+     * successfully obtains a usable model from the provider. A `pending` status
+     * therefore confirms that the request was accepted, not that it took effect.
+     *
+     * Watch for the outcome through the `session.model_change` event on success,
+     * or the ephemeral `session.auto_tier_switch_failed` event on failure. You
+     * can also read the current committed and in-flight state at any time with
+     * `session.rpc.model.getCurrent()`.
+     *
+     * Only the most recent request survives: issuing a new request replaces any
+     * earlier one that has not yet been claimed by a turn.
+     *
+     * @param autoTier - Routing preference to activate, or `null` to return to
+     *   the provider's default Auto routing
+     * @returns The runtime's immediate acknowledgement and Auto preference snapshot
+     *
+     * @experimental Part of an experimental Auto routing surface and may change
+     * or be removed in a future release.
+     *
+     * @example
+     * ```typescript
+     * const result = await session.setAutoTier("intelligence");
+     * if (result.status === "pending") {
+     *     // Takes effect on a later turn that uses the `auto` model.
+     * }
+     * ```
+     */
+    async setAutoTier(autoTier: AutoTier | null): Promise<ModelSwitchAutoTierResult> {
+        return await this.rpc.model.switchAutoTier({ autoTier });
     }
 
     /**
@@ -1449,4 +2473,202 @@ function toCanvasRpcError(error: unknown): ResponseError<unknown> {
     const code = error instanceof CanvasError ? error.code : "canvas_handler_error";
     const message = error instanceof Error ? error.message : String(error);
     return new ResponseError(ErrorCodes.InternalError, message, { code, message });
+}
+
+type FactoryResultValidationCategory =
+    | "unsupported_type"
+    | "non_finite_number"
+    | "negative_zero"
+    | "cyclic_value"
+    | "nested_undefined"
+    | "unsupported_object";
+
+interface StrictJsonValidationContext {
+    code: "factory_result_not_json" | "factory_step_not_json";
+    label: string;
+    allowTopLevelUndefined: boolean;
+}
+
+function strictJsonValidationError(
+    context: StrictJsonValidationContext,
+    category: FactoryResultValidationCategory,
+    message: string,
+    path: string
+): ResponseError<{ code: string; category: FactoryResultValidationCategory; path: string }> {
+    return new ResponseError(ErrorCodes.InternalError, message, {
+        code: context.code,
+        category,
+        path,
+    });
+}
+
+function assertStrictJson(
+    value: unknown,
+    context: StrictJsonValidationContext
+): asserts value is JsonValue | undefined {
+    const ancestors = new Set<object>();
+
+    const visit = (current: unknown, path: string, allowUndefined: boolean): void => {
+        if (current === undefined) {
+            if (allowUndefined) {
+                return;
+            }
+            throw strictJsonValidationError(
+                context,
+                "nested_undefined",
+                `${context.label} contains nested undefined at ${path}`,
+                path
+            );
+        }
+        if (current === null || typeof current === "boolean" || typeof current === "string") {
+            return;
+        }
+        if (typeof current === "number") {
+            if (!Number.isFinite(current)) {
+                throw strictJsonValidationError(
+                    context,
+                    "non_finite_number",
+                    `${context.label} contains a non-finite number at ${path}`,
+                    path
+                );
+            }
+            // JSON serializes -0 as "0", so a journaled -0 would come back as 0
+            // after a resume and break the lossless replay guarantee.
+            if (Object.is(current, -0)) {
+                throw strictJsonValidationError(
+                    context,
+                    "negative_zero",
+                    `${context.label} contains negative zero at ${path}; normalize it to 0`,
+                    path
+                );
+            }
+            return;
+        }
+        if (
+            typeof current === "function" ||
+            typeof current === "symbol" ||
+            typeof current === "bigint"
+        ) {
+            throw strictJsonValidationError(
+                context,
+                "unsupported_type",
+                `${context.label} contains a function, symbol, or BigInt at ${path}`,
+                path
+            );
+        }
+        if (typeof current !== "object") {
+            throw strictJsonValidationError(
+                context,
+                "unsupported_type",
+                `${context.label} contains a function, symbol, or BigInt at ${path}`,
+                path
+            );
+        }
+        if (ancestors.has(current)) {
+            throw strictJsonValidationError(
+                context,
+                "cyclic_value",
+                `${context.label} contains a cyclic reference at ${path}`,
+                path
+            );
+        }
+
+        ancestors.add(current);
+        try {
+            if (Array.isArray(current)) {
+                const keys = Reflect.ownKeys(current);
+                if (
+                    keys.length !== current.length + 1 ||
+                    keys.some(
+                        (key) =>
+                            key !== "length" &&
+                            (typeof key !== "string" ||
+                                !/^(0|[1-9]\d*)$/.test(key) ||
+                                Number(key) >= current.length)
+                    )
+                ) {
+                    throw strictJsonValidationError(
+                        context,
+                        "unsupported_object",
+                        `${context.label} contains a non-JSON array property at ${path}`,
+                        path
+                    );
+                }
+                for (let index = 0; index < current.length; index++) {
+                    const descriptor = Object.getOwnPropertyDescriptor(current, String(index));
+                    if (
+                        descriptor === undefined ||
+                        !descriptor.enumerable ||
+                        !("value" in descriptor)
+                    ) {
+                        throw strictJsonValidationError(
+                            context,
+                            "unsupported_object",
+                            `${context.label} contains a non-JSON array property at ${path}[${index}]`,
+                            `${path}[${index}]`
+                        );
+                    }
+                    visit(descriptor.value, `${path}[${index}]`, false);
+                }
+                return;
+            }
+
+            const prototype = Object.getPrototypeOf(current);
+            if (prototype !== Object.prototype && prototype !== null) {
+                throw strictJsonValidationError(
+                    context,
+                    "unsupported_object",
+                    `${context.label} contains a non-JSON object at ${path}`,
+                    path
+                );
+            }
+            for (const key of Reflect.ownKeys(current)) {
+                if (typeof key === "symbol") {
+                    throw strictJsonValidationError(
+                        context,
+                        "unsupported_type",
+                        `${context.label} contains a function, symbol, or BigInt at ${path}`,
+                        path
+                    );
+                }
+                const propertyPath = /^[A-Za-z_$][\w$]*$/.test(key)
+                    ? `${path}.${key}`
+                    : `${path}[${JSON.stringify(key)}]`;
+                const descriptor = Object.getOwnPropertyDescriptor(current, key);
+                if (
+                    descriptor === undefined ||
+                    !descriptor.enumerable ||
+                    !("value" in descriptor)
+                ) {
+                    throw strictJsonValidationError(
+                        context,
+                        "unsupported_object",
+                        `${context.label} contains a non-JSON property at ${propertyPath}`,
+                        propertyPath
+                    );
+                }
+                visit(descriptor.value, propertyPath, false);
+            }
+        } finally {
+            ancestors.delete(current);
+        }
+    };
+
+    visit(value, "$", context.allowTopLevelUndefined);
+}
+
+function assertFactoryResult(value: unknown): asserts value is JsonValue | undefined {
+    assertStrictJson(value, {
+        code: "factory_result_not_json",
+        label: "Factory result",
+        allowTopLevelUndefined: true,
+    });
+}
+
+function assertFactoryStepResult(value: unknown, key: string): asserts value is JsonValue {
+    assertStrictJson(value, {
+        code: "factory_step_not_json",
+        label: `Factory step "${key}" result`,
+        allowTopLevelUndefined: false,
+    });
 }

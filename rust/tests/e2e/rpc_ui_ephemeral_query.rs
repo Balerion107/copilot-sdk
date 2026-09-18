@@ -1,10 +1,13 @@
 use github_copilot_sdk::rpc::UIEphemeralQueryRequest;
 
-use super::support::with_e2e_context;
-
+// TODO(cli-1.0.81-2): CLI 1.0.81-5 still fails session.ui.ephemeralQuery against the
+// recorded snapshot on macOS ("Failed to get response from the AI model"). Re-enable
+// once the runtime fix ships.
+#[ignore = "blocked on CLI 1.0.81-5 session.ui.ephemeralQuery regression on macOS"]
 #[tokio::test]
 async fn should_answer_ephemeral_query() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_ui_ephemeral_query",
         "should_answer_ephemeral_query",
         |ctx| {
@@ -36,3 +39,5 @@ async fn should_answer_ephemeral_query() {
     )
     .await;
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_ui_ephemeral_query", 1);

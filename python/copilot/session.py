@@ -19,32 +19,37 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, Required, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, Required, TypedDict, TypeVar, cast
+
+from pydantic import BaseModel
 
 from ._diagnostics import log_timing
 from ._jsonrpc import JsonRpcError, ProcessExitedError
 from ._telemetry import get_trace_context, trace_context
 from .canvas import CanvasError, CanvasHandler, OpenCanvasInstance
 from .generated.rpc import (
-    CanvasHandler as RpcCanvasHandler,
+    AutoTier as _RpcAutoTier,
 )
 from .generated.rpc import (
+    BuiltinToolInputSchemaType,
     CanvasProviderCloseRequest,
     CanvasProviderInvokeActionRequest,
     CanvasProviderOpenRequest,
     CanvasProviderOpenResult,
     ClientSessionApiHandlers,
     CommandsHandlePendingCommandRequest,
-    ExternalToolTextResultForLlm,
+    GitHubTokenAcquireResultKind,
     HandlePendingToolCallRequest,
     LogRequest,
     MCPOauthHandlePendingRequest,
     MCPOauthPendingRequestResponse,
-    MCPOauthPendingRequestResponseKind,
+    ModelSwitchAutoTierResult,
     ModelSwitchToRequest,
     PermissionDecision,
     PermissionDecisionApproveOnce,
+    PermissionDecisionContext,
     PermissionDecisionRequest,
     PermissionDecisionUserNotAvailable,
     ProviderTokenAcquireRequest,
@@ -57,8 +62,10 @@ from .generated.rpc import (
     UIElicitationSchema,
     UIElicitationSchemaProperty,
     UIElicitationSchemaPropertyType,
-    UIElicitationSchemaType,
     UIHandlePendingElicitationRequest,
+)
+from .generated.rpc import (
+    CanvasHandler as RpcCanvasHandler,
 )
 from .generated.rpc import (
     ContextTier as _RpcContextTier,
@@ -69,6 +76,7 @@ from .generated.session_events import (
     CapabilitiesChangedData,
     CommandExecuteData,
     ElicitationRequestedData,
+    ExternalToolCompletedData,
     ExternalToolRequestedData,
     McpOauthRequiredData,
     PermissionRequest,
@@ -78,14 +86,23 @@ from .generated.session_events import (
     SessionErrorData,
     SessionEvent,
     SessionIdleData,
+    SessionMode,
+    UserMessageData,
     session_event_from_dict,
 )
 from .generated.session_events import (
     ReasoningSummary as _RpcReasoningSummary,
 )
-from .tools import Tool, ToolHandler, ToolInvocation, ToolResult
+from .tools import (
+    Tool,
+    ToolHandler,
+    ToolInvocation,
+    ToolResult,
+    tool_result_to_external_tool_text_result_for_llm,
+)
 
 logger = logging.getLogger(__name__)
+TResponse = TypeVar("TResponse", bound=BaseModel)
 
 # Fixed name of the runtime's built-in tool-search tool. A client can replace
 # its behavior by registering a tool with this exact name and
@@ -164,10 +181,38 @@ def _capabilities_to_dict(caps: ModelCapabilitiesOverride) -> dict:
     return result
 
 
-ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
+ReasoningEffort = Literal["low", "medium", "high", "xhigh", "max"]
 ReasoningSummary = Literal["none", "concise", "detailed"]
 ContextTier = Literal["default", "long_context"]
+AutoTier = Literal["efficiency", "balance", "intelligence", "fast"]
 SessionFsConventions = Literal["posix", "windows"]
+
+
+class _Unset:
+    """Sentinel distinguishing an omitted argument from an explicit ``None``.
+
+    Auto routing treats ``None`` as a meaningful value: it means "return to the
+    provider's default routing". Omitting the argument instead means "leave the
+    current preference alone", so the two cases cannot share a default.
+    """
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+_UNSET = _Unset()
+
+
+def _auto_tier_to_wire(auto_tier: AutoTier | _RpcAutoTier | None) -> str | None:
+    """Normalize an Auto tier to its wire value.
+
+    Callers may pass either the ``AutoTier`` string literal or the generated
+    ``AutoTier`` enum, which is the type the SDK hands back on results and
+    events. The JSON-RPC encoder only understands plain strings.
+    """
+    if isinstance(auto_tier, Enum):
+        return str(auto_tier.value)
+    return auto_tier
 
 
 class SessionFsCapabilities(TypedDict, total=False):
@@ -234,6 +279,24 @@ class BlobAttachment(TypedDict):
 
 
 Attachment = FileAttachment | DirectoryAttachment | SelectionAttachment | BlobAttachment
+
+
+@dataclass(frozen=True)
+class AgentMessageSource:
+    """Identify the agent that produced a message.
+
+    The agent ID is opaque and is sent unchanged after the ``agent-`` prefix.
+    """
+
+    agent_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.agent_id, str):
+            raise TypeError("agent_id must be a string")
+
+
+MessageSource = Literal["user", "system"] | AgentMessageSource
+"""Message provenance, independent of delivery mode."""
 
 # ============================================================================
 # System Message Configuration
@@ -342,12 +405,11 @@ SystemMessageConfig = (
 
 @dataclass
 class PermissionNoResult:
-    """Sentinel returned by a permission handler to leave the request unanswered.
+    """Sentinel that leaves an event-dispatched permission request unanswered.
 
-    Only meaningful against protocol-v1 servers. v2 servers reject ``no-result``
-    responses; the SDK raises :class:`ValueError` if a v2 server receives one.
-    Mirrors the ``{kind: "no-result"}`` extension TS adds to its ``PermissionDecision``
-    union (see ``nodejs/src/types.ts:883``).
+    During event-based permission dispatch, the SDK suppresses its response so
+    another connected client, such as a human-facing host, can answer the pending
+    request. Legacy direct callbacks require a concrete decision and cannot abstain.
     """
 
     kind: Literal["no-result"] = "no-result"
@@ -355,24 +417,74 @@ class PermissionNoResult:
 
 # The decision returned by a permission handler. Identical shape to the wire
 # ``PermissionDecision`` discriminated union, plus a :class:`PermissionNoResult`
-# sentinel for v1 servers. Construct via the generated variant classes:
+# sentinel that suppresses this SDK client's response. Construct via the
+# generated variant classes:
 # ``PermissionDecisionApproveOnce()``, ``PermissionDecisionReject(feedback=...)``,
 # etc. The ``kind`` discriminator is baked in as a ``ClassVar`` default by
 # codegen, so callers must not pass it.
 PermissionRequestResult = PermissionDecision | PermissionNoResult
 
 
+@dataclass
+class AttributedPermissionResult:
+    """A permission result annotated with the context describing how it was reached.
+
+    The Copilot runtime emits an ``auto_approval_decision`` telemetry event only
+    when a client supplies an explicit :class:`PermissionDecisionContext` alongside
+    its permission reply. Wrapping a :data:`PermissionRequestResult` with this class
+    forwards that context to the runtime as a sibling of the decision on the wire.
+
+    The context is informational only — it never changes permission behavior. Build
+    instances via :func:`create_attributed_permission_result` rather than constructing
+    directly, so re-attributing an already-wrapped result replaces the context instead
+    of nesting.
+    """
+
+    result: PermissionRequestResult
+    """The underlying permission decision (or :class:`PermissionNoResult`)."""
+
+    decision_context: PermissionDecisionContext
+    """Context describing how and where the decision was reached."""
+
+
+def create_attributed_permission_result(
+    result: PermissionRequestResult | AttributedPermissionResult,
+    decision_context: PermissionDecisionContext,
+) -> AttributedPermissionResult:
+    """Annotate a permission result with the context describing how it was reached.
+
+    Returns an :class:`AttributedPermissionResult` carrying ``result`` and
+    ``decision_context`` as siblings. If ``result`` is already an
+    :class:`AttributedPermissionResult`, its underlying decision is preserved and the
+    context is *replaced* — attribution never nests.
+    """
+    if isinstance(result, AttributedPermissionResult):
+        result = result.result
+    return AttributedPermissionResult(result=result, decision_context=decision_context)
+
+
+class PermissionInvocation(TypedDict, total=False):
+    session_id: Required[str]
+    managed_settings_enabled: NotRequired[bool]
+
+
 _PermissionHandlerFn = Callable[
-    [PermissionRequest, dict[str, str]],
-    PermissionRequestResult | Awaitable[PermissionRequestResult],
+    [PermissionRequest, PermissionInvocation],
+    PermissionRequestResult
+    | AttributedPermissionResult
+    | Awaitable[PermissionRequestResult | AttributedPermissionResult],
 ]
 
 
 class PermissionHandler:
     @staticmethod
     def approve_all(
-        request: PermissionRequest, invocation: dict[str, str]
+        request: PermissionRequest, invocation: PermissionInvocation
     ) -> PermissionRequestResult:
+        if invocation.get("managed_settings_enabled", False):
+            raise RuntimeError("approve_all cannot be used when managed settings are enabled")
+        if getattr(request, "managed_approval_required", False) is True:
+            return PermissionNoResult()
         return PermissionDecisionApproveOnce()
 
 
@@ -448,7 +560,7 @@ McpAuthHandler = Callable[
 
 
 class UserInputRequest(TypedDict, total=False):
-    """Request for user input from the agent (enables ask_user tool)"""
+    """Legacy question-and-answer request from the ask_user tool."""
 
     question: str
     choices: list[str]
@@ -706,7 +818,7 @@ class SessionUiApi:
             UIElicitationRequest(
                 message=message,
                 requested_schema=UIElicitationSchema(
-                    type=UIElicitationSchemaType.OBJECT,
+                    type=BuiltinToolInputSchemaType.OBJECT,
                     properties={
                         "confirmed": UIElicitationSchemaProperty(
                             type=UIElicitationSchemaPropertyType.BOOLEAN,
@@ -741,7 +853,7 @@ class SessionUiApi:
             UIElicitationRequest(
                 message=message,
                 requested_schema=UIElicitationSchema(
-                    type=UIElicitationSchemaType.OBJECT,
+                    type=BuiltinToolInputSchemaType.OBJECT,
                     properties={
                         "selection": UIElicitationSchemaProperty(
                             type=UIElicitationSchemaPropertyType.STRING,
@@ -943,6 +1055,28 @@ UserPromptSubmittedHandler = Callable[
 ]
 
 
+class UserPromptTransformedHookInput(TypedDict):
+    """Input for the user-prompt-transformed hook."""
+
+    sessionId: str
+    timestamp: datetime
+    workingDirectory: str
+    prompt: str
+    transformedPrompt: str
+
+
+class UserPromptTransformedHookOutput(TypedDict, total=False):
+    """Output for the user-prompt-transformed hook."""
+
+    modifiedTransformedPrompt: str
+
+
+UserPromptTransformedHandler = Callable[
+    [UserPromptTransformedHookInput, dict[str, str]],
+    UserPromptTransformedHookOutput | None | Awaitable[UserPromptTransformedHookOutput | None],
+]
+
+
 class SessionStartHookInput(TypedDict):
     """Input for session-start hook"""
 
@@ -1017,6 +1151,30 @@ ErrorOccurredHandler = Callable[
 ]
 
 
+class AgentStopHookInput(TypedDict):
+    """Input for the agent-stop hook."""
+
+    sessionId: str
+    timestamp: datetime
+    workingDirectory: str
+    stopReason: NotRequired[str]
+    transcriptPath: NotRequired[str]
+    stopHookActive: NotRequired[bool]
+
+
+class AgentStopHookOutput(TypedDict, total=False):
+    """Output for the agent-stop hook."""
+
+    decision: Literal["block"]
+    reason: str
+
+
+AgentStopHandler = Callable[
+    [AgentStopHookInput, dict[str, str]],
+    AgentStopHookOutput | None | Awaitable[AgentStopHookOutput | None],
+]
+
+
 class SessionHooks(TypedDict, total=False):
     """Configuration for session hooks"""
 
@@ -1025,9 +1183,11 @@ class SessionHooks(TypedDict, total=False):
     on_post_tool_use: PostToolUseHandler
     on_post_tool_use_failure: PostToolUseFailureHandler
     on_user_prompt_submitted: UserPromptSubmittedHandler
+    on_user_prompt_transformed: UserPromptTransformedHandler
     on_session_start: SessionStartHandler
     on_session_end: SessionEndHandler
     on_error_occurred: ErrorOccurredHandler
+    on_agent_stop: AgentStopHandler
 
 
 # ============================================================================
@@ -1059,6 +1219,22 @@ class MCPHTTPServerConfig(TypedDict, total=False):
 
 MCPServerConfig = MCPStdioServerConfig | MCPHTTPServerConfig
 
+
+class GitHubMcpToolConfig(TypedDict, total=False):
+    """Configuration for the built-in GitHub MCP server.
+
+    ``disable_form_deferral`` only applies to the built-in GitHub MCP server
+    and only has an effect when MCP Apps and form-backed GitHub tools are
+    enabled.
+    """
+
+    enable_all_tools: bool
+    additional_toolsets: list[str]
+    additional_tools: list[str]
+    enable_insiders_mode: bool
+    disable_form_deferral: bool
+
+
 # ============================================================================
 # Custom Agent Configuration Types
 # ============================================================================
@@ -1080,8 +1256,8 @@ class CustomAgentConfig(TypedDict, total=False):
     skills: NotRequired[list[str]]
     # Model identifier (e.g. "claude-haiku-4.5"); runtime falls back to parent model if unavailable
     model: NotRequired[str]
-    # Reasoning effort for this agent's model. When omitted, no per-agent override
-    # is sent and the backend chooses its default; the parent effort is not inherited.
+    # Reasoning effort for this agent's model. When omitted, the runtime resolves
+    # model configuration, then inherits the parent effort only for the same model.
     reasoning_effort: NotRequired[ReasoningEffort]
 
 
@@ -1183,7 +1359,8 @@ class MemoryConfiguration(TypedDict):
 class AzureProviderOptions(TypedDict, total=False):
     """Azure-specific provider configuration"""
 
-    api_version: str  # Azure API version. Defaults to "2024-10-21".
+    # Azure API version. When omitted, the runtime uses the GA versionless v1 route.
+    api_version: str
 
 
 class ProviderTokenArgs(TypedDict):
@@ -1423,7 +1600,12 @@ class CopilotSession:
     """
 
     def __init__(
-        self, session_id: str, client: Any, workspace_path: os.PathLike[str] | str | None = None
+        self,
+        session_id: str,
+        client: Any,
+        workspace_path: os.PathLike[str] | str | None = None,
+        managed_settings_enabled: bool = False,
+        on_disconnect: Callable[[], None] | None = None,
     ):
         """
         Initialize a new CopilotSession.
@@ -1437,14 +1619,18 @@ class CopilotSession:
             client: The internal client connection to the Copilot CLI.
             workspace_path: Path to the session workspace directory
                 (when infinite sessions enabled).
+            managed_settings_enabled: Whether managed settings were enabled when
+                creating or resuming the session.
         """
         self.session_id = session_id
+        self._managed_settings_enabled = managed_settings_enabled
         self._client = client
         self._workspace_path = os.fsdecode(workspace_path) if workspace_path is not None else None
         self._event_handlers: set[Callable[[SessionEvent], None]] = set()
         self._event_handlers_lock = threading.Lock()
         self._tool_handlers: dict[str, ToolHandler] = {}
         self._tool_handlers_lock = threading.Lock()
+        self._pending_external_tools: dict[str, asyncio.Task[None]] = {}
         self._permission_handler: _PermissionHandlerFn | None = None
         self._permission_handler_lock = threading.Lock()
         self._mcp_auth_handler: McpAuthHandler | None = None
@@ -1473,6 +1659,40 @@ class CopilotSession:
         self._open_canvases_lock = threading.Lock()
         self._rpc: SessionRpc | None = None
         self._destroyed = False
+        self._structured_waits: set[asyncio.Future[SessionEvent]] = set()
+        self._disconnect_lock = asyncio.Lock()
+        self._on_disconnect = on_disconnect
+
+    def _set_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Set the client-owned cleanup callback before the session becomes active."""
+        self._on_disconnect = callback
+
+    def _run_disconnect_callback(self) -> None:
+        callback = self._on_disconnect
+        self._on_disconnect = None
+        if callback is not None:
+            callback()
+
+    def _cancel_pending_external_tools(self) -> None:
+        pending_external_tools = list(self._pending_external_tools.values())
+        self._pending_external_tools.clear()
+        current_task = asyncio.current_task()
+        for task in pending_external_tools:
+            if task is not current_task:
+                task.cancel()
+
+    def _mark_disconnected(self) -> None:
+        self._destroyed = True
+        self._fail_structured_waits()
+        self._cancel_pending_external_tools()
+        self._run_disconnect_callback()
+
+    def _fail_structured_waits(self) -> None:
+        for future in tuple(self._structured_waits):
+            if not future.done():
+                future.set_exception(
+                    RuntimeError("Session closed before structured output completed")
+                )
 
     @property
     def rpc(self) -> SessionRpc:
@@ -1522,10 +1742,12 @@ class CopilotSession:
         prompt: str,
         *,
         attachments: list[Attachment] | None = None,
+        source: MessageSource | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         agent_mode: Literal["interactive", "plan", "autopilot", "shell"] | None = None,
         request_headers: dict[str, str] | None = None,
         display_prompt: str | None = None,
+        response_schema: dict[str, Any] | type[BaseModel] | None = None,
     ) -> str:
         """
         Send a message to this session.
@@ -1537,6 +1759,9 @@ class CopilotSession:
         Args:
             prompt: The message text to send.
             attachments: Optional file, directory, or selection attachments.
+            source: Optional message provenance (``"user"``, ``"system"``, or
+                :class:`AgentMessageSource` for an identified agent).
+                Omitted when None, preserving the runtime's default for user messages.
             mode: Message delivery mode (``"enqueue"`` or ``"immediate"``).
             agent_mode: The UI mode the agent was in when this message was sent
                 (for example ``"plan"`` or ``"autopilot"``). Defaults to the
@@ -1544,6 +1769,8 @@ class CopilotSession:
             request_headers: Optional per-turn HTTP headers for outbound model requests.
             display_prompt: If provided, this is shown in the timeline instead of
                 ``prompt``.
+            response_schema: JSON Schema or a Pydantic model for this run. Independent
+                sends do not inherit it. Immediate steering cannot specify a schema.
 
         Returns:
             The message ID assigned by the server, which can be used to correlate events.
@@ -1563,6 +1790,10 @@ class CopilotSession:
         }
         if attachments is not None:
             params["attachments"] = attachments
+        if source is not None:
+            params["source"] = (
+                "agent-" + source.agent_id if isinstance(source, AgentMessageSource) else source
+            )
         if mode is not None:
             params["mode"] = mode
         if agent_mode is not None:
@@ -1571,6 +1802,16 @@ class CopilotSession:
             params["requestHeaders"] = request_headers
         if display_prompt is not None:
             params["displayPrompt"] = display_prompt
+        if response_schema is not None:
+            schema = (
+                response_schema.model_json_schema()
+                if isinstance(response_schema, type) and issubclass(response_schema, BaseModel)
+                else response_schema
+            )
+            params["responseFormat"] = {
+                "type": "json_schema",
+                "jsonSchema": {"name": "response", "strict": True, "schema": schema},
+            }
         params.update(get_trace_context())
 
         rpc_start = time.perf_counter()
@@ -1591,10 +1832,12 @@ class CopilotSession:
         prompt: str,
         *,
         attachments: list[Attachment] | None = None,
+        source: MessageSource | None = None,
         mode: Literal["enqueue", "immediate"] | None = None,
         agent_mode: Literal["interactive", "plan", "autopilot", "shell"] | None = None,
         request_headers: dict[str, str] | None = None,
         display_prompt: str | None = None,
+        response_schema: dict[str, Any] | type[BaseModel] | None = None,
         timeout: float = 60.0,
     ) -> SessionEvent | None:
         """
@@ -1609,6 +1852,9 @@ class CopilotSession:
         Args:
             prompt: The message text to send.
             attachments: Optional file, directory, or selection attachments.
+            source: Optional message provenance (``"user"``, ``"system"``, or
+                :class:`AgentMessageSource` for an identified agent),
+                independent of delivery mode. Omitted when None.
             mode: Message delivery mode (``"enqueue"`` or ``"immediate"``).
             agent_mode: The UI mode the agent was in when this message was sent
                 (for example ``"plan"`` or ``"autopilot"``). Defaults to the
@@ -1618,6 +1864,8 @@ class CopilotSession:
                 ``prompt``.
             timeout: Timeout in seconds (default: 60). Controls how long to wait;
                 does not abort in-flight agent work.
+            response_schema: A per-run schema. Waits for the last correlated root
+                assistant message without tool requests at non-autopilot idle.
 
         Returns:
             The final assistant message event, or None if none was received.
@@ -1634,6 +1882,20 @@ class CopilotSession:
             ...         case AssistantMessageData() as data:
             ...             print(data.content)
         """
+        if response_schema is not None:
+            return await self._wait_for_structured_message(
+                lambda: self.send(
+                    prompt,
+                    attachments=attachments,
+                    source=source,
+                    mode=mode,
+                    agent_mode=agent_mode,
+                    request_headers=request_headers,
+                    display_prompt=display_prompt,
+                    response_schema=response_schema,
+                ),
+                timeout,
+            )
         total_start = time.perf_counter()
         idle_event = asyncio.Event()
         error_event: Exception | None = None
@@ -1654,7 +1916,7 @@ class CopilotSession:
                             total_start,
                             session_id=self.session_id,
                         )
-                case SessionIdleData():
+                case SessionIdleData() as data if data.mode != SessionMode.AUTOPILOT:
                     log_timing(
                         logger,
                         logging.DEBUG,
@@ -1672,6 +1934,7 @@ class CopilotSession:
             await self.send(
                 prompt,
                 attachments=attachments,
+                source=source,
                 mode=mode,
                 agent_mode=agent_mode,
                 request_headers=request_headers,
@@ -1710,6 +1973,125 @@ class CopilotSession:
             raise TimeoutError(f"Timeout after {timeout}s waiting for session.idle")
         finally:
             unsubscribe()
+
+    async def send_and_wait_typed(
+        self,
+        prompt: str,
+        response_type: type[TResponse],
+        *,
+        attachments: list[Attachment] | None = None,
+        source: MessageSource | None = None,
+        mode: Literal["enqueue", "immediate"] | None = None,
+        agent_mode: Literal["interactive", "plan", "autopilot", "shell"] | None = None,
+        request_headers: dict[str, str] | None = None,
+        display_prompt: str | None = None,
+        timeout: float = 60.0,
+    ) -> TResponse:
+        """Infer a schema using Pydantic, then validate and return the final result.
+
+        Uses the same model schema generation as custom tools. Provider schema
+        restrictions still apply (for example, configure ``extra="forbid"`` for
+        closed objects). Validation uses the schema's alias names, including for
+        nested models, regardless of model-level alias validation settings.
+        Streaming events remain text. Timeout or cancellation
+        only stops waiting, not the agent. Errors remain session-scoped.
+        """
+        if not isinstance(response_type, type) or not issubclass(response_type, BaseModel):
+            raise TypeError("response_type must be a Pydantic BaseModel subclass")
+        if mode == "immediate":
+            raise ValueError(
+                "Structured output cannot be requested on an immediate steering message"
+            )
+        response = await self.send_and_wait(
+            prompt,
+            attachments=attachments,
+            source=source,
+            mode=mode,
+            agent_mode=agent_mode,
+            request_headers=request_headers,
+            display_prompt=display_prompt,
+            response_schema=response_type,
+            timeout=timeout,
+        )
+        assert response is not None and isinstance(response.data, AssistantMessageData)
+        return response_type.model_validate_json(
+            response.data.content, by_alias=True, by_name=False
+        )
+
+    async def _wait_for_structured_message(
+        self, send: Callable[[], Awaitable[str]], timeout: float
+    ) -> SessionEvent:
+        if self._destroyed:
+            raise RuntimeError("Session is disconnected")
+        completion: asyncio.Future[SessionEvent] = asyncio.get_running_loop().create_future()
+        self._structured_waits.add(completion)
+        pending: list[SessionEvent] = []
+        message_id: str | None = None
+        started = False
+        final_message: SessionEvent | None = None
+
+        def process(event: SessionEvent) -> None:
+            nonlocal started, final_message
+            if completion.done() or event.agent_id:
+                return
+            match event.data:
+                case UserMessageData() as data if data.message_id == message_id:
+                    started = True
+                case AssistantMessageData() as data if data.originating_message_id == message_id:
+                    started = True
+                    final_message = None if data.tool_requests else event
+                case SessionIdleData() as data if started and data.mode != SessionMode.AUTOPILOT:
+                    if data.aborted:
+                        completion.set_exception(
+                            RuntimeError("Session aborted before structured output completed")
+                        )
+                    elif (
+                        final_message is None
+                        or not cast(AssistantMessageData, final_message.data).content.strip()
+                    ):
+                        completion.set_exception(
+                            RuntimeError("Run completed without a structured assistant response")
+                        )
+                    else:
+                        completion.set_result(final_message)
+                case SessionErrorData() as data if started:
+                    completion.set_exception(RuntimeError(f"Session error: {data.message}"))
+
+        def handler(event: SessionEvent) -> None:
+            if not isinstance(
+                event.data,
+                (UserMessageData, AssistantMessageData, SessionIdleData, SessionErrorData),
+            ):
+                return
+            if message_id is None:
+                pending.append(event)
+            else:
+                process(event)
+
+        unsubscribe = self.on(handler)
+        admission: asyncio.Future[str] | None = None
+        try:
+            async with asyncio.timeout(timeout):
+                admission = asyncio.ensure_future(send())
+                await asyncio.wait((admission, completion), return_when=asyncio.FIRST_COMPLETED)
+                if completion.done():
+                    return completion.result()
+                message_id = await admission
+                for event in pending:
+                    process(event)
+                pending.clear()
+                return await completion
+        finally:
+            unsubscribe()
+            self._structured_waits.discard(completion)
+            if admission is not None:
+                admission.cancel()
+                await asyncio.gather(admission, return_exceptions=True)
+            # Retrieve an error if admission failed while disconnection also completed the future.
+            if completion.done() and not completion.cancelled():
+                completion.exception()
+            else:
+                completion.cancel()
 
     def on(self, handler: Callable[[SessionEvent], None]) -> Callable[[], None]:
         """
@@ -1792,7 +2174,7 @@ class CopilotSession:
             case ExternalToolRequestedData() as data:
                 request_id = data.request_id
                 tool_name = data.tool_name
-                if not request_id or not tool_name:
+                if self._destroyed or not request_id or not tool_name:
                     return
 
                 handler = self._get_tool_handler(tool_name)
@@ -1803,11 +2185,26 @@ class CopilotSession:
                 arguments = data.arguments
                 tp = getattr(data, "traceparent", None)
                 ts = getattr(data, "tracestate", None)
-                asyncio.ensure_future(
+                task = asyncio.create_task(
                     self._execute_tool_and_respond(
                         request_id, tool_name, tool_call_id, arguments, handler, tp, ts
                     )
                 )
+                if request_id in self._pending_external_tools:
+                    task.cancel()
+                    return
+                self._pending_external_tools[request_id] = task
+                task.add_done_callback(
+                    lambda completed, rid=request_id: self._remove_pending_external_tool(
+                        rid, completed
+                    )
+                )
+
+            case ExternalToolCompletedData() as data:
+                if data.request_id:
+                    task = self._pending_external_tools.pop(data.request_id, None)
+                    if task is not None:
+                        task.cancel()
 
             case PermissionRequestedData() as data:
                 if logger.isEnabledFor(logging.DEBUG):
@@ -2015,6 +2412,8 @@ class CopilotSession:
             # standard "Failed to execute..." message. Deliberate user-returned
             # failures send the full structured result to preserve metadata.
             if tool_result._from_exception:
+                if not self._claim_external_tool(request_id):
+                    return
                 rpc_start = time.perf_counter()
                 await self.rpc.tools.handle_pending_tool_call(
                     HandlePendingToolCallRequest(
@@ -2033,17 +2432,13 @@ class CopilotSession:
                     tool_name=tool_name,
                 )
             else:
+                if not self._claim_external_tool(request_id):
+                    return
                 rpc_start = time.perf_counter()
                 await self.rpc.tools.handle_pending_tool_call(
                     HandlePendingToolCallRequest(
                         request_id=request_id,
-                        result=ExternalToolTextResultForLlm(
-                            text_result_for_llm=tool_result.text_result_for_llm,
-                            error=tool_result.error,
-                            result_type=tool_result.result_type,
-                            tool_references=tool_result.tool_references,
-                            tool_telemetry=tool_result.tool_telemetry,
-                        ),
+                        result=tool_result_to_external_tool_text_result_for_llm(tool_result),
                     )
                 )
                 log_timing(
@@ -2057,6 +2452,8 @@ class CopilotSession:
                     tool_name=tool_name,
                 )
         except Exception as exc:
+            if not self._claim_external_tool(request_id):
+                return
             try:
                 await self.rpc.tools.handle_pending_tool_call(
                     HandlePendingToolCallRequest(
@@ -2067,6 +2464,17 @@ class CopilotSession:
             except (JsonRpcError, ProcessExitedError, OSError):
                 pass  # Connection lost or RPC error — nothing we can do
 
+    def _remove_pending_external_tool(self, request_id: str, completed: asyncio.Task[None]) -> None:
+        if self._pending_external_tools.get(request_id) is completed:
+            self._pending_external_tools.pop(request_id, None)
+
+    def _claim_external_tool(self, request_id: str) -> bool:
+        current = asyncio.current_task()
+        if self._destroyed or self._pending_external_tools.get(request_id) is not current:
+            return False
+        self._pending_external_tools.pop(request_id, None)
+        return True
+
     async def _execute_permission_and_respond(
         self,
         request_id: str,
@@ -2076,7 +2484,13 @@ class CopilotSession:
         """Execute a permission handler and respond via RPC."""
         try:
             handler_start = time.perf_counter()
-            result = handler(permission_request, {"session_id": self.session_id})
+            result = handler(
+                permission_request,
+                {
+                    "session_id": self.session_id,
+                    "managed_settings_enabled": self._managed_settings_enabled,
+                },
+            )
             if inspect.isawaitable(result):
                 result = await result
             log_timing(
@@ -2088,7 +2502,11 @@ class CopilotSession:
                 request_id=request_id,
             )
 
-            result = cast(PermissionRequestResult, result)
+            result = cast("PermissionRequestResult | AttributedPermissionResult", result)
+            decision_context: PermissionDecisionContext | None = None
+            if isinstance(result, AttributedPermissionResult):
+                decision_context = result.decision_context
+                result = result.result
             if isinstance(result, PermissionNoResult):
                 return
 
@@ -2097,6 +2515,7 @@ class CopilotSession:
                 PermissionDecisionRequest(
                     request_id=request_id,
                     result=result,
+                    decision_context=decision_context,
                 )
             )
             log_timing(
@@ -2108,6 +2527,10 @@ class CopilotSession:
                 request_id=request_id,
             )
         except Exception:
+            logger.exception(
+                "Permission handler or response delivery failed",
+                extra={"session_id": self.session_id, "request_id": request_id},
+            )
             try:
                 await self.rpc.permissions.handle_pending_permission_request(
                     PermissionDecisionRequest(
@@ -2143,14 +2566,14 @@ class CopilotSession:
 
             if result and result.get("kind", "token") == "token":
                 rpc_result = MCPOauthPendingRequestResponse(
-                    kind=MCPOauthPendingRequestResponseKind.TOKEN,
+                    kind=GitHubTokenAcquireResultKind.TOKEN,
                     access_token=result["accessToken"],
                     expires_in=result.get("expiresIn"),
                     token_type=result.get("tokenType"),
                 )
             else:
                 rpc_result = MCPOauthPendingRequestResponse(
-                    kind=MCPOauthPendingRequestResponseKind.CANCELLED
+                    kind=GitHubTokenAcquireResultKind.CANCELLED
                 )
             await self.rpc.mcp.oauth.handle_pending_request(
                 MCPOauthHandlePendingRequest(
@@ -2164,7 +2587,7 @@ class CopilotSession:
                     MCPOauthHandlePendingRequest(
                         request_id=request_id,
                         result=MCPOauthPendingRequestResponse(
-                            kind=MCPOauthPendingRequestResponseKind.CANCELLED
+                            kind=GitHubTokenAcquireResultKind.CANCELLED
                         ),
                     )
                 )
@@ -2502,7 +2925,13 @@ class CopilotSession:
 
         try:
             handler_start = time.perf_counter()
-            result = handler(request, {"session_id": self.session_id})
+            result = handler(
+                request,
+                {
+                    "session_id": self.session_id,
+                    "managed_settings_enabled": self._managed_settings_enabled,
+                },
+            )
             if inspect.isawaitable(result):
                 result = await result
             log_timing(
@@ -2512,11 +2941,14 @@ class CopilotSession:
                 handler_start,
                 session_id=self.session_id,
             )
-            return cast(PermissionRequestResult, result)
+            result = cast(PermissionRequestResult, result)
+            if isinstance(result, PermissionNoResult):
+                return PermissionDecisionUserNotAvailable()
+            return result
         except Exception:  # pylint: disable=broad-except
             # Handler failed, deny permission.
-            logger.debug(
-                "Error handling permission request",
+            logger.error(
+                "Permission handler failed",
                 extra={"session_id": self.session_id},
                 exc_info=True,
             )
@@ -2718,9 +3150,11 @@ class CopilotSession:
             "postToolUse": hooks.get("on_post_tool_use"),
             "postToolUseFailure": hooks.get("on_post_tool_use_failure"),
             "userPromptSubmitted": hooks.get("on_user_prompt_submitted"),
+            "userPromptTransformed": hooks.get("on_user_prompt_transformed"),
             "sessionStart": hooks.get("on_session_start"),
             "sessionEnd": hooks.get("on_session_end"),
             "errorOccurred": hooks.get("on_error_occurred"),
+            "agentStop": hooks.get("on_agent_stop"),
         }
 
         handler = handler_map.get(hook_type)
@@ -2737,6 +3171,8 @@ class CopilotSession:
             transformed: dict[str, Any] = dict(input_data)
             if "cwd" in transformed:
                 transformed["workingDirectory"] = transformed.pop("cwd")
+            if "stop_hook_active" in transformed:
+                transformed["stopHookActive"] = transformed.pop("stop_hook_active")
             timestamp = transformed.get("timestamp")
             if isinstance(timestamp, (int, float)):
                 transformed["timestamp"] = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
@@ -2814,18 +3250,21 @@ class CopilotSession:
             >>> # Clean up when done — session can still be resumed later
             >>> await session.disconnect()
         """
-        # Ensure that the check and update of _destroyed are atomic so that
-        # only the first caller proceeds to send the destroy RPC.
-        with self._event_handlers_lock:
-            if self._destroyed:
-                return
-            self._destroyed = True
-
-        try:
-            await self._client.request("session.destroy", {"sessionId": self.session_id})
-        finally:
-            # Clear handlers even if the request fails.
+        async with self._disconnect_lock:
             with self._event_handlers_lock:
+                if self._destroyed:
+                    return
+
+            response = await self._client.request("session.detach", {"sessionId": self.session_id})
+            if not response.get("success"):
+                detail = response.get("error") or "unknown error"
+                raise RuntimeError(f"Failed to detach session {self.session_id}: {detail}")
+
+            self._cancel_pending_external_tools()
+            self._run_disconnect_callback()
+            with self._event_handlers_lock:
+                self._destroyed = True
+                self._fail_structured_waits()
                 self._event_handlers.clear()
             with self._tool_handlers_lock:
                 self._tool_handlers.clear()
@@ -2887,6 +3326,7 @@ class CopilotSession:
         reasoning_summary: ReasoningSummary | None = None,
         context_tier: ContextTier | None = None,
         model_capabilities: ModelCapabilitiesOverride | None = None,
+        auto_tier: AutoTier | _RpcAutoTier | None | _Unset = _UNSET,
     ) -> None:
         """
         Change the model for this session.
@@ -2897,13 +3337,21 @@ class CopilotSession:
         Args:
             model: Model ID to switch to (e.g., "gpt-5.4", "claude-sonnet-4").
             reasoning_effort: Optional reasoning effort level for the new model
-                (e.g., "low", "medium", "high", "xhigh").
+                (e.g., "low", "medium", "high", "xhigh", "max").
             reasoning_summary: Optional reasoning summary mode for supported
                 models. Use "none" to suppress summary output regardless of
                 whether reasoning is enabled.
             context_tier: Optional context window tier for supported models.
                 Omit to use normal model behavior with no explicit tier.
             model_capabilities: Override individual model capabilities resolved by the runtime.
+            auto_tier: **Experimental.** Part of an experimental Auto routing
+                surface and may change or be removed in a future release.
+                Routing preference to apply when ``model`` is ``"auto"``.
+                Pass ``None`` to return to the provider's default Auto routing.
+                Omit the argument to leave the current preference alone. The
+                runtime rejects this option when ``model`` is anything other than
+                ``"auto"``; use :meth:`set_auto_tier` to change the preference
+                without changing the selected model.
 
         Raises:
             Exception: If the session has been destroyed or the connection fails.
@@ -2911,23 +3359,79 @@ class CopilotSession:
         Example:
             >>> await session.set_model("gpt-5.4")
             >>> await session.set_model("claude-sonnet-4.6", reasoning_effort="high")
+            >>> await session.set_model("auto", auto_tier="intelligence")
         """
         rpc_caps = None
         if model_capabilities is not None:
             rpc_caps = _RpcModelCapabilitiesOverride.from_dict(
                 _capabilities_to_dict(model_capabilities)
             )
-        await self.rpc.model.switch_to(
-            ModelSwitchToRequest(
-                model_id=model,
-                reasoning_effort=reasoning_effort,
-                reasoning_summary=(
-                    _RpcReasoningSummary(reasoning_summary)
-                    if reasoning_summary is not None
-                    else None
-                ),
-                context_tier=(_RpcContextTier(context_tier) if context_tier is not None else None),
-                model_capabilities=rpc_caps,
+        request = ModelSwitchToRequest(
+            model_id=model,
+            reasoning_effort=reasoning_effort,
+            reasoning_summary=(
+                _RpcReasoningSummary(reasoning_summary) if reasoning_summary is not None else None
+            ),
+            context_tier=(_RpcContextTier(context_tier) if context_tier is not None else None),
+            model_capabilities=rpc_caps,
+        )
+        if isinstance(auto_tier, _Unset):
+            await self.rpc.model.switch_to(request)
+            return
+
+        # The generated wrapper drops null fields, which would silently turn a
+        # request for default Auto routing into "leave the preference alone", so
+        # send the payload directly to preserve an explicit null.
+        params = {k: v for k, v in request.to_dict().items() if v is not None}
+        params["autoTier"] = _auto_tier_to_wire(auto_tier)
+        params["sessionId"] = self.session_id
+        await self._client.request("session.model.switchTo", params)
+
+    async def set_auto_tier(
+        self, auto_tier: AutoTier | _RpcAutoTier | None
+    ) -> ModelSwitchAutoTierResult:
+        """
+        Change the Auto routing preference without changing the selected model.
+
+        **Experimental.** Part of an experimental Auto routing surface and may
+        change or be removed in a future release.
+
+        The runtime does not apply the preference immediately. It records the
+        request and commits it only when a later user turn using the ``auto``
+        model successfully obtains a usable model from the provider. A
+        ``"pending"`` status therefore confirms that the request was accepted,
+        not that it took effect.
+
+        Watch for the outcome through the ``session.model_change`` event on
+        success, or the ephemeral ``session.auto_tier_switch_failed`` event on
+        failure. You can also read the current committed and in-flight state at
+        any time with ``session.rpc.model.get_current()``.
+
+        Only the most recent request survives: issuing a new request replaces any
+        earlier one that has not yet been claimed by a turn.
+
+        Args:
+            auto_tier: Routing preference to activate, or ``None`` to return to
+                the provider's default Auto routing.
+
+        Returns:
+            The runtime's immediate acknowledgement and Auto preference snapshot.
+
+        Raises:
+            Exception: If the session has been destroyed or the connection fails.
+
+        Example:
+            >>> result = await session.set_auto_tier("intelligence")
+            >>> if result.status == ModelSwitchAutoTierStatus.PENDING:
+            ...     pass  # Takes effect on a later turn that uses the `auto` model.
+        """
+        # `autoTier` is a required field whose null value means "use provider
+        # default routing", so this cannot go through the generated wrapper,
+        # which omits null fields.
+        return ModelSwitchAutoTierResult.from_dict(
+            await self._client.request(
+                "session.model.switchAutoTier",
+                {"sessionId": self.session_id, "autoTier": _auto_tier_to_wire(auto_tier)},
             )
         )
 

@@ -5,8 +5,55 @@
 
 use github_copilot_sdk::rpc::{
     Extension, ExtensionList, ExtensionSource, ExtensionStatus, ExtensionsDisableRequest,
-    ExtensionsEnableRequest, FleetStartRequest, FleetStartResult, TasksStartAgentRequest,
+    ExtensionsEnableRequest, FleetStartRequest, FleetStartResult, ModelSetAllowedModelsRequest,
+    ModelSetAllowedModelsResult, ModelSwitchAutoTierRequest, ModelSwitchAutoTierResult,
+    ModelSwitchAutoTierStatus, QueuePendingItems, QueuePendingItemsKind, SandboxConfig,
+    SendAgentMode, TasksStartAgentRequest,
 };
+use github_copilot_sdk::session_events::{
+    PermissionRequest, PermissionRequestedData, SessionEventData, TypedSessionEvent,
+};
+use github_copilot_sdk::{AutoTier, AutoTierPreference, SetModelOptions};
+
+#[test]
+fn session_events_deserialize_auto_tier() {
+    for event_type in ["session.start", "session.resume"] {
+        for (tier, wire_tier) in [
+            (Some(AutoTier::Efficiency), Some("efficiency")),
+            (Some(AutoTier::Balance), Some("balance")),
+            (Some(AutoTier::Intelligence), Some("intelligence")),
+            (Some(AutoTier::Fast), Some("fast")),
+            (None, None),
+        ] {
+            let mut wire = serde_json::json!({
+                "id": "11111111-1111-1111-1111-111111111111",
+                "timestamp": "2026-08-28T00:00:00Z",
+                "parentId": null,
+                "type": event_type,
+                "data": {
+                    "sessionId": "test-session", "version": 1,
+                    "producer": "copilot", "copilotVersion": "1.0.82-1",
+                    "startTime": "2026-08-28T00:00:00Z",
+                    "resumeTime": "2026-08-28T00:00:00Z", "eventCount": 1
+                }
+            });
+            if let Some(wire_tier) = wire_tier {
+                wire["data"]["autoTier"] = serde_json::json!(wire_tier);
+            }
+            let event: TypedSessionEvent = serde_json::from_value(wire).unwrap();
+            let actual: Option<AutoTier> = match event.payload {
+                SessionEventData::SessionStart(data) if event_type == "session.start" => {
+                    data.auto_tier
+                }
+                SessionEventData::SessionResume(data) if event_type == "session.resume" => {
+                    data.auto_tier
+                }
+                _ => panic!("expected {event_type}"),
+            };
+            assert_eq!(actual, tier);
+        }
+    }
+}
 
 #[test]
 fn extension_running_has_expected_status_and_source() {
@@ -62,9 +109,8 @@ fn disabled_extension_preserves_disabled_status() {
 
 #[test]
 fn fleet_start_request_and_result_fields_are_accessible() {
-    let request = FleetStartRequest {
-        prompt: Some("Use the custom tool".to_string()),
-    };
+    let mut request = FleetStartRequest::default();
+    request.prompt = Some("Use the custom tool".to_string());
     let result = FleetStartResult { started: true };
     assert_eq!(request.prompt.as_deref(), Some("Use the custom tool"));
     assert!(result.started);
@@ -84,6 +130,122 @@ fn tasks_start_agent_request_fields_are_accessible() {
     assert_eq!(request.description.as_deref(), Some("SDK task agent"));
 }
 
+#[test]
+fn model_allowed_models_request_and_result_preserve_contract_fields() {
+    let replace = ModelSetAllowedModelsRequest {
+        allowed_models: Some(vec!["gpt-5.4".to_string(), "gpt-5-mini".to_string()]),
+    };
+    assert_eq!(
+        serde_json::to_value(&replace).unwrap(),
+        serde_json::json!({ "allowedModels": ["gpt-5.4", "gpt-5-mini"] })
+    );
+
+    let clear = ModelSetAllowedModelsRequest::default();
+    assert_eq!(clear.allowed_models, None);
+    assert_eq!(serde_json::to_value(&clear).unwrap(), serde_json::json!({}));
+
+    let explicit_null: ModelSetAllowedModelsRequest =
+        serde_json::from_value(serde_json::json!({ "allowedModels": null })).unwrap();
+    assert_eq!(explicit_null.allowed_models, None);
+
+    let result = ModelSetAllowedModelsResult {
+        allowed_models: Some(vec!["gpt-5.4".to_string()]),
+        effective_allowed_models: Some(vec!["gpt-5.4".to_string()]),
+        fallback_model: Some("gpt-5.4".to_string()),
+        model_id: Some("gpt-5.4".to_string()),
+    };
+    assert_eq!(
+        result.allowed_models.as_deref(),
+        Some(["gpt-5.4".to_string()].as_slice())
+    );
+    assert_eq!(
+        result.effective_allowed_models.as_deref(),
+        Some(["gpt-5.4".to_string()].as_slice())
+    );
+    assert_eq!(result.fallback_model.as_deref(), Some("gpt-5.4"));
+    assert_eq!(result.model_id.as_deref(), Some("gpt-5.4"));
+}
+
+#[test]
+fn permission_event_exposes_managed_approval_required() {
+    let data: PermissionRequestedData = serde_json::from_value(serde_json::json!({
+        "permissionRequest": {
+            "kind": "read",
+            "intention": "Read managed content",
+            "path": "/workspace/file.txt",
+            "managedApprovalRequired": true
+        },
+        "requestId": "permission-1"
+    }))
+    .unwrap();
+
+    let PermissionRequest::Read(request) = data.permission_request else {
+        panic!("expected read permission request");
+    };
+    assert_eq!(request.managed_approval_required, Some(true));
+}
+
+#[test]
+fn queue_pending_message_id_uses_camel_case_wire_name() {
+    let item = QueuePendingItems {
+        agent_mode: SendAgentMode::Interactive,
+        display_text: "second message".to_string(),
+        id: "batch-1".to_string(),
+        kind: QueuePendingItemsKind::Message,
+        message_id: Some("message-2".to_string()),
+    };
+
+    let serialized = serde_json::to_value(&item).unwrap();
+    assert_eq!(serialized["id"], "batch-1");
+    assert_eq!(serialized["messageId"], "message-2");
+
+    let deserialized: QueuePendingItems = serde_json::from_value(serialized).unwrap();
+    assert_eq!(deserialized.message_id.as_deref(), Some("message-2"));
+}
+
+#[test]
+fn queue_pending_message_id_is_optional_for_older_hosts() {
+    let item: QueuePendingItems = serde_json::from_value(serde_json::json!({
+        "agentMode": "interactive",
+        "displayText": "/model gpt-5",
+        "id": "command-1",
+        "kind": "command"
+    }))
+    .unwrap();
+
+    assert_eq!(item.message_id, None);
+    assert!(
+        serde_json::to_value(item)
+            .unwrap()
+            .get("messageId")
+            .is_none()
+    );
+}
+
+#[test]
+fn sandbox_allow_bypass_round_trips_as_optional_camel_case() {
+    let mut enabled = SandboxConfig::default();
+    enabled.enabled = true;
+    enabled.allow_bypass = Some(true);
+    let value = serde_json::to_value(enabled).unwrap();
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "allowBypass": true,
+            "enabled": true,
+        })
+    );
+    let round_tripped: SandboxConfig = serde_json::from_value(value).unwrap();
+    assert_eq!(round_tripped.allow_bypass, Some(true));
+
+    let mut omitted = SandboxConfig::default();
+    omitted.enabled = true;
+    assert_eq!(
+        serde_json::to_value(omitted).unwrap(),
+        serde_json::json!({ "enabled": true })
+    );
+}
+
 fn running_extension(id: &str, name: &str) -> Extension {
     Extension {
         id: id.to_string(),
@@ -96,4 +258,68 @@ fn running_extension(id: &str, name: &str) -> Extension {
         },
         status: ExtensionStatus::Running,
     }
+}
+
+#[test]
+fn switch_auto_tier_request_serializes_explicit_null_tier() {
+    // `autoTier` is a required field whose null value means "use provider-default
+    // routing", so it must survive serialization rather than being skipped.
+    let request = ModelSwitchAutoTierRequest {
+        auto_tier: None,
+        source: None,
+    };
+    let wire = serde_json::to_value(&request).unwrap();
+
+    assert_eq!(wire.get("autoTier"), Some(&serde_json::Value::Null));
+    assert!(wire.get("source").is_none());
+}
+
+#[test]
+fn switch_auto_tier_request_serializes_each_tier() {
+    for (tier, expected) in [
+        (AutoTier::Efficiency, "efficiency"),
+        (AutoTier::Balance, "balance"),
+        (AutoTier::Intelligence, "intelligence"),
+        (AutoTier::Fast, "fast"),
+    ] {
+        let request = ModelSwitchAutoTierRequest {
+            auto_tier: Some(tier),
+            source: None,
+        };
+        let wire = serde_json::to_value(&request).unwrap();
+        assert_eq!(wire["autoTier"], serde_json::json!(expected));
+    }
+}
+
+#[test]
+fn switch_auto_tier_result_deserializes_full_snapshot() {
+    let result: ModelSwitchAutoTierResult = serde_json::from_value(serde_json::json!({
+        "status": "pending",
+        "effectiveAutoTier": "balance",
+        "pendingAutoTier": "fast",
+        "activatingAutoTier": null,
+        "supersededAutoTier": "efficiency"
+    }))
+    .unwrap();
+
+    assert_eq!(result.status, ModelSwitchAutoTierStatus::Pending);
+    assert_eq!(result.effective_auto_tier, Some(AutoTier::Balance));
+    assert_eq!(result.pending_auto_tier, Some(AutoTier::Fast));
+    assert_eq!(result.activating_auto_tier, None);
+    assert_eq!(result.superseded_auto_tier, Some(AutoTier::Efficiency));
+}
+
+#[test]
+fn set_model_options_distinguishes_unset_tier_from_reset() {
+    let untouched = SetModelOptions::default();
+    assert_eq!(untouched.auto_tier, None);
+
+    let explicit = SetModelOptions::default().with_auto_tier(AutoTier::Intelligence);
+    assert_eq!(
+        explicit.auto_tier,
+        Some(AutoTierPreference::Tier(AutoTier::Intelligence))
+    );
+
+    let cleared = SetModelOptions::default().with_reset_auto_tier();
+    assert_eq!(cleared.auto_tier, Some(AutoTierPreference::Reset));
 }

@@ -16,10 +16,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::handler::{PermissionHandler, PermissionResult};
+use crate::handler::{PermissionHandler, PermissionResult, permission_handler_failure};
 use crate::types::{PermissionRequestData, RequestId, SessionId};
 
-/// Return a [`PermissionHandler`] that approves every request.
+/// Return a [`PermissionHandler`] that approves requests when managed settings
+/// are disabled.
+///
+/// When managed settings are enabled, the handler logs an error and returns a
+/// user-not-available decision.
 pub fn approve_all() -> Arc<dyn PermissionHandler> {
     Arc::new(PolicyHandler {
         policy: Policy::ApproveAll,
@@ -93,8 +97,7 @@ pub(crate) fn resolve_handler(
 ) -> Option<Arc<dyn PermissionHandler>> {
     match (handler, policy) {
         (_, Some(policy)) => Some(Arc::new(PolicyHandler { policy })),
-        (Some(h), None) => Some(h),
-        (None, None) => None,
+        (handler, None) => handler,
     }
 }
 
@@ -116,7 +119,15 @@ impl PermissionHandler for PolicyHandler {
             Policy::Predicate(f) => f(&data),
         };
         if approved {
-            PermissionResult::approve_once()
+            if matches!(self.policy, Policy::ApproveAll) && data.managed_settings_enabled {
+                permission_handler_failure(
+                    "approve-all policy cannot be used when managed settings are enabled",
+                )
+            } else if data.managed_approval_required == Some(true) {
+                PermissionResult::no_result()
+            } else {
+                PermissionResult::approve_once()
+            }
         } else {
             PermissionResult::reject(None)
         }
@@ -140,7 +151,25 @@ mod tests {
         assert!(matches!(
             h.handle(SessionId::from("s"), RequestId::new("1"), data())
                 .await,
-            PermissionResult::Decision(crate::types::PermissionDecision::ApproveOnce(_))
+            PermissionResult::Decision {
+                decision: crate::types::PermissionDecision::ApproveOnce(_),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn approve_all_fails_when_managed_settings_enabled() {
+        let h = approve_all();
+        let mut request = data();
+        request.managed_settings_enabled = true;
+        assert!(matches!(
+            h.handle(SessionId::from("s"), RequestId::new("1"), request)
+                .await,
+            PermissionResult::Decision {
+                decision: crate::types::PermissionDecision::UserNotAvailable(_),
+                ..
+            }
         ));
     }
 
@@ -150,7 +179,10 @@ mod tests {
         assert!(matches!(
             h.handle(SessionId::from("s"), RequestId::new("1"), data())
                 .await,
-            PermissionResult::Decision(crate::types::PermissionDecision::Reject(_))
+            PermissionResult::Decision {
+                decision: crate::types::PermissionDecision::Reject(_),
+                ..
+            }
         ));
     }
 
@@ -160,7 +192,37 @@ mod tests {
         assert!(matches!(
             h.handle(SessionId::from("s"), RequestId::new("1"), data())
                 .await,
-            PermissionResult::Decision(crate::types::PermissionDecision::Reject(_))
+            PermissionResult::Decision {
+                decision: crate::types::PermissionDecision::Reject(_),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn approve_if_leaves_managed_approval_pending_when_predicate_approves() {
+        let h = approve_if(|_| true);
+        let mut request = data();
+        request.managed_approval_required = Some(true);
+        assert!(matches!(
+            h.handle(SessionId::from("s"), RequestId::new("1"), request)
+                .await,
+            PermissionResult::NoResult
+        ));
+    }
+
+    #[tokio::test]
+    async fn approve_if_still_rejects_managed_request_when_predicate_denies() {
+        let h = approve_if(|_| false);
+        let mut request = data();
+        request.managed_approval_required = Some(true);
+        assert!(matches!(
+            h.handle(SessionId::from("s"), RequestId::new("1"), request)
+                .await,
+            PermissionResult::Decision {
+                decision: crate::types::PermissionDecision::Reject(_),
+                ..
+            }
         ));
     }
 
@@ -185,7 +247,10 @@ mod tests {
             resolved
                 .handle(SessionId::from("s"), RequestId::new("1"), data())
                 .await,
-            PermissionResult::Decision(crate::types::PermissionDecision::Reject(_))
+            PermissionResult::Decision {
+                decision: crate::types::PermissionDecision::Reject(_),
+                ..
+            }
         ));
     }
 
@@ -208,7 +273,10 @@ mod tests {
             resolved
                 .handle(SessionId::from("s"), RequestId::new("1"), data())
                 .await,
-            PermissionResult::Decision(crate::types::PermissionDecision::ApproveOnce(_))
+            PermissionResult::Decision {
+                decision: crate::types::PermissionDecision::ApproveOnce(_),
+                ..
+            }
         ));
     }
 

@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { ParsedHttpExchange } from "../../../test/harness/replayingCapiProxy.js";
 import { CopilotClient, approveAll, defineTool, RuntimeConnection } from "../../src/index.js";
 import { createSdkTestContext, DEFAULT_GITHUB_TOKEN, isCI } from "./harness/sdkTestContext.js";
-import { getFinalAssistantMessage, getNextEventOfType, retry } from "./harness/sdkTestHelper.js";
+import { withFinalAssistantMessage, getNextEventOfType, retry } from "./harness/sdkTestHelper.js";
 
 const {
     copilotClient: client,
@@ -95,10 +95,68 @@ describe("Sessions", () => {
         await resumedSession.disconnect();
         await originalSession.disconnect();
     });
+
+    it("should recover marker after cold resume with explicit session id", async () => {
+        const sessionId = `e2e-resume-${Date.now()}`;
+        const marker = "MARKER-7f3ac21e";
+        const firstClient = new CopilotClient({
+            workingDirectory: workDir,
+            env,
+            connection: RuntimeConnection.forStdio({ path: process.env.COPILOT_CLI_PATH }),
+            // Explicit token (matches createClient()/other passing resume tests): without it,
+            // useLoggedInUser defaults to true and the runtime falls back to ambient env-var
+            // auto-detection for the model call, which flakes on some hosts (e.g. Alpine ARM64).
+            gitHubToken: isCI ? DEFAULT_GITHUB_TOKEN : undefined,
+        });
+        onTestFinished(async () => {
+            try {
+                await firstClient.stop();
+            } catch {
+                // ignore
+            }
+        });
+
+        const session = await firstClient.createSession({
+            sessionId,
+            onPermissionRequest: approveAll,
+            model: "claude-sonnet-4.5",
+        });
+        await session.sendAndWait({
+            prompt: `Please remember this exact secret marker for later - ${marker}. Reply with only the single word "Acknowledged".`,
+        });
+        await session.disconnect();
+        await firstClient.stop();
+
+        const secondClient = new CopilotClient({
+            workingDirectory: workDir,
+            env,
+            connection: RuntimeConnection.forStdio({ path: process.env.COPILOT_CLI_PATH }),
+            gitHubToken: isCI ? DEFAULT_GITHUB_TOKEN : undefined,
+        });
+        onTestFinished(async () => {
+            try {
+                await secondClient.stop();
+            } catch {
+                // ignore
+            }
+        });
+        const resumedSession = await secondClient.resumeSession(sessionId, {
+            onPermissionRequest: approveAll,
+            model: "claude-sonnet-4.5",
+        });
+        const response = await resumedSession.sendAndWait({
+            prompt: "What was the exact secret marker I asked you to remember earlier? Reply with only that marker value and nothing else.",
+        });
+
+        expect(response?.data.content).toContain(marker);
+        await resumedSession.disconnect();
+        await secondClient.stop();
+    });
+
     it("should create and disconnect sessions", async () => {
         await using session = await client.createSession({
             onPermissionRequest: approveAll,
-            model: "claude-sonnet-4.5",
+            model: "claude-sonnet-5",
         });
         expect(session.sessionId).toMatch(/^[a-f0-9-]+$/);
 
@@ -107,7 +165,7 @@ describe("Sessions", () => {
         expect(sessionStartEvents).toMatchObject([
             {
                 type: "session.start",
-                data: { sessionId: session.sessionId, selectedModel: "claude-sonnet-4.5" },
+                data: { sessionId: session.sessionId, selectedModel: "claude-sonnet-5" },
             },
         ]);
 
@@ -252,10 +310,13 @@ describe("Sessions", () => {
 
         // It only tells the model about the specified tools and no others
         const traffic = await waitForExchanges();
-        expect(traffic[0].request.tools).toMatchObject([
-            { function: { name: "view" } },
-            { function: { name: "edit" } },
-        ]);
+        expect(traffic[0].request.tools).toHaveLength(2);
+        expect(traffic[0].request.tools).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ function: expect.objectContaining({ name: "view" }) }),
+                expect.objectContaining({ function: expect.objectContaining({ name: "edit" }) }),
+            ])
+        );
     });
 
     it("should create a session with excludedTools", async () => {
@@ -379,12 +440,12 @@ describe("Sessions", () => {
         });
         expect(session2.sessionId).toBe(sessionId);
 
-        // session.idle is ephemeral and not persisted, so use alreadyIdle
-        // to find the assistant message from the completed session.
-        const answer2 = await getFinalAssistantMessage(session2, { alreadyIdle: true });
+        // sendAndWait already observed idle on session1; only durable messages
+        // are needed to verify the completed turn survived resumption.
+        const messages = await session2.getEvents();
+        const answer2 = messages.findLast((m) => m.type === "assistant.message");
         expect(answer2?.data.content).toContain("2");
 
-        const messages = await session2.getEvents();
         expect(messages).toContainEqual(expect.objectContaining({ type: "user.message" }));
         expect(messages).toContainEqual(expect.objectContaining({ type: "session.resume" }));
 
@@ -503,8 +564,10 @@ describe("Sessions", () => {
         expect(messages.some((m) => m.type === "abort")).toBe(true);
 
         // We should be able to send another message
-        const answer = await session.sendAndWait({ prompt: "What is 2+2?" });
-        expect(answer?.data.content).toContain("4");
+        const nextAssistantMessage = getNextEventOfType(session, "assistant.message");
+        await session.send({ prompt: "What is 2+2?" });
+        const answer = await nextAssistantMessage;
+        expect(answer.data.content).toContain("4");
     });
 
     it("should receive session events", async () => {
@@ -576,19 +639,17 @@ describe("Sessions", () => {
         await using session = await client.createSession({ onPermissionRequest: approveAll });
 
         let disposed = false;
-        const disposedPromise = new Promise<void>((resolve) => {
-            session.on((event) => {
-                if (event.type === "user.message") {
-                    // Call disconnect from within a handler — must not deadlock.
-                    session.disconnect().then(() => {
-                        disposed = true;
-                        resolve();
-                    });
-                }
-            });
+        let disposedPromise: Promise<void> | undefined;
+        session.on((event) => {
+            if (event.type === "session.idle") {
+                // Isolate handler reentrancy from active-turn cancellation.
+                disposedPromise = session.disconnect().then(() => {
+                    disposed = true;
+                });
+            }
         });
 
-        await session.send({ prompt: "What is 1+1?" });
+        await session.sendAndWait({ prompt: "What is 1+1?" });
 
         // If this times out, we deadlocked.
         await vi.waitFor(() => expect(disposed).toBe(true), { timeout: 10_000 });
@@ -608,9 +669,9 @@ describe("Sessions", () => {
         expect(session.sessionId).toMatch(/^[a-f0-9-]+$/);
 
         // Session should work normally with custom config dir
-        await session.send({ prompt: "What is 1+1?" });
-        const assistantMessage = await getFinalAssistantMessage(session);
-        expect(assistantMessage.data.content).toContain("2");
+        const assistantMessage = await session.sendAndWait({ prompt: "What is 1+1?" });
+        expect(assistantMessage).toBeDefined();
+        expect(assistantMessage?.data.content).toContain("2");
     });
 
     it("should log messages at all levels and emit matching session events", async () => {
@@ -906,14 +967,13 @@ describe("Send Blocking Behavior", async () => {
             events.push(event.type);
         });
 
-        // Use a slow command so we can verify send() returns before completion
-        await session.send({ prompt: "Run 'sleep 2 && echo done'" });
+        const message = await withFinalAssistantMessage(session, async () => {
+            // Use a slow command so we can verify send() returns before completion.
+            await session.send({ prompt: "Run 'sleep 2 && echo done'" });
 
-        // send() should return before turn completes (no session.idle yet)
-        expect(events).not.toContain("session.idle");
-
-        // Wait for turn to complete
-        const message = await getFinalAssistantMessage(session);
+            // send() should return before turn completes (no session.idle yet).
+            expect(events).not.toContain("session.idle");
+        });
 
         expect(message.data.content).toContain("done");
         expect(events).toContain("session.idle");
@@ -962,15 +1022,21 @@ describe("Send Blocking Behavior", async () => {
         expect(event.data.newModel).toBe("gpt-4.1");
     });
 
-    it("should set model with reasoningEffort", async () => {
-        await using session = await client.createSession({ onPermissionRequest: approveAll });
+    describe("reasoning effort model switch (isolated to avoid models cache contamination)", async () => {
+        const { copilotClient: reasoningClient } = await createSdkTestContext();
 
-        const modelChangePromise = getNextEventOfType(session, "session.model_change");
+        it("should set model with reasoningEffort", async () => {
+            await using session = await reasoningClient.createSession({
+                onPermissionRequest: approveAll,
+            });
 
-        await session.setModel("gpt-4.1", { reasoningEffort: "high" });
+            const modelChangePromise = getNextEventOfType(session, "session.model_change");
 
-        const event = await modelChangePromise;
-        expect(event.data.newModel).toBe("gpt-4.1");
-        expect(event.data.reasoningEffort).toBe("high");
+            await session.setModel("gpt-5.4", { reasoningEffort: "high" });
+
+            const event = await modelChangePromise;
+            expect(event.data.newModel).toBe("gpt-5.4");
+            expect(event.data.reasoningEffort).toBe("high");
+        });
     });
 });

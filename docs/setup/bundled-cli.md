@@ -39,6 +39,9 @@ flowchart TB
 
 ## Quick start
 
+> [!NOTE]
+> Each SDK has a minimum language runtime requirement—see the Prerequisites section of the [Node.js](../../nodejs/README.md#prerequisites), [Python](../../python/README.md#prerequisites), [Go](../../go/README.md#prerequisites), [Rust](../../rust/README.md#prerequisites), [Java](../../java/README.md#prerequisites), or [.NET](../../dotnet/README.md#prerequisites) README—since an unsupported runtime (e.g. Python below the stated floor) can cause `pip`/package managers to silently resolve an outdated SDK release instead of reporting a version conflict.
+
 <details open>
 <summary><strong>Node.js / TypeScript</strong></summary>
 
@@ -79,7 +82,7 @@ await client.stop()
 <summary><strong>Go</strong></summary>
 
 > [!NOTE]
-> The Go SDK does not bundle the CLI. You must install the CLI separately or set `Connection` to point to an existing binary. See [Local CLI Setup](./local-cli.md) for details.
+> Unlike Node.js, Python, and .NET, the Go SDK does not include a CLI as an automatic dependency. With no explicit path, `NewClient(nil)` uses an embedded CLI when available, then falls back to `copilot` on `PATH`. To embed a CLI, run the [bundler tool](../../go/README.md#distributing-your-application-with-an-embedded-github-copilot-cli) at build time. You can also set `COPILOT_CLI_PATH` or point a `Connection` at an existing binary. See [Local CLI Setup](./local-cli.md) for details.
 
 <!-- docs-validate: hidden -->
 ```go
@@ -145,7 +148,7 @@ Console.WriteLine(response?.Data.Content);
 <summary><strong>Java</strong></summary>
 
 > [!NOTE]
-> The Java SDK does not bundle or embed the Copilot CLI. You must install the CLI separately and configure its path via `Connection` or the `COPILOT_CLI_PATH` environment variable.
+> The Java SDK does not bundle or embed the Copilot CLI. Install the CLI separately and either make `copilot` available on your `PATH` or set its location with `setCliPath(...)` (or connect to a running CLI server with `setCliUrl(...)`).
 
 ```java
 import com.github.copilot.CopilotClient;

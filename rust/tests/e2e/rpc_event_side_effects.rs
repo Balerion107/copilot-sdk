@@ -8,11 +8,12 @@ use github_copilot_sdk::session_events::{
     SessionWorkspaceFileChangedData,
 };
 
-use super::support::{assistant_message_content, wait_for_event, with_e2e_context};
+use super::support::{assistant_message_content, wait_for_event};
 
 #[tokio::test]
 async fn should_emit_mode_changed_event_when_mode_set() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_event_side_effects",
         "should_emit_mode_changed_event_when_mode_set",
         |ctx| {
@@ -39,6 +40,7 @@ async fn should_emit_mode_changed_event_when_mode_set() {
                     .mode()
                     .set(ModeSetRequest {
                         mode: SessionMode::Plan,
+                        ..Default::default()
                     })
                     .await
                     .expect("set mode");
@@ -54,7 +56,8 @@ async fn should_emit_mode_changed_event_when_mode_set() {
 
 #[tokio::test]
 async fn should_emit_plan_changed_event_for_update_and_delete() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_event_side_effects",
         "should_emit_plan_changed_event_for_update_and_delete",
         |ctx| {
@@ -91,7 +94,8 @@ async fn should_emit_plan_changed_event_for_update_and_delete() {
 
 #[tokio::test]
 async fn should_emit_plan_changed_update_operation_on_second_update() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_event_side_effects",
         "should_emit_plan_changed_update_operation_on_second_update",
         |ctx| {
@@ -132,7 +136,8 @@ async fn should_emit_plan_changed_update_operation_on_second_update() {
 
 #[tokio::test]
 async fn should_emit_workspace_file_changed_event_when_file_created() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_event_side_effects",
         "should_emit_workspace_file_changed_event_when_file_created",
         |ctx| {
@@ -177,7 +182,8 @@ async fn should_emit_workspace_file_changed_event_when_file_created() {
 
 #[tokio::test]
 async fn should_emit_title_changed_event_when_name_set() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_event_side_effects",
         "should_emit_title_changed_event_when_name_set",
         |ctx| {
@@ -220,7 +226,8 @@ async fn should_emit_title_changed_event_when_name_set() {
 
 #[tokio::test]
 async fn should_emit_snapshot_rewind_event_and_remove_events_on_truncate() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_event_side_effects",
         "should_emit_snapshot_rewind_event_and_remove_events_on_truncate",
         |ctx| {
@@ -281,7 +288,8 @@ async fn should_emit_snapshot_rewind_event_and_remove_events_on_truncate() {
 
 #[tokio::test]
 async fn should_allow_session_use_after_truncate() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_event_side_effects",
         "should_allow_session_use_after_truncate",
         |ctx| {
@@ -351,3 +359,5 @@ fn wait_for_plan_event(
             == operation
     })
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_event_side_effects", 7);

@@ -17,7 +17,28 @@ import (
 // Mirrors dotnet/test/RpcServerTests.cs (snapshot category "rpc_server").
 // Tests server-scoped (non-session) RPCs.
 func TestRPCServerE2E(t *testing.T) {
+	t.Run("should clear the managed settings cache", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
+		ctx := testharness.NewTestContext(t)
+		ctx.ConfigureForTest(t)
+		client := ctx.NewClient()
+		t.Cleanup(func() { client.ForceStop() })
+
+		if err := client.Start(t.Context()); err != nil {
+			t.Fatalf("Start failed: %v", err)
+		}
+
+		if _, err := client.RPC.ManagedSettings.ClearCache(t.Context()); err != nil {
+			t.Fatalf("ManagedSettings.ClearCache failed: %v", err)
+		}
+	})
+
 	t.Run("should call rpc ping with typed params and result", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		ctx.ConfigureForTest(t)
 		client := ctx.NewClient()
@@ -41,6 +62,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should call rpc models list with typed result", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		ctx.ConfigureForTest(t)
 		const token = "rpc-models-token"
@@ -64,16 +88,19 @@ func TestRPCServerE2E(t *testing.T) {
 			if strings.TrimSpace(model.Name) == "" {
 				t.Errorf("Model %q has empty Name", model.ID)
 			}
-			if model.ID == "claude-sonnet-4.5" {
+			if model.ID == "claude-sonnet-5" {
 				hasClaude = true
 			}
 		}
 		if !hasClaude {
-			t.Errorf("Expected models list to contain 'claude-sonnet-4.5'")
+			t.Errorf("Expected models list to contain 'claude-sonnet-5'")
 		}
 	})
 
 	t.Run("should call rpc account get quota when authenticated", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		ctx.ConfigureForTest(t)
 		const token = "rpc-quota-token"
@@ -130,6 +157,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should call rpc tools list with typed result", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		ctx.ConfigureForTest(t)
 		client := ctx.NewClient()
@@ -154,6 +184,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should call rpc session fs set provider with typed result", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		client := ctx.NewClient()
 		t.Cleanup(func() { client.ForceStop() })
@@ -177,6 +210,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should add secret filter values", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
 			opts.Env = append(opts.Env, "COPILOT_ENABLE_SECRET_FILTERING=true")
@@ -198,6 +234,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should return false for missing LLM response frames", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		client := ctx.NewClient()
 		t.Cleanup(func() { client.ForceStop() })
@@ -236,6 +275,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should list find and inspect persisted session state", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		token := "rpc-server-list-token-" + randomHex(t)
 		registerProxyUser(t, ctx, token, "rpc-user", nil)
@@ -329,6 +371,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should enrich basic session metadata", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		token := "rpc-server-enrich-token-" + randomHex(t)
 		registerProxyUser(t, ctx, token, "rpc-user", nil)
@@ -382,6 +427,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should close active session and release lock", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		token := "rpc-server-close-token-" + randomHex(t)
 		registerProxyUser(t, ctx, token, "rpc-user", nil)
@@ -419,6 +467,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should prune dry run and bulk delete persisted session", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		token := "rpc-server-delete-token-" + randomHex(t)
 		registerProxyUser(t, ctx, token, "rpc-user", nil)
@@ -485,6 +536,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should set additional plugins and reload deferred hooks", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		client := ctx.NewClient()
 		t.Cleanup(func() { client.ForceStop() })
@@ -531,7 +585,11 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should report implemented error when connecting unknown remote session", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
+		ctx.ConfigureWithoutSnapshot(t)
 		client := ctx.NewClient()
 		t.Cleanup(func() { client.ForceStop() })
 		if err := client.Start(t.Context()); err != nil {
@@ -552,6 +610,9 @@ func TestRPCServerE2E(t *testing.T) {
 	})
 
 	t.Run("should discover server mcp and skills", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		ctx.ConfigureForTest(t)
 		client := ctx.NewClient()

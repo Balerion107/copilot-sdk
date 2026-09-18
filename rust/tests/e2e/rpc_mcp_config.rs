@@ -4,11 +4,10 @@ use github_copilot_sdk::rpc::{
 };
 use serde_json::json;
 
-use super::support::with_e2e_context;
-
 #[tokio::test]
 async fn should_call_server_mcp_config_rpcs() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_mcp_config",
         "should_call_server_mcp_config_rpcs",
         |ctx| {
@@ -19,6 +18,7 @@ async fn should_call_server_mcp_config_rpcs() {
                 let _ = config
                     .remove(McpConfigRemoveRequest {
                         name: server_name.to_string(),
+                        auth_client_id_metadata_url: None,
                     })
                     .await;
 
@@ -75,6 +75,7 @@ async fn should_call_server_mcp_config_rpcs() {
                 config
                     .remove(McpConfigRemoveRequest {
                         name: server_name.to_string(),
+                        auth_client_id_metadata_url: None,
                     })
                     .await
                     .expect("remove");
@@ -91,7 +92,8 @@ async fn should_call_server_mcp_config_rpcs() {
 
 #[tokio::test]
 async fn should_round_trip_http_mcp_oauth_config_rpc() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_mcp_config",
         "should_round_trip_http_mcp_oauth_config_rpc",
         |ctx| {
@@ -102,6 +104,7 @@ async fn should_round_trip_http_mcp_oauth_config_rpc() {
                 let _ = config
                     .remove(McpConfigRemoveRequest {
                         name: server_name.to_string(),
+                        auth_client_id_metadata_url: None,
                     })
                     .await;
 
@@ -197,6 +200,7 @@ async fn should_round_trip_http_mcp_oauth_config_rpc() {
                 config
                     .remove(McpConfigRemoveRequest {
                         name: server_name.to_string(),
+                        auth_client_id_metadata_url: None,
                     })
                     .await
                     .expect("remove");
@@ -209,3 +213,5 @@ async fn should_round_trip_http_mcp_oauth_config_rpc() {
     )
     .await;
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_mcp_config", 2);

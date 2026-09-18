@@ -33,62 +33,131 @@ We are generally **not** looking for:
 - Additional documentation
 - **SDKs for other languages** — if you want to create a Copilot SDK for another language, we'd love to hear from you and may offer to link to your SDK from our repo. However we do not plan to add further language-specific SDKs to this repo in the short term, since we need to retain our maintenance capacity for moving forwards quickly with the existing language set. For other languages, please consider running your own external project.
 
-## Prerequisites for Running and Testing Code
+## Microsoft Contributor Setup
 
-This is a multi-language SDK repository. Install the tools for the SDK(s) you plan to work on:
+Microsoft contributors who need recent builds of `@github`-scoped packages from the internal Azure Artifacts feed can run this command from PowerShell at the repository root:
 
-### All SDKs
+```powershell
+node .\scripts\npm-auth-refresh.mjs --run
+```
 
-1. The end-to-end tests across all languages use a shared test harness written in Node.js. Before running tests in any language, `cd test/harness && npm ci`.
+Alternatively, on any platform, run `npm run auth:refresh` from the `nodejs` directory.
 
-### Node.js/TypeScript SDK
+The command creates or updates scoped registry configurations at `nodejs/.npmrc`, `test/harness/.npmrc`, and `java/scripts/codegen/.npmrc`, preserving unrelated settings. Each configuration routes only the `@github` scope through the `copilot-canary` feed's `@Local` view, so you can then use the normal dependency installation commands. Credentials remain in your user-level npm configuration rather than in project files. On Windows, the command uses `vsts-npm-auth`; on Linux and macOS, it uses the Microsoft Azure Artifacts npm credential provider. Both paths force a credential refresh.
 
-1. Install [Node.js](https://nodejs.org/) (v18+)
-1. Install dependencies: `cd nodejs && npm ci`
+Run `node .\scripts\npm-auth-refresh.mjs --run` from PowerShell at the repository root again after an Azure Artifacts 401 or 403 response, or rerun `npm run auth:refresh` from `nodejs`. To return to your previous registry behavior, remove the `@github:registry` entry from each of the three `.npmrc` files, or restore its previous value if you had a custom entry. Delete a file only if it contains no other settings. Public contributors do not need this setup and are unaffected.
 
-### Python SDK
+## Developing an SDK
 
-1. Install [Python 3.8+](https://www.python.org/downloads/)
-1. Install [uv](https://github.com/astral-sh/uv)
-1. Install dependencies: `cd python && uv pip install -e ".[dev]"`
+Setup, build, and test instructions are maintained with each SDK:
 
-### Go SDK
+- [Node.js/TypeScript](nodejs/README.md#development)
+- [Python](python/README.md#development)
+- [Go](go/README.md#development)
+- [.NET](dotnet/README.md#development)
+- [Rust](rust/README.md#development)
+- [Java](java/README.md#development-setup)
 
-1. Install [Go 1.24+](https://go.dev/doc/install)
-1. Install [golangci-lint](https://golangci-lint.run/welcome/install/#local-installation)
-1. Install dependencies: `cd go && go mod download`
+### Testing an unreleased runtime API
 
-### .NET SDK
+The runtime's Rust contracts under `src/native/sdk-contract` produce both
+`generated/api.schema.json` (RPC methods) and
+`generated/session-events.schema.json` (event payloads). In a local checkout of
+`github/copilot-agent-runtime`, build the runtime and emit these schemas:
 
-1. Install [.NET SDK 10+](https://dotnet.microsoft.com/download)
-1. Install .NET dependencies: `cd dotnet && dotnet restore`
+```bash
+pnpm run build
+pnpm bazel build //src/native/schema-codegen:schema-codegen
+bazel-bin/src/native/schema-codegen/schema-codegen emit \
+  --api "$PWD/generated/api.schema.json" \
+  --session-events "$PWD/generated/session-events.schema.json"
+```
+
+The SDK generators normally download schemas from the pinned CLI release. To
+use the local schemas instead, pass the event-schema path followed by the
+RPC-schema path. From this repository's `scripts/codegen` directory:
+
+```bash
+npm ci
+for language in typescript csharp python go rust; do
+  node --import tsx "$language.ts" \
+    "$RUNTIME_ROOT/generated/session-events.schema.json" \
+    "$RUNTIME_ROOT/generated/api.schema.json"
+done
+```
+
+Set `RUNTIME_ROOT` to the absolute path of the runtime checkout. Java's generator
+at `java/scripts/codegen/java.ts` reads these files from
+`java/scripts/codegen/target/schemas` instead of accepting positional arguments;
+stage the local schemas there before running it. Do not hand-edit generated
+wrappers. Regenerating against a newer runtime
+also includes any other contract changes since the SDK's pinned release.
+
+Set `COPILOT_CLI_PATH` to the built runtime's `dist-cli/index.js` to run SDK E2Es
+against that checkout rather than the packaged runtime. For example:
+
+```bash
+export COPILOT_CLI_PATH="$RUNTIME_ROOT/dist-cli/index.js"
+# Supply GITHUB_TOKEN with Copilot access when recording new provider responses.
+cd nodejs
+npm test -- test/e2e/structured_output.e2e.test.ts
+cd ../dotnet
+dotnet test test/GitHub.Copilot.SDK.Test.csproj \
+  --filter FullyQualifiedName~StructuredOutputE2ETests
+```
+
+The shared harness records real inference responses under `test/snapshots`.
+Record new captures with `GITHUB_TOKEN` set and `GITHUB_ACTIONS` unset;
+never author model responses by hand. Rerun with `GITHUB_ACTIONS=true` and real
+provider credentials removed to require replay instead of forwarding cache
+misses upstream. A draft targeting an unreleased runtime should document the
+required runtime revision; update the pinned release only after it ships.
+Pinned-schema CI can report drift in such a draft, and Java codegen may
+automatically update generated files to match the pinned release.
+
+For recording behind `HTTPS_PROXY`, Node versions that support environment
+proxies (including Node 24.20) need `NODE_USE_ENV_PROXY=1` in the test runner's
+environment. If the host proxy substitutes a protected credential, set
+`GITHUB_TOKEN="$GH_TOKEN"` using its issued placeholder; do not print or persist
+the credential. Keep localhost and loopback in `NO_PROXY`.
+
+Equivalent cross-language E2Es must share snapshot names and prompts, not
+language-specific copies. The structured-output suite in **all six SDKs** reuses
+the following captures in `test/snapshots/structured_output/`, recorded using
+real CAPI `gpt-4.1` calls through the shared harness:
+
+| Shared capture (without `.yaml`) | Flow |
+| --- | --- |
+| `infers_typed_result_after_custom_tool` | Inferred typed result after a tool call, streamed text, then an unformatted follow-up |
+| `sends_explicit_schema_for_message_and_batch` | Explicit-schema batch RPC followed by a schema-bearing single send |
+| `send_selects_correlated_response_after_idle` | Event-driven send, tool commentary, originating-message correlation, and an idle boundary held by a stop hook |
+| `typed_wait_returns_stop_hook_correction` | Typed wait returns the corrected answer, not the first assistant message |
+| `typed_wait_returns_stop_hook_correction_after_terminal_tool` | Output-only finalization after a terminal tool, followed by a stop-hook correction |
+| `typed_result_after_terminal_tool_and_steering` | Immediate steering during a terminal tool preserves the active schema |
+| `typed_wait_returns_late_steering_response` | Steering after the first final answer remains part of the original run |
+| `concurrent_typed_sends_return_their_own_results` | Concurrent queued runs use different inferred types and return their own results |
+
+Typed cases call the public idiomatic APIs: Node/Zod, C# generics, Python/Pydantic,
+Go generics, Java annotated records using the existing tool schema generator,
+and Rust generics with `derive`/schemars. The tool/follow-up case also checks the
+actual provider request's inferred schema, so a recorded JSON response alone
+cannot mask missing schema forwarding. Explicit-schema and event-stream cases
+exercise the corresponding raw public APIs instead.
+
+Every language additionally checks rejection before admission and zero provider
+calls for oversized schemas and typed immediate steering. These cases have no
+model responses and therefore need **no snapshot**. Do not create canned responses
+or empty model captures for them. Unit tests supplement, rather than replace,
+the shared runtime E2Es.
 
 ## Submitting a Pull Request
 
 1. Fork and clone the repository
-1. Install dependencies for the SDK(s) you're modifying (see above)
-1. Make sure the tests pass on your machine (see commands below)
-1. Make sure linter passes on your machine (see commands below)
+1. Follow the development instructions for the SDK(s) you're modifying
 1. Create a new branch: `git checkout -b my-branch-name`
-1. Make your change, add tests, and make sure the tests and linter still pass
+1. Make your change, add tests, and run the documented checks
 1. Push to your fork and [submit a pull request][pr]
 1. Pat yourself on the back and wait for your pull request to be reviewed and merged.
-
-### Running Tests and Linters
-
-```bash
-# Node.js
-cd nodejs && npm test && npm run lint
-
-# Python
-cd python && uv run pytest && uv run ruff check .
-
-# Go
-cd go && go test ./... && golangci-lint run ./...
-
-# .NET
-cd dotnet && dotnet test test/GitHub.Copilot.SDK.Test.csproj
-```
 
 Here are a few things you can do that will increase the likelihood of your pull request being accepted:
 

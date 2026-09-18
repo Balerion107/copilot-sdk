@@ -7,7 +7,7 @@ use github_copilot_sdk::session_events::{CommandQueuedData, SessionEventType};
 use serde_json::json;
 use uuid::Uuid;
 
-use super::support::{wait_for_condition, wait_for_event, with_e2e_context};
+use super::support::{wait_for_condition, wait_for_event};
 
 fn is_pending_command(item: &QueuePendingItems, command: &str) -> bool {
     item.kind == QueuePendingItemsKind::Command
@@ -66,7 +66,8 @@ async fn wait_for_queue_empty(session: &Session) {
 
 #[tokio::test]
 async fn fresh_queue_is_empty_and_empty_mutations_are_noops() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_queue",
         "fresh_queue_is_empty_and_empty_mutations_are_noops",
         |ctx| {
@@ -115,7 +116,8 @@ async fn fresh_queue_is_empty_and_empty_mutations_are_noops() {
 
 #[tokio::test]
 async fn pendingitems_reports_queued_command_and_remove_and_clear_update_queue() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_queue",
         "pendingitems_reports_queued_command_and_remove_and_clear_update_queue",
         |ctx| {
@@ -151,6 +153,7 @@ async fn pendingitems_reports_queued_command_and_remove_and_clear_update_queue()
                     .commands()
                     .enqueue(EnqueueCommandParams {
                         command: first_command,
+                        display_text: None,
                     })
                     .await
                     .expect("enqueue command");
@@ -165,6 +168,7 @@ async fn pendingitems_reports_queued_command_and_remove_and_clear_update_queue()
                     .commands()
                     .enqueue(EnqueueCommandParams {
                         command: second_command.clone(),
+                        display_text: None,
                     })
                     .await
                     .expect("enqueue second command");
@@ -185,6 +189,7 @@ async fn pendingitems_reports_queued_command_and_remove_and_clear_update_queue()
                     .commands()
                     .enqueue(EnqueueCommandParams {
                         command: third_command.clone(),
+                        display_text: None,
                     })
                     .await
                     .expect("enqueue third command");
@@ -223,3 +228,5 @@ async fn pendingitems_reports_queued_command_and_remove_and_clear_update_queue()
     )
     .await;
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_queue", 2);

@@ -1,6 +1,7 @@
 ---
 description: Reviews PRs to ensure features are implemented consistently across all SDK language implementations
 tracker-id: sdk-consistency-review
+model: ${{ vars.GH_AW_MODEL_AGENT_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'claude-sonnet-5' }}
 on:
   roles: all
   pull_request:
@@ -35,6 +36,10 @@ safe-outputs:
     max: 1
     hide-older-comments: true
     allowed-reasons: [outdated]
+  threat-detection:
+    engine:
+      id: copilot
+      model: ${{ vars.GH_AW_MODEL_DETECTION_COPILOT || vars.GH_AW_DEFAULT_MODEL_COPILOT || 'claude-sonnet-5' }}
 timeout-minutes: 15
 ---
 
@@ -74,17 +79,24 @@ When a pull request modifies any SDK client code, review it to ensure:
 - **Python**: `python/copilot/`
 - **Go**: `go/`
 - **.NET**: `dotnet/src/`
-- **Java**: `java/src/main/java/`
+- **Java**: `java/sdk/src/main/java/`
 - **Rust**: `rust/src/`
 
 ## Review Process
 
-1. **Identify the changed SDK(s)**: Determine which language implementation(s) are modified in this PR
-2. **Analyze the changes**: Understand what feature/fix is being implemented
-3. **Cross-reference other SDKs**: Check if the equivalent functionality exists in other language implementations:
+1. **Get the authoritative PR delta**:
+   - Call `pull_request_read` with `method: get_files` for the PR, paginating until all changed files are retrieved
+   - Call `pull_request_read` with `method: get_diff` for the PR
+   - Treat these GitHub API responses as the only authoritative source of which changes belong to the PR, including when the PR head is a merge commit
+   - Base every claim about what the PR adds or modifies on the API diff; use the local checkout only for surrounding context and cross-SDK comparison
+   - Never infer the PR base from `HEAD^`, merge-parent ordering, recent commits, or local branch refs
+   - If the API file list or diff cannot be retrieved, call `missing_data` and stop; do not substitute an inferred local `git diff` range
+2. **Identify the changed SDK(s)**: Determine which language implementation(s) are modified in the authoritative PR delta
+3. **Analyze the changes**: Understand what feature/fix is being implemented from the authoritative PR delta
+4. **Cross-reference other SDKs**: Check if the equivalent functionality exists in other language implementations:
    - Read the corresponding files in other SDK directories
    - Compare method signatures, behavior, and documentation
-4. **Report findings**: If inconsistencies are found:
+5. **Report findings**: If inconsistencies are found:
    - Use `create-pull-request-review-comment` to add inline comments on specific lines where changes should be made
    - Use `add-comment` to provide a summary of cross-SDK consistency findings
    - Be specific about which SDKs need updates and what changes would bring them into alignment

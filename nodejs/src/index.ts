@@ -9,9 +9,10 @@
  */
 
 export { CopilotClient } from "./client.js";
-export { RuntimeConnection } from "./types.js";
+export { DisableBypassPermissionsModes, RuntimeConnection } from "./types.js";
 export { BuiltInTools, ToolSet } from "./toolSet.js";
 export { CopilotSession, type AssistantMessageEvent } from "./session.js";
+export { defineFactory, FactoryResumeError, isFactoryRunTerminal } from "./factory.js";
 export {
     Canvas,
     CanvasError,
@@ -26,12 +27,14 @@ export {
 export {
     defineTool,
     approveAll,
+    createAttributedPermissionResult,
     convertMcpCallToolResult,
     createSessionFsAdapter,
     CopilotRequestHandler,
     CopilotWebSocketHandler,
     CopilotWebSocketCloseStatus,
     CopilotWebSocketForwarder,
+    SessionFsSqliteTransactionFailure,
     SYSTEM_MESSAGE_SECTIONS,
 } from "./types.js";
 // Re-export the generated session-event types (every *Event interface and
@@ -39,15 +42,18 @@ export {
 // consumers can import them directly from "@github/copilot-sdk" instead of
 // reaching into the package's internal dist layout. See issue #1156.
 //
-// Three names from this file are also explicitly exported elsewhere in this
+// Six names from this file are also explicitly exported elsewhere in this
 // module — `SessionEvent` (re-exported below from `./types.js`),
-// `PermissionRequest` (re-exported below from `./types.js`), and
-// `AssistantMessageEvent` (re-exported above from `./session.js`). Per the
-// ECMAScript module spec, the explicit named re-exports shadow the names
-// arriving via `export type *`, so the hand-authored public API surface for
-// those three identifiers is preserved unchanged.
+// `PermissionRequest` (re-exported below from `./types.js`),
+// `PermissionRequestedData`/`PermissionRequestedEvent` (also re-exported below
+// from `./types.js`), `AssistantMessageEvent` (re-exported above from
+// `./session.js`), and `JsonValue` (re-exported below from `./factory.js`).
+// Per the ECMAScript module spec, the explicit named re-exports
+// shadow the names arriving via `export type *`, so the hand-authored public API
+// surface for those six identifiers is preserved unchanged.
 export type * from "./generated/session-events.js";
 export type {
+    AskUserVariant,
     CommandContext,
     CommandDefinition,
     CommandHandler,
@@ -57,8 +63,16 @@ export type {
     AutoModeSwitchHandler,
     AutoModeSwitchRequest,
     AutoModeSwitchResponse,
+    AgentStopHandler,
+    AgentStopHookInput,
+    AgentStopHookOutput,
+    UserPromptTransformedHandler,
+    UserPromptTransformedHookInput,
+    UserPromptTransformedHookOutput,
+    CopilotClientInfo,
     CopilotClientMode,
     CopilotClientOptions,
+    CopilotExpAssignmentResponse,
     StdioRuntimeConnection,
     InProcessRuntimeConnection,
     TcpRuntimeConnection,
@@ -72,6 +86,8 @@ export type {
     ElicitationResult,
     ElicitationSchema,
     ElicitationSchemaField,
+    ExpConfigEntry,
+    ExpFlagValue,
     ExitPlanModeHandler,
     ExitPlanModeRequest,
     ExitPlanModeResult,
@@ -79,23 +95,39 @@ export type {
     ForegroundSessionInfo,
     GetAuthStatusResponse,
     GetStatusResponse,
+    GitHubMcpToolConfig,
     GitHubTelemetryNotification,
     GitHubTelemetryEvent,
     GitHubTelemetryClientInfo,
+    GitHubTokenAcquireReason,
+    GitHubTokenAcquireResult,
+    GitHubTokenProvider,
+    GitHubTokenProviderArgs,
+    GitHubTokenProviderResult,
     InfiniteSessionConfig,
     LargeToolOutputConfig,
     MemoryConfiguration,
     UiInputOptions,
+    FactoryLimits,
+    FactoryMeta,
     MCPStdioServerConfig,
     MCPHTTPServerConfig,
     MCPServerConfig,
     DefaultAgentConfig,
     BearerTokenProvider,
     MessageOptions,
+    ResponseSchema,
+    MessageSource,
+    ManagedSettings,
+    ManagedSettingsPermissions,
     ModelBilling,
     ModelBillingTokenPrices,
     ModelBillingTokenPricesLongContext,
+    AutoTier,
     CapiSessionOptions,
+    CurrentModel,
+    ModelSwitchAutoTierResult,
+    ModelSwitchAutoTierStatus,
     ModelCapabilities,
     ModelCapabilitiesOverride,
     ModelInfo,
@@ -103,7 +135,15 @@ export type {
     NamedProviderConfig,
     PermissionHandler,
     PermissionRequest,
+    PermissionRequestedData,
+    PermissionRequestedEvent,
     PermissionRequestResult,
+    AttributedPermissionResult,
+    PermissionDecisionContext,
+    PermissionDecisionOutcome,
+    PermissionDecisionSource,
+    PermissionDecisionSurface,
+    PermissionResponseCapability,
     ProviderConfig,
     ProviderModelConfig,
     ProviderTokenArgs,
@@ -123,6 +163,7 @@ export type {
     SessionLifecycleEventMetadata,
     SessionLifecycleEventType,
     SessionLifecycleHandler,
+    SessionHooks,
     SessionCreatedEvent,
     SessionDeletedEvent,
     SessionUpdatedEvent,
@@ -138,6 +179,8 @@ export type {
     SessionFsSqliteQueryResult,
     SessionFsSqliteQueryType,
     SessionFsSqliteProvider,
+    SessionFsSqliteStatement,
+    SessionFsSqliteTransactionErrorClass,
     CopilotRequestContext,
     SystemMessageAppendConfig,
     SystemMessageConfig,
@@ -158,3 +201,29 @@ export type {
     TypedSessionLifecycleHandler,
     ZodSchema,
 } from "./types.js";
+export type {
+    RunOptions,
+    ResumeOptions,
+    FactoryLimitOverrides,
+    FactoryResumeErrorCode,
+    SessionFactoryApi,
+    FactoryAgentOptions,
+    FactoryContext,
+    FactoryDefinition,
+    FactoryHandle,
+    FactoryJsonSchema,
+    JsonValue,
+    FactoryPipelineStage,
+    FactoryStepOptions,
+    FactoryRunResult,
+    FactoryRunStatus,
+    FactoryRunSummary,
+    FactoryListRunsOptions,
+    FactoryRunsPage,
+    FactoryRunDetail,
+    FactoryProgressPage,
+    FactoryProgressLine,
+    FactoryPhaseObservation,
+    FactoryPhaseStatus,
+    FactoryAgentSummary,
+} from "./factory.js";

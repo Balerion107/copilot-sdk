@@ -99,7 +99,6 @@ class TestMCPServers:
             on_permission_request=PermissionHandler.approve_all
         )
         session_id = session1.session_id
-        await session1.send_and_wait("What is 1+1?")
 
         # Resume with MCP servers
         mcp_servers = _test_mcp_servers("test-server")
@@ -184,6 +183,8 @@ class TestCustomAgents:
         )
         session_id = session1.session_id
         await session1.send_and_wait("What is 1+1?")
+        # End the first attachment before testing resume-time reconfiguration.
+        await session1.disconnect()
 
         # Resume with custom agents
         custom_agents: list[CustomAgentConfig] = [

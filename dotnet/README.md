@@ -14,6 +14,13 @@ To use the SDK, you'll need:
 dotnet add package GitHub.Copilot.SDK
 ```
 
+The package downloads the pinned Copilot CLI runtime for the build RID from the
+matching `github/copilot-cli` GitHub release and verifies the archive against
+that release's `SHA256SUMS.txt`. Set `CopilotCliReleaseBaseUrl` in MSBuild (or
+`COPILOT_CLI_DOWNLOAD_BASE_URL` in the environment) to use a release mirror.
+Set `CopilotCliBinaryPath` to copy a preinstalled binary instead, or set
+`CopilotSkipCliDownload=true` to omit runtime acquisition.
+
 ## Run the Samples
 
 Try the interactive chat sample (from the repo root):
@@ -37,7 +44,7 @@ using GitHub.Copilot;
 await using var client = new CopilotClient();
 await client.StartAsync();
 
-// Create a session (OnPermissionRequest is optional; ApproveAll allows every tool)
+// ApproveAll is only valid when managed settings are disabled.
 await using var session = await client.CreateSessionAsync(new SessionConfig
 {
     Model = "gpt-5",
@@ -64,6 +71,12 @@ await session.SendAsync(new MessageOptions { Prompt = "What is 2+2?" });
 await done.Task;
 ```
 
+When targeting MCP tools configured through `McpServers`, remember the runtime
+tool name is `<server-key>-<tool-name>`. For `AvailableTools` and
+`ExcludedTools`, prefer the source-qualified form
+`mcp:<server-key>-<tool-name>`. For `CustomAgents[].Tools` and
+`DefaultAgent.ExcludedTools`, use `<server-key>-<tool-name>` directly.
+
 ## API Reference
 
 ### CopilotClient
@@ -78,7 +91,7 @@ new CopilotClient(CopilotClientOptions? options = null)
 
 - `Connection` - How to connect to the Copilot runtime. Defaults to `null` (equivalent to `RuntimeConnection.ForStdio()` with the bundled runtime). See "RuntimeConnection" below.
 - `LogLevel` - Runtime log level. Accepts well-known values `CopilotLogLevel.None`, `Error`, `Warning`, `Info`, `Debug`, `All`. Defaults to null (the runtime's own default).
-- `WorkingDirectory` - Working directory for the runtime process.
+- `WorkingDirectory` - Working directory for the runtime process. When not set, the spawned runtime inherits the calling application's current working directory.
 - `BaseDirectory` - Base directory for Copilot data (session state, config, etc.). Sets `COPILOT_HOME` on the spawned runtime process. When not set, the runtime defaults to `~/.copilot`. Useful in restricted environments where only specific directories are writable. Ignored when connecting via `RuntimeConnection.ForUri(...)`.
 - `EnableRemoteSessions` - Enables remote-session features.
 - `Environment` - Environment variables to pass to the runtime process.
@@ -94,6 +107,11 @@ new CopilotClient(CopilotClientOptions? options = null)
 - `RuntimeConnection.ForStdio(path?, args?)` — spawns the runtime as a child process and communicates over stdio. This is the default when `Connection` is null.
 - `RuntimeConnection.ForTcp(port = 0, connectionToken?, path?, args?)` — spawns the runtime as a child process listening on a TCP port. `port = 0` auto-allocates; if a non-zero port is already in use, startup fails (no fallback). Use `CopilotClient.RuntimePort` after `StartAsync` to read the assigned port. `connectionToken` is required if other clients will connect via `RuntimeConnection.ForUri(...)`.
 - `RuntimeConnection.ForUri(url, connectionToken?)` — connects to an already-running runtime at `url` (e.g., `"localhost:8080"`). Does not spawn a process.
+
+Managed stdio and TCP connections use the bundled `copilot-runtime[.exe]` and
+adjacent `runtime.node` by default. An explicit connection path or
+`COPILOT_CLI_PATH` overrides the bundled runtime.
+Managed launch fails if the bundled wrapper pair is unavailable.
 
 #### Methods
 
@@ -117,7 +135,7 @@ Create a new conversation session.
 
 - `SessionId` - Custom session ID
 - `Model` - Model to use ("gpt-5", "claude-sonnet-4.5", etc.)
-- `ReasoningEffort` - Reasoning effort level for models that support it ("low", "medium", "high", "xhigh"). Use `ListModelsAsync()` to check which models support this option.
+- `ReasoningEffort` - Reasoning effort level for models that support it ("low", "medium", "high", "xhigh", "max"). Use `ListModelsAsync()` to check which models support this option.
 - `Tools` - Custom tool declarations exposed to the CLI. Declarations without an invocable `AIFunction` are left pending for manual resolution.
 - `SystemMessage` - System message customization
 - `AvailableTools` - List of tool names to allow
@@ -125,8 +143,12 @@ Create a new conversation session.
 - `Provider` - Custom API provider configuration (BYOK)
 - `Streaming` - Enable streaming of response chunks (default: false)
 - `InfiniteSessions` - Configure automatic context compaction (see below)
-- `OnPermissionRequest` - Optional handler called before each tool execution to approve or deny it. When omitted, permission requests are emitted as events and left pending for manual resolution. Use `PermissionHandler.ApproveAll` to allow everything, or provide a custom function for fine-grained control. See [Permission Handling](#permission-handling) section.
-- `OnUserInputRequest` - Handler for user input requests from the agent (enables ask_user tool). See [User Input Requests](#user-input-requests) section.
+- `WorkingDirectory` - Working directory for the session. When not set, the runtime uses its own process working directory.
+- `EnableSessionStore` - Enables the cross-session store for search and retrieval across sessions. When unset in `CopilotClientMode.CopilotCli`, the runtime default applies (enabled). In `CopilotClientMode.Empty`, defaults to disabled.
+- `GitHubTokenProvider` - Acquires session-scoped GitHub tokens on demand. Return `GitHubTokenProviderResult.FromToken` with a positive `ExpiresIn` value (production GitHub tokens typically use `8 * 60 * 60` seconds), or `GitHubTokenProviderResult.Cancel()`. Cannot be combined with `GitHubToken`.
+- `OnPermissionRequest` - Optional handler called before each tool execution to approve or deny it. When omitted, permission requests are emitted as events and left pending for manual resolution. `PermissionHandler.ApproveAll` approves requests when managed settings are disabled and throws when `EnableManagedSettings` is true. Custom handlers can inspect `ManagedApprovalRequired` for human-facing confirmation logic. See [Permission Handling](#permission-handling) section.
+- `OnUserInputRequest` - Handler for legacy question-and-answer requests from the agent. Enables the legacy `ask_user` tool. See [User Input Requests](#user-input-requests) section.
+- `AskUserVariant` - Selects the model-facing `ask_user` tool shape. Defaults to `AskUserVariant.Legacy`; use `AskUserVariant.Elicitation` with `OnElicitationRequest`.
 - `Hooks` - Hook handlers for session lifecycle events. See [Session Hooks](#session-hooks) section.
 
 ##### `ResumeSessionAsync(string sessionId, ResumeSessionConfig? config = null): Task<CopilotSession>`
@@ -136,6 +158,25 @@ Resume an existing session. Returns the session with `WorkspacePath` populated i
 **ResumeSessionConfig:**
 
 - `OnPermissionRequest` - Optional handler called before each tool execution to approve or deny it. See [Permission Handling](#permission-handling) section.
+- `GitHubTokenProvider` - Replaces the session-scoped token provider when resuming. Cannot be combined with `GitHubToken`.
+- `AskUserVariant` - Re-supplies the model-facing `ask_user` tool shape on cold resume.
+
+```csharp
+await using var session = await client.CreateSessionAsync(new SessionConfig
+{
+    GitHubTokenProvider = async args =>
+    {
+        var token = await AcquireTokenAsync(args.Host);
+        return GitHubTokenProviderResult.FromToken(new GitHubToken
+        {
+            AccessToken = token,
+            ExpiresIn = 8 * 60 * 60
+        });
+    }
+});
+```
+
+Initial acquisition runs during session creation or resume. Cancellation, provider errors, and invalid token responses reject that operation instead of falling back to ambient authentication. Idle sessions refresh only before their next credential-consuming operation; there is no background refresh timer.
 
 ##### `PingAsync(string? message = null): Task<PingResponse>`
 
@@ -209,8 +250,159 @@ Send a message to the session.
 - `Prompt` - The message/prompt to send
 - `Attachments` - File attachments
 - `Mode` - Delivery mode ("enqueue" or "immediate")
+- `Source` - Optional message origin: `MessageSource.User`, `MessageSource.System`, or `MessageSource.Agent(id)`. Omitted by default, preserving the runtime's default user behavior.
+- `ResponseSchema` - Experimental provider-native JSON Schema (`JsonElement`) for this turn.
 
 Returns the message ID.
+
+Use `MessageSource.System` for application-generated system context and
+`MessageSource.Agent(id)` for messages from an identified agent. This marks the
+message's origin; it does not replace the session's system prompt or change
+delivery mode. `SendAndWaitAsync` accepts the same option and still waits for
+session idle, returning null if no assistant message was received.
+
+```csharp
+await session.SendAsync(new MessageOptions
+{
+    Prompt = "The background build completed successfully.",
+    Source = MessageSource.System,
+});
+
+await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "The review found no blocking issues.",
+    Source = MessageSource.Agent("reviewer"),
+});
+```
+
+Agent sources serialize as `agent-<id>`. Pass the agent ID without adding a
+prefix. The SDK preserves its case and whitespace and rejects null IDs.
+
+##### Structured outputs (experimental)
+
+Use `SendAndWaitAsync<TResult>` to infer a JSON Schema from a .NET type and
+deserialize the final response. Schema inference uses
+`Microsoft.Extensions.AI.AIJsonUtilities`, the same technology as custom tools.
+In a reflection-enabled application, `await session.SendAndWaitAsync<Inventory>(prompt)`
+needs no serialization configuration. The example below supplies source-generated
+metadata so it also works when reflection serialization is disabled.
+
+```csharp
+var result = await session.SendAndWaitAsync<Inventory>(
+    "How many red widgets are in stock?",
+    serializerOptions: InventoryJsonContext.Default.Options);
+Console.WriteLine($"{result.Count} {result.Color} widgets");
+
+public sealed class Inventory
+{
+    public required int Count { get; set; }
+    public required string Color { get; set; }
+}
+
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(
+    PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]
+[System.Text.Json.Serialization.JsonSerializable(typeof(Inventory))]
+internal partial class InventoryJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
+```
+
+The same serialization options govern schema inference and deserialization,
+including naming policies, `[JsonPropertyName]`, converters, required members,
+and nullable annotations. Options default to `AIJsonUtilities.DefaultOptions`,
+as for custom tools. Supply a source-generated resolver (as above) for Native
+AOT or when reflection serialization is disabled. The typed helper requests
+strict output, marks all schema properties required, and disallows additional
+properties; nullable properties can still contain JSON null.
+
+The helper waits for non-autopilot session idle after the requested user message
+is consumed, selecting only root assistant messages with that originating message
+ID. This can wait for other queued work to drain, but other messages and subagent
+responses cannot replace the result. Session errors or an aborted idle after the
+requested run starts conservatively fail the wait, even if later queued work
+caused them. It throws `InvalidOperationException` when there is no final response,
+and `JsonException` for invalid JSON, an incompatible
+value, or a null result. Deserialization is not full JSON Schema validation:
+validate application-specific constraints yourself. Timeout defaults to 60
+seconds; timeout and cancellation stop waiting without aborting runtime work.
+The original `MessageOptions` is not modified, and an explicit `ResponseSchema`
+cannot be combined with this typed overload.
+
+For an explicit schema, set `MessageOptions.ResponseSchema`. Schemas are opaque
+`JsonElement` values, just like custom-tool schemas. The SDK forwards this schema
+unchanged with the name `response` and `strict: true`. The untyped
+`SendAndWaitAsync` still returns an assistant message event; it does not validate
+or deserialize the response. Schema-bearing waits use the same message
+correlation as typed waits; unformatted waits retain their existing behavior.
+
+With `SendAsync`, collect root `AssistantMessageEvent` events whose
+`Data.OriginatingMessageId` matches the returned message ID, then select the last
+one without tool requests when the session becomes idle. Subscribe before sending
+because events can precede the send acknowledgement, and handle `SessionErrorEvent` normally.
+There is no final-message flag: stop hooks can reject an initial answer and
+request a correction. Those corrections retain the original schema and
+originating message ID, so `SendAndWaitAsync` selects the corrected response at
+idle. Independent queued sends retain their own schemas and IDs.
+
+```csharp
+using var schema = System.Text.Json.JsonDocument.Parse("""
+    {"type":"object","properties":{"count":{"type":"integer"}},"required":["count"],"additionalProperties":false}
+    """);
+var message = await session.SendAndWaitAsync(new MessageOptions
+{
+    Prompt = "Count the widgets.",
+    ResponseSchema = schema.RootElement.Clone(),
+});
+```
+
+Use the generated `session.Rpc` APIs for advanced response-format options:
+
+```csharp
+using GitHub.Copilot.Rpc;
+using System.Text.Json;
+
+using var schema = JsonDocument.Parse("""
+    {"type":"object","properties":{"count":{"type":"integer"}},"required":["count"],"additionalProperties":false}
+    """);
+var format = new ResponseFormatJsonSchema
+{
+    JsonSchema = new JsonSchemaResponseFormat
+    {
+        Name = "inventory",
+        Schema = schema.RootElement.Clone(),
+        Strict = true,
+        Description = "The inventory count",
+    },
+};
+await session.Rpc.SendAsync("Count the widgets.", responseFormat: format);
+// A batch shares one output contract:
+await session.Rpc.SendMessagesAsync(
+    [new() { Prompt = "There are 42 widgets." }, new() { Prompt = "Report the count." }],
+    responseFormat: format);
+```
+
+Raw schemas and outputs are passed through without validation or rewriting.
+Provider support and schema restrictions apply. The format persists through
+tool continuations in that run, not independent subsequent runs. An ordinary
+`Mode = "immediate"` steering message inherits the active format and originating
+message ID, even if it arrives after the final model request and is promoted
+into a follow-up run. Specifying a new format on an immediate message is rejected,
+even while idle.
+Each batch starts one run: the final returned message ID is its origin, preceding
+messages are context, and an empty batch has no origin. An immediate batch
+steers the active run instead and retains its origin.
+The schema is not a persisted session default: autonomous resume-pending work
+after a restart does not restore it. A terminal tool that clears context ends
+the old run; its fresh seed does not inherit the schema or origin. Such a run
+can finish without a structured result, in which case the typed wait throws.
+After a successful terminal tool, the runtime disables tools while the model
+produces the structured result. Stop-hook corrections remain supported.
+Remote sessions and known HydraFusion routes reject response formats before
+admission. Schemas larger than 32 MiB when JSON-encoded are also rejected before
+admission, using the runtime's existing request-size ceiling. This does not
+guarantee the schema plus conversation and tools fits the provider's budget.
+Use a provider route that enforces JSON Schema: an API-compatible gateway can
+ignore unsupported format fields, and the Claude Chat-completions compatibility
+route is not equivalent to Anthropic's native Messages endpoint. The SDK's
+pinned CLI release includes the required runtime support.
 
 ##### `On(Action<SessionEvent> handler): IDisposable`
 
@@ -249,6 +441,31 @@ await session2.DisposeAsync();
 ```
 
 ---
+
+## Auto routing tiers
+
+The canonical values are `AutoTier.Efficiency`, `AutoTier.Balance`, `AutoTier.Intelligence`, and `AutoTier.Fast`, which send `efficiency`, `balance`, `intelligence`, and `fast` on the wire. Fast is an integrator-only latency preset, not a fourth first-party GitHub Copilot preference. The SDK forwards the requested value without deciding eligibility or inspecting client identity. An externally supplied older runtime returns its native runtime or JSON-RPC error; the SDK does not downgrade or silently ignore the request.
+
+Omitting the tier on create uses the runtime default rather than Balance. A cold resume restores the persisted tier unless the resume request supplies an explicit override.
+
+Change the Auto routing preference without changing the selected model. The runtime does not apply the preference immediately: it records the request and commits it only when a later user turn using the `auto` model successfully obtains a usable model from the provider, so a `pending` status confirms acceptance rather than effect. Only the most recent request survives.
+
+Watch for the outcome through the `session.model_change` event on success or the ephemeral `session.auto_tier_switch_failed` event on failure. A failed activation leaves the incumbent effective tier unchanged. Read the authoritative committed, pending, and activating preferences at any time through the session's `model.getCurrent` RPC method.
+
+```csharp
+var result = await session.SetAutoTierAsync(AutoTier.Intelligence);
+if (result.Status == ModelSwitchAutoTierStatus.Pending)
+{
+    // Accepted, but not yet in effect.
+}
+
+// Return to the provider's default Auto routing.
+await session.SetAutoTierAsync(null);
+```
+
+`SetModelAsync` accepts the same preference through `SetModelOptions.AutoTier`, which stages the tier atomically with selecting `auto`. Set `ResetAutoTier` instead to return to provider-default routing; the two options are mutually exclusive.
+
+See [Auto tier persistence](../docs/features/session-persistence.md#auto-tier-persistence) for the full lifecycle rules.
 
 ## Event Types
 
@@ -289,9 +506,9 @@ The SDK supports image attachments via the `Attachments` parameter. You can atta
 await session.SendAsync(new MessageOptions
 {
     Prompt = "What's in this image?",
-    Attachments = new List<UserMessageDataAttachmentsItem>
+    Attachments = new List<Attachment>
     {
-        new UserMessageDataAttachmentsItemFile
+        new AttachmentFile
         {
             Path = "/path/to/image.jpg",
             DisplayName = "image.jpg",
@@ -303,9 +520,9 @@ await session.SendAsync(new MessageOptions
 await session.SendAsync(new MessageOptions
 {
     Prompt = "What's in this image?",
-    Attachments = new List<UserMessageDataAttachmentsItem>
+    Attachments = new List<Attachment>
     {
-        new UserMessageDataAttachmentsItemBlob
+        new AttachmentBlob
         {
             Data = base64ImageData,
             MimeType = "image/png",
@@ -714,13 +931,12 @@ await session2.SendAsync(new MessageOptions { Prompt = "Hello from session 2" })
 await session.SendAsync(new MessageOptions
 {
     Prompt = "Analyze this file",
-    Attachments = new List<UserMessageDataAttachmentsItem>
+    Attachments = new List<Attachment>
     {
-        new UserMessageDataAttachmentsItem
+        new AttachmentFile
         {
-            Type = UserMessageDataAttachmentsItemType.File,
             Path = "/path/to/file.cs",
-            DisplayName = "My File"
+            DisplayName = "My File",
         }
     }
 });
@@ -775,7 +991,7 @@ An `OnPermissionRequest` handler is optional when you create or resume a session
 
 ### Approve All (simplest)
 
-Use the built-in `PermissionHandler.ApproveAll` helper to allow every tool call without any checks:
+Use the built-in `PermissionHandler.ApproveAll` helper to approve ordinary permission requests automatically:
 
 ```csharp
 using GitHub.Copilot;
@@ -787,9 +1003,11 @@ var session = await client.CreateSessionAsync(new SessionConfig
 });
 ```
 
+When `EnableManagedSettings` is true for the session, `ApproveAll` throws on the first permission request. Use a custom handler for managed sessions; request-level `ManagedApprovalRequired` remains available for human-facing confirmation logic.
+
 ### Custom Permission Handler
 
-Provide your own permission handler (`Func<PermissionRequest, PermissionInvocation, Task<PermissionDecision>>`) to inspect each request and apply custom logic:
+Provide your own permission handler (`Func<PermissionRequest, PermissionInvocation, Task<PermissionDecision>>`) to inspect each request and apply custom logic. Check `ManagedApprovalRequired` before any automatic approval:
 
 ```csharp
 var session = await client.CreateSessionAsync(new SessionConfig
@@ -797,6 +1015,11 @@ var session = await client.CreateSessionAsync(new SessionConfig
     Model = "gpt-5",
     OnPermissionRequest = async (request, invocation) =>
     {
+        if (request.ManagedApprovalRequired is true)
+        {
+            return PermissionDecision.NoResult();
+        }
+
         // Pattern-match on the discriminated PermissionRequest union to access
         // per-kind fields (FullCommandText, Path, ToolName, …).
         return request switch
@@ -838,7 +1061,7 @@ To let a specific custom tool bypass the permission prompt entirely, set `SkipPe
 
 ## User Input Requests
 
-Enable the agent to ask questions to the user using the `ask_user` tool by providing an `OnUserInputRequest` handler:
+Enable the legacy question-and-answer `ask_user` tool by providing an `OnUserInputRequest` handler:
 
 ```csharp
 var session = await client.CreateSessionAsync(new SessionConfig
@@ -971,6 +1194,7 @@ var session = await client.CreateSessionAsync(new SessionConfig
 {
     Model = "gpt-5",
     OnPermissionRequest = PermissionHandler.ApproveAll,
+    AskUserVariant = AskUserVariant.Elicitation,
     OnElicitationRequest = async (context) =>
     {
         // context.SessionId - Session that triggered the request
@@ -1022,6 +1246,25 @@ catch (Exception ex)
 {
     Console.Error.WriteLine($"Error: {ex.Message}");
 }
+```
+
+## Development
+
+Development requires [.NET SDK 10+](https://dotnet.microsoft.com/download) and a supported [Node.js version](../nodejs/README.md#prerequisites). From the repository root:
+
+```bash
+cd nodejs
+npm ci
+```
+
+```bash
+cd test/harness
+npm ci
+```
+
+```bash
+cd dotnet
+dotnet test
 ```
 
 ## License

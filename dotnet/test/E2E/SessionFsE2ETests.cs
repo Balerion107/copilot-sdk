@@ -337,6 +337,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
             var messages = await session.GetEventsAsync();
             var toolResult = FindToolCallResult(messages, "get_big_string");
             Assert.NotNull(toolResult);
+            // Windows reports the spilled file path with backslash separators.
+            toolResult = toolResult!.Replace('\\', '/');
             Assert.Contains($"{SessionFsConfig.SessionStatePath}/temp/", toolResult);
 
             var match = System.Text.RegularExpressions.Regex.Match(
@@ -581,7 +583,8 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
         return normalized;
     }
 
-    private sealed class ThrowingSessionFsProvider(Exception exception) : SessionFsProvider, ISessionFsSqliteProvider
+    private sealed class ThrowingSessionFsProvider(Exception exception)
+        : SessionFsProvider, ISessionFsSqliteProvider, ISessionFsSqliteTransactionProvider
     {
         protected override Task<string> ReadFileAsync(string path, CancellationToken cancellationToken) =>
             Task.FromException<string>(exception);
@@ -615,6 +618,9 @@ public class SessionFsE2ETests(E2ETestFixture fixture, ITestOutputHelper output)
 
         Task<SessionFsSqliteResult?> ISessionFsSqliteProvider.QueryAsync(SessionFsSqliteQueryType queryType, string query, IDictionary<string, object?>? bindParams, CancellationToken cancellationToken) =>
             Task.FromException<SessionFsSqliteResult?>(exception);
+
+        Task<IList<SessionFsSqliteResult>> ISessionFsSqliteTransactionProvider.TransactionAsync(IList<SessionFsSqliteStatement> statements, CancellationToken cancellationToken) =>
+            Task.FromException<IList<SessionFsSqliteResult>>(exception);
 
         Task<bool> ISessionFsSqliteProvider.ExistsAsync(CancellationToken cancellationToken) =>
             Task.FromException<bool>(exception);

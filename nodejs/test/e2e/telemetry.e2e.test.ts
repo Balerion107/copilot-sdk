@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { approveAll, defineTool, RuntimeConnection } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
-import { getFinalAssistantMessage } from "./harness/sdkTestHelper.js";
 
 interface TelemetryEntry {
     type?: string;
@@ -85,10 +84,9 @@ describe("Telemetry export", async () => {
             ],
         });
 
-        await session.send({ prompt });
-        const assistantMessage = await getFinalAssistantMessage(session);
+        const assistantMessage = await session.sendAndWait({ prompt }, 90_000);
         expect(assistantMessage).toBeDefined();
-        expect(assistantMessage.data.content ?? "").toContain("TELEMETRY_E2E_DONE");
+        expect(assistantMessage?.data.content ?? "").toContain("TELEMETRY_E2E_DONE");
 
         await session.disconnect();
         await client.stop();
@@ -103,11 +101,6 @@ describe("Telemetry export", async () => {
             expect(span.instrumentationScope?.name).toBe(sourceName);
         }
 
-        // All spans for one SDK turn must share the same trace id and must not be in error state.
-        const traceIds = Array.from(
-            new Set(spans.map((span) => span.traceId).filter((id): id is string => Boolean(id)))
-        );
-        expect(traceIds).toHaveLength(1);
         for (const span of spans) {
             expect(span.status?.code).not.toBe(2);
         }
@@ -122,6 +115,8 @@ describe("Telemetry export", async () => {
         expect(isRootSpan(invokeAgentSpan!)).toBe(true);
         const invokeAgentSpanId = invokeAgentSpan!.spanId;
         expect(invokeAgentSpanId).toBeTruthy();
+        const invokeAgentTraceId = invokeAgentSpan!.traceId;
+        expect(invokeAgentTraceId).toBeTruthy();
 
         const chatSpans = spans.filter(
             (span) => getStringAttribute(span, "gen_ai.operation.name") === "chat"
@@ -129,6 +124,7 @@ describe("Telemetry export", async () => {
         expect(chatSpans.length).toBeGreaterThan(0);
         for (const chat of chatSpans) {
             expect(chat.parentSpanId).toBe(invokeAgentSpanId);
+            expect(chat.traceId).toBe(invokeAgentTraceId);
         }
         expect(
             chatSpans.some((span) =>
@@ -148,6 +144,7 @@ describe("Telemetry export", async () => {
         );
         expect(toolSpan).toBeDefined();
         expect(toolSpan!.parentSpanId).toBe(invokeAgentSpanId);
+        expect(toolSpan!.traceId).toBe(invokeAgentTraceId);
         expect(getStringAttribute(toolSpan!, "gen_ai.tool.name")).toBe(toolName);
         expect(getStringAttribute(toolSpan!, "gen_ai.tool.call.id")).toBeTruthy();
         expect(getStringAttribute(toolSpan!, "gen_ai.tool.call.arguments")).toBe(

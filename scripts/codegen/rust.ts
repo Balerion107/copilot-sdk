@@ -17,6 +17,7 @@ import { fileURLToPath } from "url";
 import { promisify } from "util";
 import type { JSONSchema7, JSONSchema7Definition } from "json-schema";
 import {
+	addManagedApprovalRequiredToPermissionRequests,
 	type ApiSchema,
 	type DefinitionCollections,
 	EXCLUDED_EVENT_TYPES,
@@ -84,6 +85,12 @@ const STRING_NEWTYPE_OVERRIDES: Record<string, string> = {
 	requestId: "RequestId",
 };
 
+const STRING_ENUM_VARIANT_OVERRIDES: Record<string, Record<string, string>> = {
+	CatalogTrustEligibility: {
+		unknown: "UnknownValue",
+	},
+};
+
 // ── Naming helpers ──────────────────────────────────────────────────────────
 
 function toPascalCase(s: string): string {
@@ -114,8 +121,9 @@ function uniqueRustPascalIdentifier(
 	used: Set<string>,
 	fallback: string,
 	reserved: Set<string> = new Set(),
+	override?: string,
 ): string {
-	const identifier = toRustPascalIdentifier(value, fallback);
+	const identifier = override ?? toRustPascalIdentifier(value, fallback);
 	if (used.has(identifier) || reserved.has(identifier)) {
 		throw new Error(
 			`Generated Rust enum variant identifier "${identifier}" is not unique for value "${value}". Add an explicit naming rule instead of stabilizing an arbitrary public variant name.`,
@@ -299,6 +307,7 @@ function tryEmitRustUnion(
 	const enumName =
 		(typeof schema.title === "string" && schema.title) ||
 		parentTypeName + toPascalCase(jsonPropName);
+	const isAllowedUnionType = ctx.allowedUnionTypeNames.has(enumName);
 
 	const resolvedVariants: RustUnionVariant[] = [];
 	for (let i = 0; i < nonNull.length; i++) {
@@ -317,7 +326,20 @@ function tryEmitRustUnion(
 			resolveObjectSchema(variant, ctx.definitions) ??
 			resolveSchema(variant, ctx.definitions) ??
 			variant;
-		if (!isObjectSchema(resolved)) return null;
+		if (!isObjectSchema(resolved)) {
+			if (!isAllowedUnionType) return null;
+			resolvedVariants.push({
+				schema: resolved as JSONSchema7,
+				typeName: resolveRustType(
+					resolved as JSONSchema7,
+					enumName,
+					`variant${i + 1}`,
+					true,
+					ctx,
+				),
+			});
+			continue;
+		}
 		const discriminatorValue = Object.values(resolved.properties ?? {}).find(
 			(prop) => typeof prop === "object" && (prop as JSONSchema7).const !== undefined,
 		) as JSONSchema7 | undefined;
@@ -334,7 +356,6 @@ function tryEmitRustUnion(
 	}
 
 	const discriminator = findRustDiscriminator(resolvedVariants);
-	const isAllowedUnionType = ctx.allowedUnionTypeNames.has(enumName);
 	if (discriminator) {
 		if (
 			ctx.unionDiscriminatorProperties &&
@@ -343,7 +364,7 @@ function tryEmitRustUnion(
 		) {
 			return null;
 		}
-	} else if (!ctx.allowUntaggedUnions || !isAllowedUnionType) {
+	} else if (!ctx.allowUntaggedUnions && !isAllowedUnionType) {
 		return null;
 	}
 
@@ -364,9 +385,7 @@ function tryEmitRustUnion(
 
 	const lines: string[] = [];
 	if (schema.description) {
-		for (const line of schema.description.split(/\r?\n/)) {
-			lines.push(`/// ${line}`);
-		}
+		pushRustDoc(lines, schema.description);
 	}
 	pushRustExperimentalDocs(lines, isSchemaExperimental(schema) || ctx.experimentalTypeNames.has(enumName));
 	lines.push("#[derive(Debug, Clone, Serialize, Deserialize)]");
@@ -454,7 +473,16 @@ function pushRustExperimentalDocs(
 
 function pushRustDoc(lines: string[], text: string | undefined, indent = ""): void {
 	if (!text) return;
-	for (const paragraph of text.trim().split(/\r?\n/)) {
+	const sanitized = text
+		.split("`")
+		.map((segment, index) =>
+			index % 2 === 0
+				? segment.replace(/<[A-Za-z][A-Za-z0-9_-]*>/g, "`$&`")
+				: segment,
+		)
+		.join("`")
+		.replace(/\[::\]/g, "`[::]`");
+	for (const paragraph of sanitized.trim().split(/\r?\n/)) {
 		if (paragraph.trim().length === 0) {
 			lines.push(`${indent}///`);
 		} else {
@@ -573,6 +601,45 @@ function emitRustMapAlias(
 		ctx,
 		description,
 	);
+}
+
+/**
+ * Map a primitive JSON Schema type to its Rust equivalent, or `undefined` when
+ * the schema is not a plain scalar. Mirrors the primitive branches of
+ * {@link resolveRustType}.
+ */
+function rustScalarType(schema: JSONSchema7): string | undefined {
+	if (schema.enum || schema.const !== undefined) return undefined;
+	switch (schema.type) {
+		case "string":
+			return "String";
+		case "number":
+			return "f64";
+		case "integer":
+			return isIntegerSchemaBoundedToInt32(schema) ? "i32" : "i64";
+		case "boolean":
+			return "bool";
+		default:
+			return undefined;
+	}
+}
+
+/**
+ * Emit a type alias for a named schema that resolves to a primitive scalar
+ * (e.g. an RPC result declared as `{ "type": "integer" }`). Without this the
+ * generated RPC surface would reference a `*Result` type that was never
+ * defined.
+ */
+function emitRustScalarAlias(
+	typeName: string,
+	schema: JSONSchema7,
+	ctx: RustCodegenCtx,
+	description?: string,
+): void {
+	if (ctx.generatedNames.has(typeName)) return;
+	const scalarType = rustScalarType(schema);
+	if (!scalarType) return;
+	emitRustTypeAlias(typeName, schema, scalarType, ctx, description);
 }
 
 function rustRpcResultDescription(
@@ -918,9 +985,7 @@ function emitRustStruct(
 
 	for (const { propName, prop, isReq, rustField, rustType } of fields) {
 		if (prop.description) {
-			for (const line of prop.description.split(/\r?\n/)) {
-				lines.push(`    /// ${line}`);
-			}
+			pushRustDoc(lines, prop.description, "    ");
 		}
 		pushRustExperimentalDocs(lines, isSchemaExperimental(prop), "    ");
 		const propIsInternal = isSchemaInternal(prop);
@@ -995,6 +1060,7 @@ function emitRustStringEnum(
 			usedVariantNames,
 			"Value",
 			reservedVariantNames,
+			STRING_ENUM_VARIANT_OVERRIDES[enumName]?.[value],
 		);
 		pushRustDoc(lines, enumValueDescriptions?.[value], "    ");
 		if (variantName !== value) {
@@ -1399,7 +1465,7 @@ function isNullableParamsSchema(
 	return !!resolved && !!getNullableInner(resolved);
 }
 
-function generateApiTypesCode(
+export function generateApiTypesCode(
 	apiSchema: ApiSchema,
 	nonDefaultableTypes: Iterable<string> = [],
 ): string {
@@ -1407,7 +1473,10 @@ function generateApiTypesCode(
 	const defCollections = collectDefinitionCollections(
 		apiSchema as Record<string, unknown>,
 	);
-	const ctx = makeCtx(defCollections, { nonDefaultableTypes });
+	const ctx = makeCtx(defCollections, {
+		nonDefaultableTypes,
+		allowedUnionTypeNames: ["AuthInfo", "McpOauthProbeResult", "SettableAuthInfo", "ToolResult"],
+	});
 
 	// Collect all RPC methods before emitting shared definitions so method stability
 	// can propagate to referenced data types.
@@ -1527,6 +1596,8 @@ function generateApiTypesCode(
 			} else {
 				tryEmitRustUnion(schema, name, "", ctx);
 			}
+		} else {
+			emitRustScalarAlias(name, schema, ctx, schema.description);
 		}
 	}
 
@@ -1576,6 +1647,8 @@ function generateApiTypesCode(
 					emitRustMapAlias(resultName, resolved, ctx, resolved.description);
 				} else if (isObjectSchema(resolved)) {
 					emitRustStruct(resultName, resolved, ctx, resolved.description);
+				} else {
+					emitRustScalarAlias(resultName, resolved, ctx, resolved.description);
 				}
 			}
 		}
@@ -1623,7 +1696,11 @@ function generateApiTypesCode(
 	for (const [module, typeNames] of [...externalImports].sort(([left], [right]) =>
 		left.localeCompare(right),
 	)) {
-		out.push(`use ${module}::{${[...typeNames].sort().join(", ")}};`);
+		// Preserve API module paths when a definition moves into a shared schema.
+		const importKeyword = Object.values(EXTERNAL_SCHEMA_RUST_MODULE).includes(module)
+			? "pub use"
+			: "use";
+		out.push(`${importKeyword} ${module}::{${[...typeNames].sort().join(", ")}};`);
 	}
 	out.push("");
 
@@ -2168,7 +2245,9 @@ async function generate(): Promise<void> {
 
 	const sessionEventsSchema = propagateInternalVisibility(
 		postProcessSchema(
-			stripBooleanLiterals(sessionEventsRaw) as JSONSchema7,
+			stripBooleanLiterals(
+				addManagedApprovalRequiredToPermissionRequests(sessionEventsRaw as JSONSchema7),
+			) as JSONSchema7,
 		),
 	);
 	const apiSchema = propagateInternalVisibility(

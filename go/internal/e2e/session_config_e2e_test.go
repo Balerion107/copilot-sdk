@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	copilot "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/internal/e2e/testharness"
@@ -117,8 +119,8 @@ func createAnthropicProvider() *copilot.ProviderConfig {
 		Type:      "anthropic",
 		BaseURL:   "https://anthropic-citations.invalid/v1",
 		APIKey:    "test-provider-key",
-		ModelID:   "claude-sonnet-4.5",
-		WireModel: "claude-sonnet-4.5",
+		ModelID:   "claude-sonnet-5",
+		WireModel: "claude-sonnet-5",
 	}
 }
 
@@ -182,6 +184,7 @@ func TestSessionConfigE2E(t *testing.T) {
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			Model:               "claude-sonnet-5",
 			ModelCapabilities: &copilot.ModelCapabilitiesOverride{
 				Supports: &copilot.ModelCapabilitiesOverrideSupports{
 					Vision: copilot.Bool(false),
@@ -206,7 +209,7 @@ func TestSessionConfigE2E(t *testing.T) {
 		}
 
 		// Switch vision on
-		if err := session.SetModel(t.Context(), "claude-sonnet-4.5", &copilot.SetModelOptions{
+		if err := session.SetModel(t.Context(), "claude-sonnet-5", &copilot.SetModelOptions{
 			ModelCapabilities: &copilot.ModelCapabilitiesOverride{
 				Supports: &copilot.ModelCapabilitiesOverrideSupports{
 					Vision: copilot.Bool(true),
@@ -236,6 +239,7 @@ func TestSessionConfigE2E(t *testing.T) {
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+			Model:               "claude-sonnet-5",
 			ModelCapabilities: &copilot.ModelCapabilitiesOverride{
 				Supports: &copilot.ModelCapabilitiesOverrideSupports{
 					Vision: copilot.Bool(true),
@@ -260,7 +264,7 @@ func TestSessionConfigE2E(t *testing.T) {
 		}
 
 		// Switch vision off
-		if err := session.SetModel(t.Context(), "claude-sonnet-4.5", &copilot.SetModelOptions{
+		if err := session.SetModel(t.Context(), "claude-sonnet-5", &copilot.SetModelOptions{
 			ModelCapabilities: &copilot.ModelCapabilitiesOverride{
 				Supports: &copilot.ModelCapabilitiesOverrideSupports{
 					Vision: copilot.Bool(false),
@@ -418,7 +422,7 @@ func TestSessionConfigNewOptionsCopilotRequestE2E(t *testing.T) {
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-4.5",
+			Model:               "claude-sonnet-5",
 			EnableCitations:     copilot.Bool(true),
 			Provider:            createAnthropicProvider(),
 		})
@@ -479,7 +483,7 @@ func TestSessionConfigNewOptionsCopilotRequestE2E(t *testing.T) {
 
 		session2, err := resumeClient.ResumeSessionWithOptions(t.Context(), session1.SessionID, &copilot.ResumeSessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-4.5",
+			Model:               "claude-sonnet-5",
 			EnableCitations:     copilot.Bool(true),
 			Provider:            createAnthropicProvider(),
 		})
@@ -587,7 +591,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-4.5",
+			Model:               "claude-sonnet-5",
 			Provider:            createProxyProvider(ctx, providerHeaderName, "create-provider-header"),
 		})
 		if err != nil {
@@ -631,7 +635,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 
 		session2, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-4.5",
+			Model:               "claude-sonnet-5",
 			Provider:            createProxyProvider(ctx, providerHeaderName, "resume-provider-header"),
 		})
 		if err != nil {
@@ -675,7 +679,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 		maxOutputTokens := 1024
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
 			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
-			Model:               "claude-sonnet-4.5",
+			Model:               "claude-sonnet-5",
 			Provider: &copilot.ProviderConfig{
 				Type:            "openai",
 				BaseURL:         ctx.ProxyURL,
@@ -717,7 +721,7 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 				Type:    "openai",
 				BaseURL: ctx.ProxyURL,
 				APIKey:  "test-provider-key",
-				ModelID: "claude-sonnet-4.5",
+				ModelID: "claude-sonnet-5",
 			},
 		})
 		if err != nil {
@@ -736,8 +740,8 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 		if len(exchanges) != 1 {
 			t.Fatalf("Expected exactly 1 exchange, got %d", len(exchanges))
 		}
-		if exchanges[0].Request.Model != "claude-sonnet-4.5" {
-			t.Errorf("Expected request model to be 'claude-sonnet-4.5', got %q", exchanges[0].Request.Model)
+		if exchanges[0].Request.Model != "claude-sonnet-5" {
+			t.Errorf("Expected request model to be 'claude-sonnet-5', got %q", exchanges[0].Request.Model)
 		}
 	})
 
@@ -988,6 +992,79 @@ func TestSessionConfigExtrasE2E(t *testing.T) {
 			t.Errorf("Expected toolNames=[view], got %v", toolNames)
 		}
 	})
+
+	t.Run("should apply GitHub MCP tool config on create", func(t *testing.T) {
+		ctx.ConfigureForTest(t)
+		enableAllTools := true
+		enableInsidersMode := true
+		disableFormDeferral := true
+
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			OnPermissionRequest:   copilot.PermissionHandler.ApproveAll,
+			EnableConfigDiscovery: copilot.Bool(true),
+			EnableMCPApps:         true,
+			GitHubMCPToolConfig: &copilot.GitHubMCPToolConfig{
+				EnableAllTools:      &enableAllTools,
+				AdditionalToolsets:  []string{"actions"},
+				AdditionalTools:     []string{"get_me"},
+				EnableInsidersMode:  &enableInsidersMode,
+				DisableFormDeferral: &disableFormDeferral,
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateSession failed: %v", err)
+		}
+		t.Cleanup(func() { _ = session.Disconnect() })
+
+		assertGitHubMCPConfigApplied(t, ctx, session)
+	})
+}
+
+func assertGitHubMCPConfigApplied(t *testing.T, ctx *testharness.TestContext, session *copilot.Session) {
+	t.Helper()
+	if _, err := session.RPC.MCP.List(t.Context()); err != nil {
+		t.Fatalf("MCP.List failed: %v", err)
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	var lastRequests []testharness.CapturedRequest
+	for time.Now().Before(deadline) {
+		requests, err := ctx.GetRequests()
+		if err == nil {
+			lastRequests = requests
+			var writableRequest *testharness.CapturedRequest
+			hasReadonlyRequest := false
+			for i := range requests {
+				request := &requests[i]
+				if request.URL == "/mcp/readonly" {
+					hasReadonlyRequest = true
+				}
+				if request.Method == http.MethodPost && request.URL == "/mcp" {
+					writableRequest = request
+				}
+			}
+			if writableRequest != nil {
+				if hasReadonlyRequest {
+					t.Fatalf("Expected writable GitHub MCP endpoint, got requests: %+v", requests)
+				}
+				assertCapturedHeader(t, writableRequest.Headers, "x-mcp-toolsets", "all")
+				assertCapturedHeader(t, writableRequest.Headers, "x-mcp-insiders", "true")
+				return
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("Timed out waiting for configured GitHub MCP request; captured: %+v", lastRequests)
+}
+
+func assertCapturedHeader(t *testing.T, headers map[string]json.RawMessage, name, expected string) {
+	t.Helper()
+	var actual string
+	if err := json.Unmarshal(headers[name], &actual); err != nil {
+		t.Fatalf("Failed to decode %s header: %v", name, err)
+	}
+	if actual != expected {
+		t.Fatalf("Expected %s=%q, got %q", name, expected, actual)
+	}
 }
 
 // createProxyProvider returns a ProviderConfig that points at the test proxy and

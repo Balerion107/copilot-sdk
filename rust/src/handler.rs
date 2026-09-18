@@ -22,7 +22,7 @@ use crate::generated::api_types::{
     McpOauthPendingRequestResponse, McpOauthPendingRequestResponseCancelled,
     McpOauthPendingRequestResponseCancelledKind, McpOauthPendingRequestResponseToken,
     McpOauthPendingRequestResponseTokenKind, PermissionDecision, PermissionDecisionApproveOnce,
-    PermissionDecisionReject, PermissionDecisionUserNotAvailable,
+    PermissionDecisionContext, PermissionDecisionReject, PermissionDecisionUserNotAvailable,
 };
 use crate::session_events::{
     McpOauthRequestReason, McpOauthRequiredStaticClientConfig, McpOauthWWWAuthenticateParams,
@@ -35,13 +35,30 @@ use crate::types::{
 /// Decision returned by a [`PermissionHandler`].
 ///
 /// Either a concrete wire-level [`PermissionDecision`] (approve, reject,
-/// approve-for-session, approve-permanently, user-not-available, …) or
-/// [`PermissionResult::NoResult`], which tells the SDK to suppress its
-/// response so another connected client can answer instead.
+/// approve-for-session, approve-permanently, user-not-available, …) with
+/// optional telemetry context, or [`PermissionResult::NoResult`], which tells
+/// the SDK to suppress its response so another connected client can answer
+/// instead.
+///
+/// ```
+/// use github_copilot_sdk::handler::PermissionResult;
+///
+/// fn is_decision(result: PermissionResult) -> bool {
+///     match result {
+///         PermissionResult::Decision { .. } => true,
+///         PermissionResult::NoResult => false,
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub enum PermissionResult {
     /// Send a permission decision on the wire.
-    Decision(PermissionDecision),
+    Decision {
+        /// The decision to send.
+        decision: PermissionDecision,
+        /// Optional context describing how and where the decision was reached.
+        context: Option<PermissionDecisionContext>,
+    },
     /// Decline to respond to this request, allowing another connected
     /// client to answer instead. The SDK suppresses the response.
     NoResult,
@@ -50,24 +67,31 @@ pub enum PermissionResult {
 impl PermissionResult {
     /// Approve this single request.
     pub fn approve_once() -> Self {
-        Self::Decision(PermissionDecision::ApproveOnce(
-            PermissionDecisionApproveOnce::default(),
-        ))
+        Self::Decision {
+            decision: PermissionDecision::ApproveOnce(PermissionDecisionApproveOnce::default()),
+            context: None,
+        }
     }
 
     /// Reject the request, optionally forwarding feedback to the LLM.
     pub fn reject(feedback: impl Into<Option<String>>) -> Self {
-        Self::Decision(PermissionDecision::Reject(PermissionDecisionReject {
-            feedback: feedback.into(),
-            ..Default::default()
-        }))
+        Self::Decision {
+            decision: PermissionDecision::Reject(PermissionDecisionReject {
+                feedback: feedback.into(),
+                ..Default::default()
+            }),
+            context: None,
+        }
     }
 
     /// Deny because no user is available to confirm.
     pub fn user_not_available() -> Self {
-        Self::Decision(PermissionDecision::UserNotAvailable(
-            PermissionDecisionUserNotAvailable::default(),
-        ))
+        Self::Decision {
+            decision: PermissionDecision::UserNotAvailable(
+                PermissionDecisionUserNotAvailable::default(),
+            ),
+            context: None,
+        }
     }
 
     /// Decline to respond, allowing another connected client to answer
@@ -75,12 +99,49 @@ impl PermissionResult {
     pub fn no_result() -> Self {
         Self::NoResult
     }
+
+    /// Attach provenance describing how and where this decision was made,
+    /// so the runtime can attribute auto-approval telemetry.
+    ///
+    /// It is a no-op on [`PermissionResult::NoResult`].
+    ///
+    /// ```rust,no_run
+    /// # use github_copilot_sdk::handler::PermissionResult;
+    /// # use github_copilot_sdk::{
+    /// #     PermissionDecisionContext, PermissionDecisionOutcome, PermissionDecisionSource,
+    /// #     PermissionDecisionSurface,
+    /// # };
+    ///
+    /// let result = PermissionResult::approve_once().with_context(PermissionDecisionContext {
+    ///     outcome: PermissionDecisionOutcome::AutoApproved,
+    ///     response_capability: None,
+    ///     source: PermissionDecisionSource::HostPolicy,
+    ///     surface: PermissionDecisionSurface::Sdk,
+    /// });
+    /// ```
+    pub fn with_context(self, context: PermissionDecisionContext) -> Self {
+        match self {
+            Self::Decision { decision, .. } => Self::Decision {
+                decision,
+                context: Some(context),
+            },
+            Self::NoResult => Self::NoResult,
+        }
+    }
 }
 
 impl From<PermissionDecision> for PermissionResult {
     fn from(value: PermissionDecision) -> Self {
-        Self::Decision(value)
+        Self::Decision {
+            decision: value,
+            context: None,
+        }
     }
+}
+
+pub(crate) fn permission_handler_failure(message: &str) -> PermissionResult {
+    tracing::error!(error = message, "permission handler failed");
+    PermissionResult::user_not_available()
 }
 
 /// Response to a user input request.
@@ -233,10 +294,11 @@ pub trait McpAuthHandler: Send + Sync + 'static {
     ) -> McpAuthResult;
 }
 
-/// Handler for `user_input.requested` events from the `ask_user` tool.
+/// Handler for `user_input.requested` events from the legacy question-and-answer
+/// `ask_user` variant.
 ///
-/// When unset, `requestUserInput: false` goes on the wire and the
-/// `ask_user` tool is disabled for the session.
+/// When unset, `requestUserInput: false` goes on the wire, so this client
+/// cannot handle legacy user-input requests.
 #[async_trait]
 pub trait UserInputHandler: Send + Sync + 'static {
     /// Answer a question on behalf of the user. Return `None` to signal
@@ -273,9 +335,12 @@ pub trait AutoModeSwitchHandler: Send + Sync + 'static {
     ) -> AutoModeSwitchResponse;
 }
 
-/// A [`PermissionHandler`] that approves every request. Useful for CLI
-/// tools, scripts, and tests that don't need interactive permission
-/// prompts.
+/// A [`PermissionHandler`] that approves ordinary requests when managed settings are disabled.
+///
+/// When managed settings are enabled, the handler logs an error and returns a
+/// user-not-available decision. As a defense-in-depth fallback, a request marked
+/// as requiring managed approval is left unanswered even if the session flag is
+/// absent.
 #[derive(Debug, Clone)]
 pub struct ApproveAllHandler;
 
@@ -285,9 +350,17 @@ impl PermissionHandler for ApproveAllHandler {
         &self,
         _session_id: SessionId,
         _request_id: RequestId,
-        _data: PermissionRequestData,
+        data: PermissionRequestData,
     ) -> PermissionResult {
-        PermissionResult::approve_once()
+        if data.managed_settings_enabled {
+            permission_handler_failure(
+                "ApproveAllHandler cannot be used when managed settings are enabled",
+            )
+        } else if data.managed_approval_required == Some(true) {
+            PermissionResult::no_result()
+        } else {
+            PermissionResult::approve_once()
+        }
     }
 }
 
@@ -322,8 +395,47 @@ mod tests {
             .await;
         assert!(matches!(
             result,
-            PermissionResult::Decision(PermissionDecision::ApproveOnce(_))
+            PermissionResult::Decision {
+                decision: PermissionDecision::ApproveOnce(_),
+                ..
+            }
         ));
+    }
+
+    #[tokio::test]
+    async fn approve_all_handler_fails_when_managed_settings_enabled() {
+        let result = ApproveAllHandler
+            .handle(
+                SessionId::from("s1"),
+                RequestId::new("1"),
+                PermissionRequestData {
+                    managed_settings_enabled: true,
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(matches!(
+            result,
+            PermissionResult::Decision {
+                decision: PermissionDecision::UserNotAvailable(_),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn approve_all_handler_leaves_managed_approval_pending() {
+        let result = ApproveAllHandler
+            .handle(
+                SessionId::from("s1"),
+                RequestId::new("1"),
+                PermissionRequestData {
+                    managed_approval_required: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await;
+        assert!(matches!(result, PermissionResult::NoResult));
     }
 
     #[tokio::test]
@@ -337,7 +449,10 @@ mod tests {
             .await;
         assert!(matches!(
             result,
-            PermissionResult::Decision(PermissionDecision::Reject(_))
+            PermissionResult::Decision {
+                decision: PermissionDecision::Reject(_),
+                ..
+            }
         ));
     }
 

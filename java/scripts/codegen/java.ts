@@ -4,7 +4,7 @@
 
 /**
  * Java code generator for session-events and RPC types.
- * Generates Java source files under src/generated/java/ from JSON Schema files.
+ * Generates Java source files under sdk/src/generated/java/ from JSON Schema files.
  */
 
 import fs from "fs/promises";
@@ -65,6 +65,24 @@ function normalizeBrandCasingNode(node: unknown): void {
     }
     if (node === null || typeof node !== "object") return;
     const obj = node as Record<string, unknown>;
+
+    if (obj.title === "ProviderModelConfig" && obj.properties && typeof obj.properties === "object") {
+        const tokenFields = new Set([
+            "maxPromptTokens",
+            "maxContextWindowTokens",
+            "maxOutputTokens",
+        ]);
+        for (const [key, value] of Object.entries(obj.properties as Record<string, unknown>)) {
+            if (
+                tokenFields.has(key) &&
+                value !== null &&
+                typeof value === "object" &&
+                (value as Record<string, unknown>).type === "number"
+            ) {
+                (value as Record<string, unknown>).type = "integer";
+            }
+        }
+    }
 
     for (const defsKey of ["definitions", "$defs"] as const) {
         const defs = obj[defsKey];
@@ -149,58 +167,22 @@ function toCamelCase(name: string): string {
 }
 
 function toEnumConstant(value: string): string {
-    return value.toUpperCase().replace(/[-. /:]/g, "_").replace(/^_+/, "").replace(/_+/g, "_");
+    const constant = value.toUpperCase().replace(/[^A-Z0-9]/g, "_").replace(/^_+/, "").replace(/_+/g, "_");
+    if (constant.length === 0) return "_";
+    return /^[0-9]/.test(constant) ? `_${constant}` : constant;
 }
 
 // ── Schema path resolution ───────────────────────────────────────────────────
 
-/**
- * Resolve a JSON schema shipped by the `@github/copilot` CLI package.
- *
- * The CLI package layout changed in 1.0.64-1: the umbrella `@github/copilot`
- * package became a thin loader and its bundled assets (including the JSON
- * schemas) moved into the platform-specific packages installed as optional
- * dependencies, e.g. `@github/copilot-linux-x64` or `@github/copilot-win32-x64`.
- *
- * We search both the Java codegen install (`scripts/codegen/node_modules`) and
- * the Node SDK install (`nodejs/node_modules`), checking the umbrella package
- * first (older versions) and then whichever platform package is present.
- */
+/** Resolve a JSON schema staged from the pinned GitHub Release artifact. */
 async function resolveCopilotSchemaPath(fileName: string): Promise<string> {
-    const nodeModulesDirs = [
-        path.join(REPO_ROOT, "scripts/codegen/node_modules"),
-        path.join(REPO_ROOT, "nodejs/node_modules"),
-    ];
-
-    const candidates: string[] = [];
-    for (const nodeModulesDir of nodeModulesDirs) {
-        candidates.push(path.join(nodeModulesDir, "@github/copilot/schemas", fileName));
-        const githubScopeDir = path.join(nodeModulesDir, "@github");
-        try {
-            for (const entry of await fs.readdir(githubScopeDir)) {
-                if (entry.startsWith("copilot-")) {
-                    candidates.push(path.join(githubScopeDir, entry, "schemas", fileName));
-                }
-            }
-        } catch (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (code !== "ENOENT" && code !== "ENOTDIR") {
-                throw err;
-            }
-            // @github scope directory may not exist; try the next location.
-        }
+    const schemaPath = path.join(REPO_ROOT, "scripts/codegen/target/schemas", fileName);
+    try {
+        await fs.access(schemaPath);
+        return schemaPath;
+    } catch {
+        throw new Error(`${fileName} not found. Run 'npm run fetch:schemas' in java/scripts/codegen.`);
     }
-
-    for (const candidate of candidates) {
-        try {
-            await fs.access(candidate);
-            return candidate;
-        } catch {
-            // Try the next candidate.
-        }
-    }
-
-    throw new Error(`${fileName} not found. Run 'npm ci' in java/scripts/codegen or java/nodejs first.`);
 }
 
 async function getSessionEventsSchemaPath(): Promise<string> {
@@ -232,6 +214,8 @@ interface JavaTypeResult {
 // Set before each schema generation pass; used by schemaTypeToJava and helpers.
 let currentDefinitions: Record<string, JSONSchema7> = {};
 const pendingStandaloneTypes = new Map<string, JSONSchema7>();
+const promotedNestedUnionTypes = new Set<string>();
+const generatedSessionEventTypeNames = new Set<string>();
 
 // Cross-schema definitions: keyed by schema filename (e.g. "session-events.schema.json"),
 // value is the definitions map from that schema. Populated by generateRpcTypes so that
@@ -254,6 +238,40 @@ function resolveRef(schema: JSONSchema7 | undefined): JSONSchema7 | undefined {
         return resolved;
     }
     return schema;
+}
+
+function hasOmissionSentinel(schema: JSONSchema7): boolean {
+    return (schema.anyOf ?? []).some(
+        (variant) =>
+            typeof variant === "object"
+            && variant !== null
+            && typeof (variant as JSONSchema7).not === "object"
+            && (variant as JSONSchema7).not !== null
+            && Object.keys((variant as JSONSchema7).not as object).length === 0
+    );
+}
+
+/**
+ * Resolve a method's params schema to the object schema that carries its properties.
+ *
+ * Methods whose params object is entirely optional are published as
+ * `anyOf: [{ not: {} }, { ...object }]`, so the properties live on a variant
+ * rather than on the schema itself.
+ */
+function resolveMethodParamsSchema(method: RpcMethodNode): JSONSchema7 | undefined {
+    const params = resolveRef(method.params ?? undefined);
+    if (!params || typeof params !== "object") return undefined;
+    if (params.properties) return params;
+    if (!Array.isArray(params.anyOf)) return undefined;
+    const objectVariants = resolveAnyOfVariants(params.anyOf as JSONSchema7[]).filter((variant) => !!variant.properties);
+    return hasOmissionSentinel(params) && objectVariants.length === 1 ? objectVariants[0] : undefined;
+}
+
+function resolveMethodParamsUnionSchema(method: RpcMethodNode): JSONSchema7 | undefined {
+    const params = resolveRef(method.params ?? undefined);
+    if (!params || typeof params !== "object" || !Array.isArray(params.anyOf)) return undefined;
+    const variants = resolveAnyOfVariants(params.anyOf as JSONSchema7[]);
+    return variants.length > 1 && findDiscriminator(variants) ? params : undefined;
 }
 
 /** Extract the definition name from a $ref string (e.g., "#/definitions/Foo" → "Foo") */
@@ -310,16 +328,99 @@ function findDiscriminator(variants: JSONSchema7[]): DiscriminatorInfo | null {
 /**
  * Resolve anyOf variants, handling $ref to definitions.
  */
-function resolveAnyOfVariants(anyOf: JSONSchema7[]): JSONSchema7[] {
+function resolveAnyOfVariants(
+    anyOf: JSONSchema7[],
+    definitions: Record<string, JSONSchema7> = currentDefinitions
+): JSONSchema7[] {
     return anyOf
         .map((v) => {
             if (v.$ref) {
                 const name = v.$ref.replace(/^#\/definitions\//, "");
-                return currentDefinitions[name] ?? v;
+                return definitions[name] ?? v;
             }
             return v;
         })
         .filter((v) => v.type !== "null");
+}
+
+export function collectNestedDiscriminatedUnionTypeNames(
+    root: unknown,
+    definitions: Record<string, JSONSchema7>
+): Set<string> {
+    const promotedTypes = new Set<string>();
+    const definitionName = (schema: JSONSchema7): string | null => {
+        return schema.$ref?.match(/^#\/definitions\/([^/]+)$/)?.[1] ?? null;
+    };
+    const resolveLocal = (schema: JSONSchema7): JSONSchema7 | null => {
+        const name = definitionName(schema);
+        return name ? definitions[name] ?? null : schema;
+    };
+    const closedDiscriminatedUnionVariants = (schema: JSONSchema7): JSONSchema7[] | null => {
+        const resolved = resolveLocal(schema);
+        if (!resolved?.anyOf || !Array.isArray(resolved.anyOf)) return null;
+        const variants = resolveAnyOfVariants(resolved.anyOf as JSONSchema7[], definitions);
+        return variants.length > 1
+            && findDiscriminator(variants)
+            && variants.every((variant) => variant.additionalProperties === false)
+            ? variants
+            : null;
+    };
+
+    const rootSchema = typeof root === "object" && root !== null ? root as JSONSchema7 : null;
+    const rootVariants = rootSchema ? closedDiscriminatedUnionVariants(rootSchema) : null;
+    if (!rootVariants) return promotedTypes;
+
+    const nestedUnionItems: JSONSchema7[] = [];
+    for (const variant of rootVariants) {
+        for (const property of Object.values(variant.properties ?? {})) {
+            if (!property || typeof property !== "object") continue;
+            const propertySchema = resolveLocal(property as JSONSchema7);
+            if (
+                propertySchema?.type === "array"
+                && propertySchema.items
+                && !Array.isArray(propertySchema.items)
+                && closedDiscriminatedUnionVariants(propertySchema.items as JSONSchema7)
+            ) {
+                nestedUnionItems.push(propertySchema.items as JSONSchema7);
+            }
+        }
+    }
+
+    const visitedDefinitions = new Set<string>();
+    const visit = (schema: JSONSchema7): void => {
+        const name = definitionName(schema);
+        if (name) {
+            if (visitedDefinitions.has(name)) return;
+            visitedDefinitions.add(name);
+            const resolved = definitions[name];
+            if (!resolved) return;
+            if (closedDiscriminatedUnionVariants(schema)) {
+                promotedTypes.add(name);
+            }
+            visit(resolved);
+            return;
+        }
+
+        for (const property of Object.values(schema.properties ?? {})) {
+            if (property && typeof property === "object") {
+                visit(property as JSONSchema7);
+            }
+        }
+        if (schema.items && !Array.isArray(schema.items)) {
+            visit(schema.items as JSONSchema7);
+        }
+        if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+            visit(schema.additionalProperties as JSONSchema7);
+        }
+        for (const branch of [...(schema.anyOf ?? []), ...(schema.allOf ?? [])]) {
+            if (branch && typeof branch === "object") {
+                visit(branch as JSONSchema7);
+            }
+        }
+    };
+
+    for (const items of nestedUnionItems) visit(items);
+    return promotedTypes;
 }
 
 /**
@@ -374,7 +475,10 @@ async function generatePolymorphicResultClass(
         baseLines.push(` * @since 1.0.0`);
         baseLines.push(` */`);
     }
-    baseLines.push(`@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "${discriminator.property}", visible = true)`);
+    const typeInfoInclude = promotedNestedUnionTypes.has(className)
+        ? `, include = JsonTypeInfo.As.EXISTING_PROPERTY`
+        : "";
+    baseLines.push(`@JsonTypeInfo(use = JsonTypeInfo.Id.NAME${typeInfoInclude}, property = "${discriminator.property}", visible = true)`);
     baseLines.push(`@JsonSubTypes({`);
     for (let i = 0; i < variantInfos.length; i++) {
         const v = variantInfos[i];
@@ -523,12 +627,23 @@ async function generatePolymorphicVariantClass(
     await writeGeneratedFile(`${packageDir}/${className}.java`, lines.join("\n"));
 }
 
-function schemaTypeToJava(
+interface JavaTypeResolution {
+    definitions: Record<string, JSONSchema7>;
+    standaloneTypes: Map<string, JSONSchema7>;
+    promotedUnionTypes: Set<string>;
+}
+
+export function schemaTypeToJava(
     schema: JSONSchema7,
     required: boolean,
     context: string,
     propName: string,
-    nestedTypes: Map<string, JavaClassDef>
+    nestedTypes: Map<string, JavaClassDef>,
+    resolution: JavaTypeResolution = {
+        definitions: currentDefinitions,
+        standaloneTypes: pendingStandaloneTypes,
+        promotedUnionTypes: promotedNestedUnionTypes,
+    }
 ): JavaTypeResult {
     const imports = new Set<string>();
 
@@ -539,34 +654,39 @@ function schemaTypeToJava(
         if (crossSchemaMatch) {
             const [, schemaFile, typeName] = crossSchemaMatch;
             const externalDefs = crossSchemaDefinitions.get(schemaFile);
-            if (externalDefs) {
-                const resolved = externalDefs[typeName];
-                if (resolved) {
-                    // Save and swap currentDefinitions so recursive calls resolve against
-                    // the external schema's definitions.
-                    const savedDefs = currentDefinitions;
-                    currentDefinitions = externalDefs;
-                    const result = schemaTypeToJava(resolved, required, context, propName, nestedTypes);
-                    currentDefinitions = savedDefs;
-                    return result;
-                }
+            if (
+                schemaFile === "session-events.schema.json"
+                && externalDefs?.[typeName]
+                && generatedSessionEventTypeNames.has(typeName)
+            ) {
+                imports.add(`com.github.copilot.generated.${typeName}`);
+                return { javaType: typeName, imports };
             }
-            // Fallback: extract just the type name and warn
-            console.warn(`[codegen] Unresolved cross-schema $ref: ${schema.$ref}`);
-            return { javaType: typeName, imports };
+            return { javaType: "Object", imports };
         }
 
         const name = schema.$ref.replace(/^#\/definitions\//, "");
-        const resolved = currentDefinitions[name];
+        const resolved = resolution.definitions[name];
         if (resolved) {
+            if (
+                resolution.promotedUnionTypes.has(name)
+                && resolved.anyOf
+                && Array.isArray(resolved.anyOf)
+            ) {
+                const variants = resolveAnyOfVariants(resolved.anyOf as JSONSchema7[], resolution.definitions);
+                if (variants.length > 1 && findDiscriminator(variants)) {
+                    resolution.standaloneTypes.set(name, resolved);
+                    return { javaType: name, imports };
+                }
+            }
             // Enum or object types → register for standalone generation, return ref name
             if ((resolved.type === "string" && resolved.enum) ||
                 (resolved.type === "object" && resolved.properties)) {
-                pendingStandaloneTypes.set(name, resolved);
+                resolution.standaloneTypes.set(name, resolved);
                 return { javaType: name, imports };
             }
             // Other types (primitives, arrays, maps, anyOf unions) → resolve and recurse
-            return schemaTypeToJava(resolved, required, context, propName, nestedTypes);
+            return schemaTypeToJava(resolved, required, context, propName, nestedTypes, resolution);
         }
         // Unresolved $ref — return name as-is
         console.warn(`[codegen] Unresolved $ref: ${schema.$ref}`);
@@ -577,7 +697,8 @@ function schemaTypeToJava(
         const hasNull = schema.anyOf.some((s) => typeof s === "object" && (s as JSONSchema7).type === "null");
         const nonNull = schema.anyOf.filter((s) => typeof s === "object" && (s as JSONSchema7).type !== "null");
         if (nonNull.length === 1) {
-            const result = schemaTypeToJava(nonNull[0] as JSONSchema7, required && !hasNull, context, propName, nestedTypes);
+            const result = schemaTypeToJava(nonNull[0] as JSONSchema7, required && !hasNull,
+                context, propName, nestedTypes, resolution);
             return result;
         }
         // Multi-branch anyOf: fall through to Object, matching the C# generator's
@@ -613,7 +734,8 @@ function schemaTypeToJava(
         const nonNullTypes = schema.type.filter((t) => t !== "null");
         if (nonNullTypes.length === 1) {
             const baseSchema = { ...schema, type: nonNullTypes[0] };
-            return schemaTypeToJava(baseSchema as JSONSchema7, required, context, propName, nestedTypes);
+            return schemaTypeToJava(baseSchema as JSONSchema7, required, context, propName,
+                nestedTypes, resolution);
         }
     }
 
@@ -635,7 +757,8 @@ function schemaTypeToJava(
         const items = schema.items as JSONSchema7 | undefined;
         if (items) {
             // Always pass required=false so primitives are boxed (List<Long>, not List<long>)
-            const itemResult = schemaTypeToJava(items, false, context, propName + "Item", nestedTypes);
+            const itemResult = schemaTypeToJava(items, false, context, propName + "Item",
+                nestedTypes, resolution);
             imports.add("java.util.List");
             for (const imp of itemResult.imports) imports.add(imp);
             return { javaType: `List<${itemResult.javaType}>`, imports };
@@ -663,7 +786,8 @@ function schemaTypeToJava(
                 ? schema.additionalProperties as JSONSchema7
                 : { type: "object" } as JSONSchema7;
             // Always pass required=false so primitives are boxed (Map<String, Long>, not Map<String, long>)
-            const valueResult = schemaTypeToJava(valueSchema, false, context, propName + "Value", nestedTypes);
+            const valueResult = schemaTypeToJava(valueSchema, false, context,
+                propName + "Value", nestedTypes, resolution);
             imports.add("java.util.Map");
             for (const imp of valueResult.imports) imports.add(imp);
             return { javaType: `Map<String, ${valueResult.javaType}>`, imports };
@@ -745,7 +869,7 @@ async function generateSessionEvents(schemaPath: string): Promise<void> {
 
     const variants = extractEventVariants(schema);
     const packageName = "com.github.copilot.generated";
-    const packageDir = `src/generated/java/com/github/copilot/generated`;
+    const packageDir = `sdk/src/generated/java/com/github/copilot/generated`;
 
     // Generate base SessionEvent class
     await generateSessionEventBaseClass(variants, packageName, packageDir);
@@ -757,6 +881,13 @@ async function generateSessionEvents(schemaPath: string): Promise<void> {
 
     // Generate standalone types discovered via $ref resolution
     await generatePendingStandaloneTypes(packageName, packageDir, GENERATED_FROM_SESSION_EVENTS);
+
+    generatedSessionEventTypeNames.clear();
+    for (const entry of await fs.readdir(path.join(REPO_ROOT, packageDir), { withFileTypes: true })) {
+        if (entry.isFile() && entry.name.endsWith(".java")) {
+            generatedSessionEventTypeNames.add(path.basename(entry.name, ".java"));
+        }
+    }
 
     console.log(`✅ Generated ${variants.length + 1} session event files`);
 }
@@ -820,6 +951,10 @@ async function generateSessionEventBaseClass(
     lines.push(`    @JsonProperty("parentId")`);
     lines.push(`    private UUID parentId;`);
     lines.push("");
+    lines.push(`    /** Sub-agent instance identifier. Absent for events from the root/main agent and session-level events. */`);
+    lines.push(`    @JsonProperty("agentId")`);
+    lines.push(`    private String agentId;`);
+    lines.push("");
     lines.push(`    /** When true, the event is transient and not persisted to the session event log on disk. */`);
     lines.push(`    @JsonProperty("ephemeral")`);
     lines.push(`    private Boolean ephemeral;`);
@@ -839,6 +974,9 @@ async function generateSessionEventBaseClass(
     lines.push("");
     lines.push(`    public UUID getParentId() { return parentId; }`);
     lines.push(`    public void setParentId(UUID parentId) { this.parentId = parentId; }`);
+    lines.push("");
+    lines.push(`    public String getAgentId() { return agentId; }`);
+    lines.push(`    public void setAgentId(String agentId) { this.agentId = agentId; }`);
     lines.push("");
     lines.push(`    public Boolean getEphemeral() { return ephemeral; }`);
     lines.push(`    public void setEphemeral(Boolean ephemeral) { this.ephemeral = ephemeral; }`);
@@ -1263,13 +1401,26 @@ function rpcMethodToClassName(rpcMethod: string): string {
     return rpcMethod.split(/[._-]/).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
 }
 
+function schemaAllowsNull(schema: JSONSchema7): boolean {
+    if (schema.type === "null" || (Array.isArray(schema.type) && schema.type.includes("null"))) {
+        return true;
+    }
+    if (schema.const === null || schema.enum?.includes(null)) {
+        return true;
+    }
+    return [...(schema.anyOf || []), ...(schema.oneOf || [])].some(
+        (variant) => typeof variant === "object" && schemaAllowsNull(variant)
+    );
+}
+
 /** Generate a Java record for a JSON Schema object type. Returns the class content. */
 function generateRpcClass(
     className: string,
     schema: JSONSchema7,
     _nestedTypes: Map<string, { code: string }>,
     _packageName: string,
-    visibility: "public" | "internal" = "public"
+    visibility: "public" | "internal" = "public",
+    preserveRequiredNulls = false
 ): { code: string; imports: Set<string> } {
     const imports = new Set<string>();
     const localNestedTypes = new Map<string, JavaClassDef>();
@@ -1277,13 +1428,20 @@ function generateRpcClass(
     const visModifier = visibility === "public" ? "public " : "";
 
     const properties = Object.entries(schema.properties || {});
+    const required = new Set(schema.required || []);
     const fields = properties.flatMap(([propName, propSchema]) => {
         if (typeof propSchema !== "object") return [];
         const prop = propSchema as JSONSchema7;
         // Record components are always boxed (nullable by design).
         const result = schemaTypeToJava(prop, false, className, propName, localNestedTypes);
         for (const imp of result.imports) imports.add(imp);
-        return [{ propName, javaName: toCamelCase(propName), javaType: result.javaType, description: prop.description }];
+        return [{
+            propName,
+            javaName: toCamelCase(propName),
+            javaType: result.javaType,
+            description: prop.description,
+            includeNull: preserveRequiredNulls && required.has(propName) && schemaAllowsNull(prop),
+        }];
     });
 
     lines.push(`@JsonInclude(JsonInclude.Include.NON_NULL)`);
@@ -1297,6 +1455,9 @@ function generateRpcClass(
             const comma = i < fields.length - 1 ? "," : "";
             if (f.description) {
                 lines.push(`    /** ${f.description} */`);
+            }
+            if (f.includeNull) {
+                lines.push(`    @JsonInclude(JsonInclude.Include.ALWAYS)`);
             }
             lines.push(`    @JsonProperty("${f.propName}") ${f.javaType} ${f.javaName}${comma}`);
         }
@@ -1328,6 +1489,7 @@ async function generateRpcTypes(schemaPath: string): Promise<void> {
     // Set module-level definitions for $ref resolution
     currentDefinitions = (schema.definitions ?? {}) as Record<string, JSONSchema7>;
     pendingStandaloneTypes.clear();
+    promotedNestedUnionTypes.clear();
     crossSchemaDefinitions.clear();
 
     // Load cross-schema definitions (session-events) so that cross-schema $ref values
@@ -1343,7 +1505,7 @@ async function generateRpcTypes(schemaPath: string): Promise<void> {
     }
 
     const packageName = "com.github.copilot.generated.rpc";
-    const packageDir = `src/generated/java/com/github/copilot/generated/rpc`;
+    const packageDir = `sdk/src/generated/java/com/github/copilot/generated/rpc`;
 
     // Collect all RPC methods from all sections
     const sections: [string, Record<string, unknown>][] = [];
@@ -1351,6 +1513,14 @@ async function generateRpcTypes(schemaPath: string): Promise<void> {
     if (schema.session) sections.push(["session", schema.session]);
     if (schema.clientSession) sections.push(["clientSession", schema.clientSession]);
     if (schema.clientGlobal) sections.push(["clientGlobal", schema.clientGlobal]);
+
+    for (const [, sectionNode] of sections) {
+        for (const [, method] of collectRpcMethods(sectionNode)) {
+            for (const typeName of collectNestedDiscriminatedUnionTypeNames(method.result, currentDefinitions)) {
+                promotedNestedUnionTypes.add(typeName);
+            }
+        }
+    }
 
     const generatedClasses = new Map<string, boolean>();
     const allFiles: string[] = [];
@@ -1371,6 +1541,19 @@ async function generateRpcTypes(schemaPath: string): Promise<void> {
                 paramsSchema = null;
             } else if (paramsSchema?.$ref) {
                 paramsSchema = resolveRef(paramsSchema) as JSONSchema7;
+            }
+            const paramsUnionSchema = resolveMethodParamsUnionSchema(method);
+            if (paramsUnionSchema) {
+                const paramsClassName = `${className}Params`;
+                if (!generatedClasses.has(paramsClassName)) {
+                    generatedClasses.set(paramsClassName, true);
+                    await generatePolymorphicResultClass(paramsClassName, paramsUnionSchema, packageName, packageDir);
+                    allFiles.push(`${paramsClassName}.java`);
+                }
+                paramsSchema = null;
+            }
+            if (paramsSchema && !paramsSchema.properties) {
+                paramsSchema = resolveMethodParamsSchema(method) ?? paramsSchema;
             }
             if (paramsSchema && typeof paramsSchema === "object" && paramsSchema.properties) {
                 const paramsClassName = `${className}Params`;
@@ -1444,7 +1627,7 @@ async function generateRpcDataClass(
     deprecated?: boolean
 ): Promise<string> {
     const nestedTypes = new Map<string, { code: string }>();
-    const { code, imports } = generateRpcClass(className, schema, nestedTypes, packageName);
+    const { code, imports } = generateRpcClass(className, schema, nestedTypes, packageName, "public", kind === "params");
 
     const lines: string[] = [];
     lines.push(COPYRIGHT);
@@ -1662,9 +1845,11 @@ function addWrapperResultImports(resultType: string, allImports: Set<string>, pa
  * callers supply it explicitly.
  */
 function wrapperParamsClassName(method: RpcMethodNode, isSession: boolean): string | null {
-    let params = method.params;
-    if (params?.$ref) params = resolveRef(params) as JSONSchema7;
-    if (!params || typeof params !== "object") return null;
+    if (resolveMethodParamsUnionSchema(method)) {
+        return rpcMethodToClassName(method.rpcMethod) + "Params";
+    }
+    const params = resolveMethodParamsSchema(method);
+    if (!params) return null;
     const props = params.properties ?? {};
     const userProps = Object.keys(props).filter((k) => !isSession || k !== "sessionId");
     if (userProps.length === 0) return null;
@@ -1673,9 +1858,14 @@ function wrapperParamsClassName(method: RpcMethodNode, isSession: boolean): stri
 
 /** True if the method's params schema contains a "sessionId" property */
 function methodHasSessionId(method: RpcMethodNode): boolean {
-    let params = method.params;
-    if (params?.$ref) params = resolveRef(params) as JSONSchema7;
+    const params = resolveMethodParamsSchema(method);
     return !!params?.properties && "sessionId" in params.properties;
+}
+
+/** True if the method's params object may be omitted entirely */
+function methodParamsAreOptional(method: RpcMethodNode): boolean {
+    const params = resolveRef(method.params ?? undefined);
+    return !!params && typeof params === "object" && hasOmissionSentinel(params);
 }
 
 /**
@@ -1692,6 +1882,7 @@ function generateApiMethod(
     const paramsClass = wrapperParamsClassName(method, isSession);
     const hasSessionId = methodHasSessionId(method);
     const hasExtraParams = paramsClass !== null;
+    const paramsOptional = hasExtraParams && methodParamsAreOptional(method);
     let needsMapper = false;
 
     const lines: string[] = [];
@@ -1700,25 +1891,38 @@ function generateApiMethod(
     const description = (method.params as JSONSchema7 | null)?.description
         ?? (method.result as JSONSchema7 | null)?.description
         ?? `Invokes {@code ${method.rpcMethod}}.`;
-    lines.push(`    /**`);
-    lines.push(`     * ${description}`);
-    if (isSession && hasExtraParams && hasSessionId) {
-        lines.push(`     * <p>`);
-        lines.push(`     * Note: the {@code sessionId} field in the params record is overridden`);
-        lines.push(`     * by the session-scoped wrapper; any value provided is ignored.`);
+    const pushJavadoc = (extraLines: string[] = [], includeSessionIdNote = true): void => {
+        lines.push(`    /**`);
+        lines.push(`     * ${description}`);
+        if (includeSessionIdNote && isSession && hasExtraParams && hasSessionId) {
+            lines.push(`     * <p>`);
+            lines.push(`     * Note: the {@code sessionId} field in the params record is overridden`);
+            lines.push(`     * by the session-scoped wrapper; any value provided is ignored.`);
+        }
+        lines.push(...extraLines);
+        if (method.stability === "experimental") {
+            lines.push(`     *`);
+            lines.push(`     * @apiNote This method is experimental and may change in a future version.`);
+        }
+        lines.push(`     * @since 1.0.0`);
+        lines.push(`     */`);
+        if (method.deprecated) {
+            lines.push(`    @Deprecated`);
+        }
+        if (method.stability === "experimental") {
+            lines.push(`    @CopilotExperimental`);
+        }
+    };
+
+    if (paramsOptional) {
+        pushJavadoc([`     * <p>`, `     * Invokes the method with no params, applying the runtime defaults.`], false);
+        lines.push(`    public CompletableFuture<${resultClass}> ${key}() {`);
+        lines.push(`        return ${key}(null);`);
+        lines.push(`    }`);
+        lines.push(``);
     }
-    if (method.stability === "experimental") {
-        lines.push(`     *`);
-        lines.push(`     * @apiNote This method is experimental and may change in a future version.`);
-    }
-    lines.push(`     * @since 1.0.0`);
-    lines.push(`     */`);
-    if (method.deprecated) {
-        lines.push(`    @Deprecated`);
-    }
-    if (method.stability === "experimental") {
-        lines.push(`    @CopilotExperimental`);
-    }
+
+    pushJavadoc();
 
     // Signature
     if (hasExtraParams) {
@@ -1732,7 +1936,10 @@ function generateApiMethod(
         if (hasExtraParams) {
             // Merge sessionId into the params using Jackson ObjectNode
             needsMapper = true;
-            lines.push(`        com.fasterxml.jackson.databind.node.ObjectNode _p = MAPPER.valueToTree(params);`);
+            const paramsNode = paramsOptional
+                ? `params == null ? MAPPER.createObjectNode() : MAPPER.valueToTree(params)`
+                : `MAPPER.valueToTree(params)`;
+            lines.push(`        com.fasterxml.jackson.databind.node.ObjectNode _p = ${paramsNode};`);
             lines.push(`        _p.put("sessionId", ${sessionIdExpr});`);
             lines.push(`        return caller.invoke("${method.rpcMethod}", _p, ${wrapperResultTypeExpression(resultClass)});`);
         } else if (hasSessionId) {
@@ -1743,7 +1950,8 @@ function generateApiMethod(
     } else {
         // Server-side: pass params directly (or empty map if no params)
         if (hasExtraParams) {
-            lines.push(`        return caller.invoke("${method.rpcMethod}", params, ${wrapperResultTypeExpression(resultClass)});`);
+            const paramsArg = paramsOptional ? `params == null ? java.util.Map.of() : params` : `params`;
+            lines.push(`        return caller.invoke("${method.rpcMethod}", ${paramsArg}, ${wrapperResultTypeExpression(resultClass)});`);
         } else {
             lines.push(`        return caller.invoke("${method.rpcMethod}", java.util.Map.of(), ${wrapperResultTypeExpression(resultClass)});`);
         }
@@ -2145,7 +2353,7 @@ async function generateRpcWrappers(schemaPath: string): Promise<void> {
     currentDefinitions = (schema.definitions ?? {}) as Record<string, JSONSchema7>;
 
     const packageName = "com.github.copilot.generated.rpc";
-    const packageDir = `src/generated/java/com/github/copilot/generated/rpc`;
+    const packageDir = `sdk/src/generated/java/com/github/copilot/generated/rpc`;
 
     // RpcCaller interface and shared ObjectMapper holder
     await generateRpcCallerInterface(packageName, packageDir);
@@ -2268,7 +2476,7 @@ async function main(): Promise<void> {
     console.log("============================");
 
     // Clean the generated output directory to remove orphaned files from previous runs
-    const generatedOutputDir = path.join(REPO_ROOT, "src/generated/java/com/github/copilot/generated");
+    const generatedOutputDir = path.join(REPO_ROOT, "sdk/src/generated/java/com/github/copilot/generated");
     console.log(`🧹 Cleaning output directory: ${generatedOutputDir}`);
     await fs.rm(generatedOutputDir, { recursive: true, force: true });
     await fs.mkdir(generatedOutputDir, { recursive: true });
@@ -2283,15 +2491,17 @@ async function main(): Promise<void> {
     await generateRpcWrappers(apiSchemaPath);
 
     // Generate package-info.java for each generated package
-    const generatedPkgDir = `src/generated/java/com/github/copilot/generated`;
-    const rpcPkgDir = `src/generated/java/com/github/copilot/generated/rpc`;
+    const generatedPkgDir = `sdk/src/generated/java/com/github/copilot/generated`;
+    const rpcPkgDir = `sdk/src/generated/java/com/github/copilot/generated/rpc`;
     await generateGeneratedPackageInfo(generatedPkgDir);
     await generateRpcPackageInfo(rpcPkgDir);
 
     console.log("\n✅ Java code generation complete!");
 }
 
-main().catch((err) => {
-    console.error("❌ Code generation failed:", err);
-    process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+    main().catch((err) => {
+        console.error("❌ Code generation failed:", err);
+        process.exit(1);
+    });
+}

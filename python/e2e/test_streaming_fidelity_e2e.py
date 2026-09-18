@@ -5,11 +5,28 @@ import os
 import pytest
 
 from copilot import CopilotClient, RuntimeConnection
+from copilot.rpc import SessionsCheckInUseRequest
 from copilot.session import PermissionHandler
 
-from .testharness import E2ETestContext
+from .testharness import E2ETestContext, wait_for_condition
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
+
+RESUME_LOCK_TIMEOUT = 60.0
+
+
+async def _wait_for_session_lock_release(ctx: E2ETestContext, session_id: str) -> None:
+    async def session_lock_is_released() -> bool:
+        result = await ctx.client.rpc.sessions.check_in_use(
+            SessionsCheckInUseRequest(session_ids=[session_id])
+        )
+        return session_id not in result.in_use
+
+    await wait_for_condition(
+        session_lock_is_released,
+        timeout=RESUME_LOCK_TIMEOUT,
+        timeout_message=f"Timed out waiting for session '{session_id}' to release its lock.",
+    )
 
 
 class TestStreamingFidelity:
@@ -70,8 +87,11 @@ class TestStreamingFidelity:
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all, streaming=False
         )
+        session_id = session.session_id
         await session.send_and_wait("What is 3 + 6?")
         await session.disconnect()
+
+        await _wait_for_session_lock_release(ctx, session_id)
 
         # Resume using a new client
         github_token = (
@@ -86,7 +106,7 @@ class TestStreamingFidelity:
 
         try:
             session2 = await new_client.resume_session(
-                session.session_id,
+                session_id,
                 on_permission_request=PermissionHandler.approve_all,
                 streaming=True,
             )
@@ -126,6 +146,8 @@ class TestStreamingFidelity:
         session_id = session.session_id
         await session.disconnect()
 
+        await _wait_for_session_lock_release(ctx, session_id)
+
         # Resume with streaming disabled
         new_client = CopilotClient(
             connection=RuntimeConnection.for_stdio(path=ctx.cli_path),
@@ -155,34 +177,44 @@ class TestStreamingFidelity:
         finally:
             await new_client.force_stop()
 
-    async def test_should_emit_streaming_deltas_with_reasoning_effort_configured(
-        self, ctx: E2ETestContext
-    ):
+    async def test_should_emit_streaming_deltas_with_reasoning_effort_configured(self):
         """Streaming + reasoning_effort produces delta events and session.start shows effort."""
         from copilot.session_events import SessionStartData
 
-        session = await ctx.client.create_session(
-            on_permission_request=PermissionHandler.approve_all,
-            streaming=True,
-            reasoning_effort="high",
-        )
-
-        events = []
-        session.on(lambda event: events.append(event))
-
+        isolated_ctx = E2ETestContext()
+        await isolated_ctx.setup()
         try:
-            await session.send_and_wait("What is 15 * 17?", timeout=60.0)
+            await isolated_ctx.configure_for_test(
+                "streaming_fidelity",
+                "should_emit_streaming_deltas_with_reasoning_effort_configured",
+            )
+            session = await isolated_ctx.client.create_session(
+                on_permission_request=PermissionHandler.approve_all,
+                model="gpt-5.4",
+                streaming=True,
+                reasoning_effort="high",
+            )
 
-            delta_events = [e for e in events if e.type.value == "assistant.message_delta"]
-            assert len(delta_events) >= 1, "Expected delta events with streaming=True"
+            events = []
+            session.on(lambda event: events.append(event))
 
-            assistant_events = [e for e in events if e.type.value == "assistant.message"]
-            assert len(assistant_events) >= 1, "Expected final assistant.message"
+            try:
+                await session.send_and_wait("What is 15 * 17?", timeout=60.0)
 
-            # Check session.start event (from get_events) has reasoning_effort
-            all_msgs = await session.get_events()
-            start_event = next((e for e in all_msgs if isinstance(e.data, SessionStartData)), None)
-            assert start_event is not None, "Expected session.start event"
-            assert start_event.data.reasoning_effort == "high"
+                delta_events = [e for e in events if e.type.value == "assistant.message_delta"]
+                assert len(delta_events) >= 1, "Expected delta events with streaming=True"
+
+                assistant_events = [e for e in events if e.type.value == "assistant.message"]
+                assert len(assistant_events) >= 1, "Expected final assistant.message"
+
+                # Check session.start event (from get_events) has reasoning_effort
+                all_msgs = await session.get_events()
+                start_event = next(
+                    (e for e in all_msgs if isinstance(e.data, SessionStartData)), None
+                )
+                assert start_event is not None, "Expected session.start event"
+                assert start_event.data.reasoning_effort == "high"
+            finally:
+                await session.disconnect()
         finally:
-            await session.disconnect()
+            await isolated_ctx.teardown()

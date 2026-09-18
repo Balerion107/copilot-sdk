@@ -2,75 +2,102 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+import type { ChildProcess } from "node:child_process";
 import { AssistantMessageEvent, CopilotSession, SessionEvent } from "../../../src";
 
-export async function getFinalAssistantMessage(
-    session: CopilotSession,
-    { alreadyIdle = false }: { alreadyIdle?: boolean } = {}
-): Promise<AssistantMessageEvent> {
-    // Install the live subscription (via getFutureFinalResponse) before issuing the
-    // existing-messages RPC so we don't miss events that arrive while that RPC is in flight.
-    const futurePromise = getFutureFinalResponse(session);
-    // We may end up returning from the existing-messages path; attach a noop handler so
-    // the unawaited future-response rejection doesn't surface as an unhandled rejection.
-    futurePromise.catch(() => {});
+const CHILD_SHUTDOWN_TIMEOUT_MS = 1_000;
 
-    const existing = await getExistingFinalResponse(session, alreadyIdle);
-    if (existing) {
-        return existing;
+export async function stopChildProcess(child: ChildProcess): Promise<void> {
+    if (hasChildExited(child)) {
+        return;
     }
-    return futurePromise;
+
+    child.kill("SIGTERM");
+    if (await waitForChildExit(child, CHILD_SHUTDOWN_TIMEOUT_MS)) {
+        return;
+    }
+
+    child.kill("SIGKILL");
+    if (!(await waitForChildExit(child, CHILD_SHUTDOWN_TIMEOUT_MS))) {
+        throw new Error("Child process did not exit after SIGKILL");
+    }
 }
 
-async function getExistingFinalResponse(
-    session: CopilotSession,
-    alreadyIdle: boolean = false
-): Promise<AssistantMessageEvent | undefined> {
-    const messages = await session.getEvents();
-    const finalUserMessageIndex = messages.findLastIndex((m) => m.type === "user.message");
-    const currentTurnMessages =
-        finalUserMessageIndex < 0 ? messages : messages.slice(finalUserMessageIndex);
-
-    const currentTurnError = currentTurnMessages.find((m) => m.type === "session.error");
-    if (currentTurnError) {
-        const error = new Error(currentTurnError.data.message);
-        error.stack = currentTurnError.data.stack;
-        throw error;
-    }
-
-    const sessionIdleMessageIndex = alreadyIdle
-        ? currentTurnMessages.length
-        : currentTurnMessages.findIndex((m) => m.type === "session.idle");
-    if (sessionIdleMessageIndex !== -1) {
-        return currentTurnMessages
-            .slice(0, sessionIdleMessageIndex)
-            .findLast((m) => m.type === "assistant.message") as AssistantMessageEvent | undefined;
-    }
-
-    return undefined;
+function hasChildExited(child: ChildProcess): boolean {
+    return child.exitCode !== null || child.signalCode !== null;
 }
 
-function getFutureFinalResponse(session: CopilotSession): Promise<AssistantMessageEvent> {
-    return new Promise<AssistantMessageEvent>((resolve, reject) => {
-        let finalAssistantMessage: AssistantMessageEvent | undefined;
-        session.on((event) => {
-            if (event.type === "assistant.message") {
-                finalAssistantMessage = event;
-            } else if (event.type === "session.idle") {
-                if (!finalAssistantMessage) {
-                    reject(
-                        new Error("Received session.idle without a preceding assistant.message")
-                    );
-                } else {
-                    resolve(finalAssistantMessage);
-                }
-            } else if (event.type === "session.error") {
-                const error = new Error(event.data.message);
-                error.stack = event.data.stack;
-                reject(error);
+function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+    if (hasChildExited(child)) {
+        return Promise.resolve(true);
+    }
+
+    return new Promise<boolean>((resolvePromise) => {
+        let settled = false;
+        const finish = (exited: boolean) => {
+            if (settled) {
+                return;
             }
-        });
+            settled = true;
+            clearTimeout(timeout);
+            child.off("exit", onExit);
+            resolvePromise(exited);
+        };
+        const onExit = () => finish(true);
+        const timeout = setTimeout(() => finish(false), timeoutMs);
+
+        child.once("exit", onExit);
+        if (hasChildExited(child)) {
+            onExit();
+        }
     });
+}
+
+export async function withFinalAssistantMessage(
+    session: CopilotSession,
+    trigger: () => Promise<unknown>
+): Promise<AssistantMessageEvent> {
+    type Outcome = { message: AssistantMessageEvent } | { error: Error };
+    let resolveOutcome!: (outcome: Outcome) => void;
+    const outcomePromise = new Promise<Outcome>((resolve) => {
+        resolveOutcome = resolve;
+    });
+    let finalAssistantMessage: AssistantMessageEvent | undefined;
+
+    // session.idle is ephemeral: subscribe before triggering work, not after an RPC
+    // reply or a history lookup. Keep errors as values while the trigger is in flight.
+    const unsubscribe = session.on((event) => {
+        if (event.type === "assistant.message") {
+            finalAssistantMessage = event;
+        } else if (event.type === "session.idle" && event.data.mode !== "autopilot") {
+            unsubscribe();
+            resolveOutcome(
+                finalAssistantMessage
+                    ? { message: finalAssistantMessage }
+                    : {
+                          error: new Error(
+                              "Received session.idle without a preceding assistant.message"
+                          ),
+                      }
+            );
+        } else if (event.type === "session.error") {
+            unsubscribe();
+            const error = new Error(event.data.message);
+            error.stack = event.data.stack;
+            resolveOutcome({ error });
+        }
+    });
+
+    try {
+        await trigger();
+        const outcome = await outcomePromise;
+        if ("error" in outcome) {
+            throw outcome.error;
+        }
+        return outcome.message;
+    } finally {
+        unsubscribe();
+    }
 }
 
 export async function retry(

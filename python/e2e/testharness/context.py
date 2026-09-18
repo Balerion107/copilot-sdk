@@ -9,6 +9,7 @@ import contextlib
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -19,26 +20,36 @@ from copilot import CopilotClient, RuntimeConnection
 from .proxy import CapiProxy
 
 
+def _prepare_pinned_cli(repo_root: Path) -> str:
+    npm = "npm.cmd" if os.name == "nt" else "npm"
+    result = subprocess.run(
+        [npm, "run", "--silent", "prepare:runtime", "--", "--print-path"],
+        cwd=repo_root / "nodejs",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = result.stdout.strip()
+    if result.returncode != 0 or not output:
+        detail = result.stderr.strip() or output or f"exit code {result.returncode}"
+        raise RuntimeError(f"Failed to prepare the pinned Copilot CLI: {detail}")
+    cli_path = Path(output.splitlines()[-1])
+    if not cli_path.is_file():
+        raise RuntimeError(f"Pinned Copilot CLI was not created at {cli_path}")
+    return str(cli_path.resolve())
+
+
 def get_cli_path_for_tests() -> str:
     """Get CLI path for E2E tests.
 
-    Uses COPILOT_CLI_PATH env var if set, otherwise node_modules CLI.
+    Uses COPILOT_CLI_PATH env var if set, otherwise prepares the release pinned
+    by the sibling Node.js SDK.
     """
     env_path = os.environ.get("COPILOT_CLI_PATH")
     if env_path and Path(env_path).exists():
         return str(Path(env_path).resolve())
 
-    # Look for CLI in sibling nodejs directory's node_modules. As of CLI 1.0.64-1
-    # the @github/copilot package is a thin loader; the runnable index.js ships in
-    # the installed platform package (e.g. @github/copilot-linux-x64).
-    base_path = Path(__file__).parents[3]
-    github_modules = base_path / "nodejs" / "node_modules" / "@github"
-    for platform_pkg in sorted(github_modules.glob("copilot-*")):
-        candidate = platform_pkg / "index.js"
-        if candidate.exists():
-            return str(candidate.resolve())
-
-    raise RuntimeError("CLI not found for tests. Run 'npm install' in the nodejs directory.")
+    return _prepare_pinned_cli(Path(__file__).parents[3])
 
 
 CLI_PATH = get_cli_path_for_tests()
@@ -219,11 +230,13 @@ class E2ETestContext:
         if self._proxy:
             await self._proxy.configure(abs_snapshot_path, self.work_dir)
 
-        # Clear temp directories between tests (but leave them in place)
-        # Use ignore_errors=True / suppress(OSError) to handle race conditions
-        # where files (e.g., SQLite session-store.db on Windows) may still be
-        # held open by a background process during cleanup.
-        for base_dir in (self.home_dir, self.work_dir):
+        # Keep the in-process runtime's isolated home intact until teardown stops
+        # the runtime. Removing its open state files on POSIX can leave later tests
+        # using unlinked database state.
+        cleanup_dirs = (
+            (self.work_dir,) if self._client_inprocess else (self.home_dir, self.work_dir)
+        )
+        for base_dir in cleanup_dirs:
             base_path = Path(base_dir)
             base_path.mkdir(parents=True, exist_ok=True)
             for item in base_path.iterdir():

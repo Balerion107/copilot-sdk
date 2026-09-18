@@ -31,7 +31,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         var session = await CreateSessionAsync(new SessionConfig
         {
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             ModelCapabilities = new ModelCapabilitiesOverride
             {
                 Supports = new ModelCapabilitiesOverrideSupports { Vision = false },
@@ -46,7 +46,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         // Switch vision on
         await session.SetModelAsync(
-            "claude-sonnet-4.5",
+            "claude-sonnet-5",
             reasoningEffort: null,
             modelCapabilities: new ModelCapabilitiesOverride
             {
@@ -74,7 +74,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         var session = await CreateSessionAsync(new SessionConfig
         {
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             ModelCapabilities = new ModelCapabilitiesOverride
             {
                 Supports = new ModelCapabilitiesOverrideSupports { Vision = true },
@@ -89,7 +89,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
 
         // Switch vision off
         await session.SetModelAsync(
-            "claude-sonnet-4.5",
+            "claude-sonnet-5",
             reasoningEffort: null,
             modelCapabilities: new ModelCapabilitiesOverride
             {
@@ -173,9 +173,11 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Trait(E2ETestTraits.Backend, E2ETestTraits.SelfConfiguredBackend)]
     public async Task Should_Apply_ReasoningEffort_On_Session_Resume()
     {
-        var originalSession = await CreateSessionAsync();
+        await using var originalSession = await CreateSessionAsync();
+        var sessionId = originalSession.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(originalSession);
         const string reasoningModelId = "custom-reasoning-model";
-        var resumedSession = await ResumeSessionAsync(originalSession.SessionId, new ResumeSessionConfig
+        var resumedSession = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             Model = reasoningModelId,
             Provider = CreateProxyProvider("resume-reasoning"),
@@ -187,7 +189,6 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.Equal("high", resumeEvent.Data.ReasoningEffort);
 
         await resumedSession.DisposeAsync();
-        await originalSession.DisposeAsync();
     }
 
     [Fact]
@@ -215,7 +216,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         var session = await CreateSessionAsync(new SessionConfig
         {
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             Provider = CreateProxyProvider("create-provider-header"),
         });
 
@@ -233,12 +234,13 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Trait(E2ETestTraits.Backend, E2ETestTraits.SelfConfiguredBackend)]
     public async Task Should_Forward_Custom_Provider_Headers_On_Resume()
     {
-        var session1 = await CreateSessionAsync();
+        await using var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(session1);
 
         var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             Provider = CreateProxyProvider("resume-provider-header"),
         });
 
@@ -265,7 +267,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         // tests for serialization coverage).
         var session = await CreateSessionAsync(new SessionConfig
         {
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             Provider = new ProviderConfig
             {
                 Type = "openai",
@@ -298,14 +300,14 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
                 Type = "openai",
                 BaseUrl = Ctx.ProxyUrl,
                 ApiKey = "test-provider-key",
-                ModelId = "claude-sonnet-4.5",
+                ModelId = "claude-sonnet-5",
             },
         });
 
         await session.SendAndWaitAsync(new MessageOptions { Prompt = "What is 1+1?" });
 
         var exchange = Assert.Single(await Ctx.GetExchangesAsync());
-        Assert.Equal("claude-sonnet-4.5", exchange.Request.Model);
+        Assert.Equal("claude-sonnet-5", exchange.Request.Model);
 
         await session.DisposeAsync();
     }
@@ -339,8 +341,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Directory.CreateDirectory(subDir);
         await File.WriteAllTextAsync(Path.Join(subDir, "resume-marker.txt"), "I am in the resume working directory");
 
-        var session1 = await CreateSessionAsync();
+        await using var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(session1);
 
         var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
@@ -360,8 +363,9 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Fact]
     public async Task Should_Apply_SystemMessage_On_Session_Resume()
     {
-        var session1 = await CreateSessionAsync();
+        await using var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(session1);
 
         var resumeInstruction = "End the response with RESUME_SYSTEM_MESSAGE_SENTINEL.";
         var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
@@ -422,11 +426,13 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Path.Join(instructionFilesDir, "extra.instructions.md"),
             $"Always include {sentinel}.");
 
-        var session1 = await CreateSessionAsync(new SessionConfig
+        await using var session1 = await CreateSessionAsync(new SessionConfig
         {
             WorkingDirectory = projectDir,
         });
-        var session2 = await ResumeSessionAsync(session1.SessionId, new ResumeSessionConfig
+        var sessionId = session1.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(session1);
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             WorkingDirectory = projectDir,
             InstructionDirectories = [instructionDir],
@@ -438,14 +444,14 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         Assert.Contains(sentinel, GetSystemMessage(exchange));
 
         await session2.DisposeAsync();
-        await session1.DisposeAsync();
     }
 
     [Fact]
     public async Task Should_Apply_AvailableTools_On_Session_Resume()
     {
-        var session1 = await CreateSessionAsync();
+        await using var session1 = await CreateSessionAsync();
         var sessionId = session1.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(session1);
 
         var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
@@ -493,8 +499,10 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     [Fact]
     public async Task Should_Apply_Session_Limits_On_Resume()
     {
-        var session1 = await CreateSessionAsync();
-        var session2 = await ResumeSessionAsync(session1.SessionId, new ResumeSessionConfig
+        await using var session1 = await CreateSessionAsync();
+        var sessionId = session1.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(session1);
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             SessionLimits = new SessionLimitsConfig
             {
@@ -513,7 +521,6 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         finally
         {
             await session2.DisposeAsync();
-            await session1.DisposeAsync();
         }
     }
 
@@ -558,8 +565,10 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
     {
         const string excludedAgent = "explore";
 
-        var session1 = await CreateSessionAsync();
-        var session2 = await ResumeSessionAsync(session1.SessionId, new ResumeSessionConfig
+        await using var session1 = await CreateSessionAsync();
+        var sessionId = session1.SessionId;
+        await SuspendAndUntrackSessionForResumeAsync(session1);
+        var session2 = await ResumeSessionAsync(sessionId, new ResumeSessionConfig
         {
             ExcludedBuiltInAgents = [excludedAgent],
         });
@@ -575,7 +584,6 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         finally
         {
             await session2.DisposeAsync();
-            await session1.DisposeAsync();
         }
     }
 
@@ -590,7 +598,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var session = await Ctx.CreateSessionAsync(client, new SessionConfig
         {
             OnPermissionRequest = PermissionHandler.ApproveAll,
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             EnableCitations = true,
             Provider = CreateAnthropicProvider(),
         });
@@ -637,7 +645,7 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
         var session2 = await Ctx.ResumeSessionAsync(resumeClient, sessionId, new ResumeSessionConfig
         {
             OnPermissionRequest = PermissionHandler.ApproveAll,
-            Model = "claude-sonnet-4.5",
+            Model = "claude-sonnet-5",
             EnableCitations = true,
             Provider = CreateAnthropicProvider(),
         });
@@ -826,8 +834,8 @@ public class SessionConfigE2ETests(E2ETestFixture fixture, ITestOutputHelper out
             Type = "anthropic",
             BaseUrl = "https://anthropic-citations.invalid/v1",
             ApiKey = "test-provider-key",
-            ModelId = "claude-sonnet-4.5",
-            WireModel = "claude-sonnet-4.5",
+            ModelId = "claude-sonnet-5",
+            WireModel = "claude-sonnet-5",
         };
     }
 

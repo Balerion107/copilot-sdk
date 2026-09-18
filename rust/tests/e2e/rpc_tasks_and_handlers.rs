@@ -27,11 +27,10 @@ use github_copilot_sdk::rpc::{
     UIUnregisterDirectAutoModeSwitchHandlerRequest, UIUserInputResponse,
 };
 
-use super::support::with_e2e_context;
-
 #[tokio::test]
 async fn should_list_task_state_and_return_false_for_missing_task_operations() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_tasks_and_handlers",
         "should_list_task_state_and_return_false_for_missing_task_operations",
         |ctx| {
@@ -67,7 +66,7 @@ async fn should_list_task_state_and_return_false_for_missing_task_operations() {
                         .await
                         .expect("progress missing")
                         .progress
-                        .is_none()
+                        .is_null()
                 );
                 assert!(
                     session
@@ -145,7 +144,8 @@ async fn should_list_task_state_and_return_false_for_missing_task_operations() {
 
 #[tokio::test]
 async fn should_report_implemented_error_for_missing_task_agent_type() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_tasks_and_handlers",
         "should_report_implemented_error_for_missing_task_agent_type",
         |ctx| {
@@ -182,7 +182,8 @@ async fn should_report_implemented_error_for_missing_task_agent_type() {
 
 #[tokio::test]
 async fn should_report_implemented_error_for_invalid_task_agent_model() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_tasks_and_handlers",
         "should_report_implemented_error_for_invalid_task_agent_model",
         |ctx| {
@@ -229,7 +230,7 @@ async fn should_report_implemented_error_for_invalid_task_agent_model() {
 
 #[tokio::test]
 async fn should_return_expected_results_for_missing_pending_handler_requestids() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(&E2E,
         "rpc_tasks_and_handlers",
         "should_return_expected_results_for_missing_pending_handler_requestids",
         |ctx| {
@@ -272,6 +273,7 @@ async fn should_return_expected_results_for_missing_pending_handler_requestids()
                         result: UIElicitationResponse {
                             action: UIElicitationResponseAction::Cancel,
                             content: Default::default(),
+                            meta: None,
                         },
                     })
                     .await
@@ -322,6 +324,7 @@ async fn should_return_expected_results_for_missing_pending_handler_requestids()
                         response: UIExitPlanModeResponse {
                             approved: false,
                             auto_approve_edits: None,
+                            defer_implementation: None,
                             feedback: Some("not now".to_string()),
                             selected_action: None,
                         },
@@ -358,6 +361,7 @@ async fn should_return_expected_results_for_missing_pending_handler_requestids()
                     (
                         "missing-approve-once-request",
                         PermissionDecision::ApproveOnce(PermissionDecisionApproveOnce {
+                            approved_interactively: None,
                             kind: PermissionDecisionApproveOnceKind::ApproveOnce,
                         }),
                     ),
@@ -401,6 +405,7 @@ async fn should_return_expected_results_for_missing_pending_handler_requestids()
                         .rpc()
                         .permissions()
                         .handle_pending_permission_request(PermissionDecisionRequest {
+                            decision_context: None,
                             request_id: request_id.into(),
                             result,
                         })
@@ -423,6 +428,7 @@ async fn should_return_expected_results_for_missing_pending_handler_requestids()
                                         "missing".to_string(),
                                     )]),
                                     kind: McpHeadersHandlePendingHeadersRefreshRequestHeadersKind::Headers,
+                                    ttl_ms: None,
                                 },
                             ),
                         },
@@ -441,7 +447,8 @@ async fn should_return_expected_results_for_missing_pending_handler_requestids()
 
 #[tokio::test]
 async fn should_register_and_unregister_direct_auto_mode_switch_handler() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_tasks_and_handlers",
         "should_register_and_unregister_direct_auto_mode_switch_handler",
         |ctx| {
@@ -501,3 +508,5 @@ fn assert_implemented_error<T>(result: Result<T, github_copilot_sdk::Error>, met
         "expected implemented error for {method}, got {message}"
     );
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_tasks_and_handlers", 5);

@@ -21,7 +21,8 @@ use super::support::{with_e2e_context, with_e2e_context_no_snapshot};
 
 #[tokio::test]
 async fn should_call_rpc_ping_with_typed_params_and_result() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_call_rpc_ping_with_typed_params_and_result",
         |ctx| {
@@ -46,7 +47,38 @@ async fn should_call_rpc_ping_with_typed_params_and_result() {
 }
 
 #[tokio::test]
+async fn should_clear_the_managed_settings_cache() {
+    if super::support::skip_inprocess("managedSettings.clearCache is unavailable in-process") {
+        return;
+    }
+    with_e2e_context(
+        "rpc_server",
+        "should_clear_the_managed_settings_cache",
+        |ctx| {
+            Box::pin(async move {
+                let client = ctx.start_client().await;
+
+                client
+                    .rpc()
+                    .managed_settings()
+                    .clear_cache()
+                    .await
+                    .expect("clear managed settings cache");
+
+                client.stop().await.expect("stop client");
+            })
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn should_call_rpc_models_list_with_typed_result() {
+    // TODO(cli-1.0.81-2): CLI 1.0.81-2 stopped honoring client-level GitHub tokens over the
+    // in-process (FFI) host, which resolves auth from the ambient environment instead.
+    if super::support::skip_inprocess("client-level GitHub tokens are not supported in-process") {
+        return;
+    }
     with_e2e_context(
         "rpc_server",
         "should_call_rpc_models_list_with_typed_result",
@@ -64,7 +96,7 @@ async fn should_call_rpc_models_list_with_typed_result() {
                     result
                         .models
                         .iter()
-                        .any(|model| model.id == "claude-sonnet-4.5")
+                        .any(|model| model.id == "claude-sonnet-5")
                 );
                 assert!(result.models.iter().all(|model| !model.name.is_empty()));
                 client.stop().await.expect("stop client");
@@ -76,6 +108,11 @@ async fn should_call_rpc_models_list_with_typed_result() {
 
 #[tokio::test]
 async fn should_call_rpc_account_get_quota_when_authenticated() {
+    // TODO(cli-1.0.81-2): CLI 1.0.81-2 stopped honoring client-level GitHub tokens over the
+    // in-process (FFI) host, which resolves auth from the ambient environment instead.
+    if super::support::skip_inprocess("client-level GitHub tokens are not supported in-process") {
+        return;
+    }
     with_e2e_context(
         "rpc_server",
         "should_call_rpc_account_get_quota_when_authenticated",
@@ -118,7 +155,8 @@ async fn should_call_rpc_account_get_quota_when_authenticated() {
 
 #[tokio::test]
 async fn should_call_rpc_tools_list_with_typed_result() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_call_rpc_tools_list_with_typed_result",
         |ctx| {
@@ -186,7 +224,8 @@ async fn should_reject_llm_response_frames_for_unknown_request() {
 
 #[tokio::test]
 async fn should_discover_server_mcp_and_skills() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_discover_server_mcp_and_skills",
         |ctx| {
@@ -204,6 +243,7 @@ async fn should_discover_server_mcp_and_skills() {
                     .rpc()
                     .mcp()
                     .discover(McpDiscoverRequest {
+                        include_effective_source: None,
                         working_directory: Some(project_path.clone()),
                     })
                     .await
@@ -401,35 +441,41 @@ async fn should_call_rpc_sessionfs_setprovider_with_typed_result() {
 
 #[tokio::test]
 async fn should_add_secret_filter_values() {
-    with_e2e_context("rpc_server", "should_add_secret_filter_values", |ctx| {
-        Box::pin(async move {
-            let client = ctx.start_client().await;
+    super::support::with_shared_e2e_context(
+        &E2E,
+        "rpc_server",
+        "should_add_secret_filter_values",
+        |ctx| {
+            Box::pin(async move {
+                let client = ctx.start_client().await;
 
-            let result = client
-                .rpc()
-                .secrets()
-                .add_filter_values(SecretsAddFilterValuesRequest {
-                    values: vec!["rust-secret-value".to_string()],
-                })
-                .await;
-            match result {
-                Ok(result) => assert!(result.ok),
-                Err(err) => {
-                    let message = err.to_string();
-                    assert!(message.contains("COPILOT_ENABLE_SECRET_FILTERING"));
-                    assert!(!message.contains("Unhandled method secrets.addFilterValues"));
+                let result = client
+                    .rpc()
+                    .secrets()
+                    .add_filter_values(SecretsAddFilterValuesRequest {
+                        values: vec!["rust-secret-value".to_string()],
+                    })
+                    .await;
+                match result {
+                    Ok(response) => assert!(response.ok),
+                    Err(err) => {
+                        let message = err.to_string();
+                        assert!(message.contains("COPILOT_ENABLE_SECRET_FILTERING"));
+                        assert!(!message.contains("Unhandled method secrets.addFilterValues"));
+                    }
                 }
-            }
 
-            client.stop().await.expect("stop client");
-        })
-    })
+                client.stop().await.expect("stop client");
+            })
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn should_list_find_and_inspect_persisted_session_state() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_list_find_and_inspect_persisted_session_state",
         |ctx| {
@@ -550,7 +596,8 @@ async fn should_list_find_and_inspect_persisted_session_state() {
 
 #[tokio::test]
 async fn should_enrich_basic_session_metadata() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_enrich_basic_session_metadata",
         |ctx| {
@@ -604,7 +651,8 @@ async fn should_enrich_basic_session_metadata() {
 
 #[tokio::test]
 async fn should_close_active_session_and_release_lock() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_close_active_session_and_release_lock",
         |ctx| {
@@ -655,7 +703,8 @@ async fn should_close_active_session_and_release_lock() {
 
 #[tokio::test]
 async fn should_prune_dryrun_and_bulkdelete_persisted_session() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_prune_dryrun_and_bulkdelete_persisted_session",
         |ctx| {
@@ -702,7 +751,8 @@ async fn should_prune_dryrun_and_bulkdelete_persisted_session() {
 
 #[tokio::test]
 async fn should_set_additional_plugins_and_reload_deferred_hooks() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_set_additional_plugins_and_reload_deferred_hooks",
         |ctx| {
@@ -752,34 +802,40 @@ async fn should_set_additional_plugins_and_reload_deferred_hooks() {
 
 #[tokio::test]
 async fn should_save_and_get_event_file_path() {
-    with_e2e_context("rpc_server", "should_save_and_get_event_file_path", |ctx| {
-        Box::pin(async move {
-            ctx.set_default_copilot_user();
-            let client = ctx.start_client().await;
-            let session = client
-                .create_session(ctx.approve_all_session_config())
-                .await
-                .expect("create session");
+    super::support::with_shared_e2e_context(
+        &E2E,
+        "rpc_server",
+        "should_save_and_get_event_file_path",
+        |ctx| {
+            Box::pin(async move {
+                ctx.set_default_copilot_user();
+                let client = ctx.start_client().await;
+                let session = client
+                    .create_session(ctx.approve_all_session_config())
+                    .await
+                    .expect("create session");
 
-            client
-                .rpc()
-                .sessions()
-                .save(SessionsSaveRequest {
-                    session_id: session.id().clone(),
-                })
-                .await
-                .expect("save session");
+                client
+                    .rpc()
+                    .sessions()
+                    .save(SessionsSaveRequest {
+                        session_id: session.id().clone(),
+                    })
+                    .await
+                    .expect("save session");
 
-            session.disconnect().await.expect("disconnect session");
-            client.stop().await.expect("stop client");
-        })
-    })
+                session.disconnect().await.expect("disconnect session");
+                client.stop().await.expect("stop client");
+            })
+        },
+    )
     .await;
 }
 
 #[tokio::test]
 async fn should_report_implemented_error_when_connecting_unknown_remote_session() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_server",
         "should_report_implemented_error_when_connecting_unknown_remote_session",
         |ctx| {
@@ -861,3 +917,5 @@ fn paths_equal(left: &str, right: &str) -> bool {
 
     normalize(left) == normalize(right)
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_server", 11);

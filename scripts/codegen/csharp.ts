@@ -40,6 +40,7 @@ import {
     isSchemaExperimental,
     isSchemaInternal,
     isOpaqueJson,
+    isOpaqueInProcess,
     isObjectSchema,
     isVoidSchema,
     getNullableInner,
@@ -65,6 +66,55 @@ const execFileAsync = promisify(execFile);
 const TYPE_RENAMES: Record<string, string> = {
     PermissionRequestedDataPermissionRequest: "PermissionRequest",
 };
+
+const POLYMORPHIC_BASE_PROPERTIES: Record<string, readonly string[]> = {
+    PermissionRequest: ["managedApprovalRequired"],
+};
+
+/**
+ * Public type names declared by hand-written C# sources under `dotnet/src`
+ * (excluding `dotnet/src/Generated`). Generated session-event types share the
+ * `GitHub.Copilot` namespace with those sources, so a schema definition whose
+ * name collides with a hand-written declaration must reuse it — emitting a
+ * second class of the same name fails the build (CS0260/CS0102).
+ *
+ * Populated by {@link collectHandWrittenCSharpTypeNames} before generation.
+ */
+let handWrittenCSharpTypeNames = new Set<string>();
+
+/**
+ * Scan hand-written `.cs` files under `dotnet/src` for top-level public type
+ * declarations. The `Generated` directory is skipped so this scanner never
+ * reads (or depends on the output of) its own emit.
+ */
+async function collectHandWrittenCSharpTypeNames(): Promise<Set<string>> {
+    const names = new Set<string>();
+    const srcDir = path.join(REPO_ROOT, "dotnet", "src");
+    const declaration = /^\s*(?:public|internal)\s+(?:(?:abstract|sealed|static|partial|readonly|ref)\s+)*(?:class|record|struct|interface|enum)\s+([A-Za-z_]\w*)/gm;
+
+    const walk = async (dir: string): Promise<void> => {
+        let entries;
+        try {
+            entries = await fs.readdir(dir, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const entry of entries) {
+            const entryPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name === "Generated" || entry.name === "bin" || entry.name === "obj") continue;
+                await walk(entryPath);
+                continue;
+            }
+            if (!entry.name.endsWith(".cs")) continue;
+            const content = await fs.readFile(entryPath, "utf-8");
+            for (const match of content.matchAll(declaration)) names.add(match[1]);
+        }
+    };
+
+    await walk(srcDir);
+    return names;
+}
 
 /** Apply rename to a generated class name, checking both exact match and prefix replacement for derived types. */
 function applyTypeRename(className: string): string {
@@ -304,6 +354,41 @@ function failUnmappable(context: string, schema: JSONSchema7): never {
             `mark it \`.asOpaqueJson()\` so the schema emits \`x-opaque-json: true\` and the codegen maps it to JsonElement. ` +
             `Offending schema (truncated): ${summary}`,
     );
+}
+
+function omitUnrepresentableInternalProperties(value: unknown): void {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+        value.forEach(omitUnrepresentableInternalProperties);
+        return;
+    }
+
+    const node = value as Record<string, unknown>;
+    const properties = node.properties;
+    if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+        for (const [name, property] of Object.entries(properties)) {
+            if (!property || typeof property !== "object" || Array.isArray(property)) continue;
+            const schema = property as JSONSchema7;
+            const hasType =
+                schema.type !== undefined ||
+                schema.$ref !== undefined ||
+                schema.anyOf !== undefined ||
+                schema.oneOf !== undefined ||
+                schema.allOf !== undefined ||
+                schema.enum !== undefined ||
+                schema.const !== undefined ||
+                isOpaqueJson(schema);
+            if (isSchemaInternal(schema) && (!hasType || isOpaqueInProcess(schema))) {
+                delete (properties as Record<string, unknown>)[name];
+            } else {
+                omitUnrepresentableInternalProperties(property);
+            }
+        }
+    }
+
+    for (const [name, child] of Object.entries(node)) {
+        if (name !== "properties") omitUnrepresentableInternalProperties(child);
+    }
 }
 
 function requiresArgumentNullCheck(typeName: string, isRequired: boolean): boolean {
@@ -827,6 +912,7 @@ function generatePolymorphicClasses(
     const lines: string[] = [];
     const discriminatorInfo = findDiscriminator(variants)!;
     const renamedBase = applyTypeRename(baseClassName);
+    const baseProperties = new Set(POLYMORPHIC_BASE_PROPERTIES[renamedBase] ?? []);
 
     lines.push(...xmlDocCommentWithFallback(description, `Polymorphic base type discriminated by <c>${escapeXml(discriminatorProperty)}</c>.`, ""));
     if (experimental) pushExperimentalAttribute(lines);
@@ -845,13 +931,52 @@ function generatePolymorphicClasses(
     lines.push(`    /// <summary>The type discriminator.</summary>`);
     lines.push(`    [JsonPropertyName("${discriminatorProperty}")]`);
     lines.push(`    public virtual string ${toPascalCase(discriminatorProperty)} { get; set; } = string.Empty;`);
+    for (const propName of baseProperties) {
+        const propSchema = variants
+            .map((variant) => variant.properties?.[propName])
+            .find((property): property is JSONSchema7 => typeof property === "object");
+        if (!propSchema) continue;
+
+        const csharpName = toCSharpPropertyName(propName, propSchema);
+        const csharpType = resolver(
+            propSchema,
+            renamedBase,
+            csharpName,
+            false,
+            knownTypes,
+            nestedClasses,
+            enumOutput
+        );
+        lines.push("");
+        lines.push(...xmlDocPropertyComment(propSchema.description, propName, "    "));
+        lines.push(...emitDataAnnotations(propSchema, "    ", csharpType));
+        if (isSchemaDeprecated(propSchema)) pushObsoleteAttributes(lines, "    ");
+        if (isSchemaExperimental(propSchema)) pushExperimentalAttribute(lines, "    ");
+        lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
+        const propVisibility = pushCSharpInternalAttribute(lines, propSchema);
+        lines.push(`    [JsonPropertyName("${propName}")]`);
+        lines.push(`    ${propVisibility} virtual ${csharpType} ${csharpName} { get; set; }`);
+    }
     lines.push(`}`);
     lines.push("");
 
     for (const { value, schema } of discriminatorInfo.mapping.values()) {
         const constValue = String(value);
         const derivedClassName = applyTypeRename(`${baseClassName}${toPascalCase(constValue)}`);
-        const derivedCode = generateDerivedClass(derivedClassName, renamedBase, discriminatorProperty, constValue, schema, knownTypes, nestedClasses, enumOutput, resolver, experimental, options);
+        const derivedCode = generateDerivedClass(
+            derivedClassName,
+            renamedBase,
+            discriminatorProperty,
+            constValue,
+            schema,
+            knownTypes,
+            nestedClasses,
+            enumOutput,
+            resolver,
+            experimental,
+            options,
+            baseProperties
+        );
         nestedClasses.set(derivedClassName, derivedCode);
     }
 
@@ -872,7 +997,8 @@ function generateDerivedClass(
     enumOutput: string[],
     propertyResolver: PropertyTypeResolver,
     experimental = false,
-    options: DiscriminatedUnionGenerationOptions = {}
+    options: DiscriminatedUnionGenerationOptions = {},
+    baseProperties: ReadonlySet<string> = new Set()
 ): string {
     const lines: string[] = [];
     const required = new Set(schema.required || []);
@@ -897,6 +1023,18 @@ function generateDerivedClass(
             const csharpName = toCSharpPropertyName(propName, prop);
             const csharpType = propertyResolver(prop, className, csharpName, isReq, knownTypes, nestedClasses, enumOutput);
 
+            if (baseProperties.has(propName)) {
+                lines.push(`    /// <inheritdoc />`);
+                if (!isReq) lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`);
+                lines.push(`    [JsonPropertyName("${propName}")]`);
+                lines.push(`    public override ${csharpType} ${csharpName}`);
+                lines.push(`    {`);
+                lines.push(`        get => base.${csharpName};`);
+                lines.push(`        set => base.${csharpName} = value;`);
+                lines.push(`    }`, "");
+                continue;
+            }
+
             lines.push(...xmlDocPropertyComment(prop.description, propName, "    "));
             lines.push(...emitDataAnnotations(prop, "    ", csharpType));
             if (isSchemaDeprecated(prop)) pushObsoleteAttributes(lines, "    ");
@@ -919,6 +1057,7 @@ interface JsonUnionVariant {
     typeName: string;
     propertyName: string;
     schema?: JSONSchema7;
+    matchExpression?: string;
 }
 
 function getUnionMembers(schema: JSONSchema7): JSONSchema7[] | undefined {
@@ -969,9 +1108,10 @@ function getJsonUnionMatchExpression(variant: JsonUnionVariant, variants: JsonUn
     ].join(" && ");
 }
 
-function generateJsonUnionClass(className: string, variants: JsonUnionVariant[], description: string | undefined, jsonContextType: string, isInternal: boolean): string {
+function generateJsonUnionClass(className: string, variants: JsonUnionVariant[], description: string | undefined, jsonContextType: string, isInternal: boolean, experimental = false): string {
     const lines: string[] = [];
     lines.push(...xmlDocCommentWithFallback(description, `JSON union data type for <c>${escapeXml(className)}</c>.`, ""));
+    if (experimental) pushExperimentalAttribute(lines);
     lines.push(`[JsonConverter(typeof(Converter))]`);
     lines.push(`${isInternal ? "internal" : "public"} sealed partial class ${className}`);
     lines.push(`{`);
@@ -1009,7 +1149,7 @@ function generateJsonUnionClass(className: string, variants: JsonUnionVariant[],
 
     const fallbackVariants: JsonUnionVariant[] = [];
     for (const variant of variants) {
-        const matchExpression = getJsonUnionMatchExpression(variant, variants);
+        const matchExpression = variant.matchExpression ?? getJsonUnionMatchExpression(variant, variants);
         if (!matchExpression) {
             fallbackVariants.push(variant);
             continue;
@@ -1249,9 +1389,6 @@ function resolveSessionPropertyType(
 
 function generateDataClass(variant: EventVariant, knownTypes: Map<string, string>, nestedClasses: Map<string, string>, enumOutput: string[]): string {
     const dataVisibility = isSchemaInternal(variant.dataSchema) ? "internal" : "public";
-    if (!variant.dataSchema?.properties) return `${dataVisibility} sealed partial class ${variant.dataClassName} { }`;
-
-    const required = new Set(variant.dataSchema.required || []);
     const lines: string[] = [];
     if (variant.dataDescription) {
         lines.push(...xmlDocComment(variant.dataDescription, ""));
@@ -1264,6 +1401,12 @@ function generateDataClass(variant: EventVariant, knownTypes: Map<string, string
     if (isSchemaDeprecated(variant.dataSchema)) {
         pushObsoleteAttributes(lines);
     }
+    if (!variant.dataSchema?.properties) {
+        lines.push(`${dataVisibility} sealed partial class ${variant.dataClassName} { }`);
+        return lines.join("\n");
+    }
+
+    const required = new Set(variant.dataSchema.required || []);
     lines.push(`${dataVisibility} sealed partial class ${variant.dataClassName}`, `{`);
 
     for (const [propName, propSchema] of Object.entries(variant.dataSchema.properties).sort(([a], [b]) => a.localeCompare(b))) {
@@ -1399,8 +1542,13 @@ namespace GitHub.Copilot;
         lines.push(generateDataClass(variant, knownTypes, nestedClasses, enumOutput), "");
     }
 
-    // Nested classes
-    for (const [, code] of nestedClasses) lines.push(code, "");
+    // Nested classes. A name already declared by a hand-written source is skipped:
+    // that declaration is the one the namespace keeps, and the generated property
+    // simply binds to it.
+    for (const [name, code] of nestedClasses) {
+        if (handWrittenCSharpTypeNames.has(name)) continue;
+        lines.push(code, "");
+    }
 
     // Enums
     for (const code of enumOutput) lines.push(code);
@@ -1420,6 +1568,7 @@ export async function generateSessionEvents(schemaPath?: string): Promise<void> 
     const resolvedPath = schemaPath ?? (await getSessionEventsSchemaPath());
     const schema = cloneSchemaForCodegen((await loadSchemaJson(resolvedPath)) as JSONSchema7);
     const processed = propagateInternalVisibility(postProcessSchema(schema));
+    handWrittenCSharpTypeNames = await collectHandWrittenCSharpTypeNames();
     const code = generateSessionEventsCode(processed);
     const outPath = await writeGeneratedFile("dotnet/src/Generated/SessionEvents.cs", code);
     console.log(`  ✓ ${outPath}`);
@@ -1516,6 +1665,39 @@ function stableStringify(value: unknown): string {
     return JSON.stringify(value);
 }
 
+// Match literal values before deserialization: an optional discriminator must not swallow another variant.
+function getRpcUnionMatchExpression(schema: JSONSchema7, seenRefs: ReadonlySet<string> = new Set()): string | undefined {
+    if (schema.$ref) {
+        if (seenRefs.has(schema.$ref)) return undefined;
+        seenRefs = new Set([...seenRefs, schema.$ref]);
+    }
+    const resolved = resolveSchema(schema, rpcDefinitions) ?? schema;
+    const members = getUnionMembers(resolved);
+    if (members) {
+        const expressions = members.map((member) => getRpcUnionMatchExpression(member, seenRefs));
+        return expressions.every((expression) => expression !== undefined)
+            ? `(${expressions.join(" || ")})`
+            : undefined;
+    }
+
+    const expressions: string[] = [];
+    for (const [name, property] of Object.entries(resolved.properties ?? {})) {
+        if (typeof property !== "object") continue;
+        const propSchema = resolveSchema(property, rpcDefinitions) ?? property;
+        const values = propSchema.const !== undefined ? [propSchema.const] : propSchema.enum;
+        if (!values?.length || !values.every((value) => typeof value === "string")) continue;
+        const propertyName = escapeCSharpStringLiteral(name);
+        const present = `element.TryGetProperty("${propertyName}", out _)`;
+        const value = `element.GetProperty("${propertyName}")`;
+        const matches = values.map((entry) => `${value}.GetString() == "${escapeCSharpStringLiteral(entry as string)}"`);
+        const match = `${present} && ${value}.ValueKind == JsonValueKind.String && (${matches.join(" || ")})`;
+        expressions.push(resolved.required?.includes(name) ? `(${match})` : `(!${present} || (${match}))`);
+    }
+    return expressions.length > 0
+        ? `element.ValueKind == JsonValueKind.Object && ${expressions.join(" && ")}`
+        : undefined;
+}
+
 function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassName: string, propName: string, classes: string[]): string {
     if (isOpaqueJson(schema)) {
         return isRequired ? "JsonElement" : "JsonElement?";
@@ -1539,17 +1721,13 @@ function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassNam
             return isRequired ? typeName : `${typeName}?`;
         }
 
-        return resolveRpcType(refSchema, isRequired, parentClassName, propName, classes);
+        return resolveRpcType({ ...refSchema, title: refSchema.title ?? typeName }, isRequired, parentClassName, propName, classes);
     }
-    // Handle anyOf: [T, null/{not:{}}] → T? (nullable typed property)
-    const nullableInner = getNullableInner(schema);
-    if (nullableInner) {
-        return resolveRpcType(nullableInner, false, parentClassName, propName, classes);
-    }
-    // Discriminated union: anyOf with multiple variants sharing a const discriminator
-    if (schema.anyOf && Array.isArray(schema.anyOf)) {
-        const nonNull = schema.anyOf.filter((s) => typeof s === "object" && s !== null && (s as JSONSchema7).type !== "null");
-        if (nonNull.length > 1) {
+    const unionVariants = schema.anyOf ?? schema.oneOf;
+    // Keep the same polymorphic API even when a discriminated union has only one variant.
+    if (unionVariants) {
+        const nonNull = getNonNullUnionMembers(schema);
+        if (nonNull.length > 0) {
             const variants = (nonNull as JSONSchema7[]).map((v) => {
                 if (v.$ref) {
                     const resolved = resolveRef(v.$ref, rpcDefinitions);
@@ -1559,7 +1737,7 @@ function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassNam
             });
             const discriminatorInfo = findDiscriminator(variants);
             if (discriminatorInfo) {
-                const hasNull = schema.anyOf.length > nonNull.length;
+                const hasNull = unionVariants.length > nonNull.length;
                 const baseClassName = (schema.title as string) ?? `${parentClassName}${propName}`;
                 if (!emittedRpcClassSchemas.has(baseClassName)) {
                     emittedRpcClassSchemas.set(baseClassName, "polymorphic");
@@ -1578,6 +1756,32 @@ function resolveRpcType(schema: JSONSchema7, isRequired: boolean, parentClassNam
                 }
                 return isRequired && !hasNull ? baseClassName : `${baseClassName}?`;
             }
+        }
+    }
+    // Preserve nullable references without introducing another wrapper around their declared type.
+    const nullableInner = getNullableInner(schema);
+    if (nullableInner) {
+        return resolveRpcType(nullableInner, false, parentClassName, propName, classes);
+    }
+    if (unionVariants && getNonNullUnionMembers(schema).length > 0) {
+        const members = getNonNullUnionMembers(schema);
+        const matchExpressions = members.map((member) => getRpcUnionMatchExpression(member));
+        if (matchExpressions.every((expression) => expression !== undefined)) {
+            const className = schema.title ?? `${parentClassName}${propName}`;
+            if (!emittedRpcClassSchemas.has(className)) {
+                emittedRpcClassSchemas.set(className, "union");
+                const usedNames = new Set<string>();
+                const variants = members.map((member, index) => {
+                    const typeName = resolveRpcType(member, true, className, `Variant${index + 1}`, classes);
+                    return {
+                        typeName,
+                        propertyName: toUnionVariantPropertyName(typeName, usedNames),
+                        matchExpression: matchExpressions[index],
+                    };
+                });
+                classes.push(generateJsonUnionClass(className, variants, schema.description, "RpcJsonContext", isSchemaInternal(schema), isSchemaExperimental(schema) || experimentalRpcTypes.has(className)));
+            }
+            return isRequired && members.length === unionVariants.length ? className : `${className}?`;
         }
     }
     // Handle enums (string unions like "interactive" | "plan" | "autopilot")
@@ -1624,7 +1828,9 @@ function emitRpcClass(
     className: string,
     schema: JSONSchema7,
     visibility: "public" | "internal",
-    extraClasses: string[]
+    extraClasses: string[],
+    inlineTypeParentName: string = className,
+    preserveRequiredNulls = false
 ): string {
     const effectiveSchema =
         resolveObjectSchema(schema, rpcDefinitions) ??
@@ -1671,7 +1877,7 @@ function emitRpcClass(
         const prop = propSchema as JSONSchema7;
         const isReq = requiredSet.has(propName);
         const csharpName = toCSharpPropertyName(propName, prop);
-        const csharpType = resolveRpcType(prop, isReq, className, csharpName, extraClasses);
+        const csharpType = resolveRpcType(prop, isReq, inlineTypeParentName, csharpName, extraClasses);
 
         lines.push(...xmlDocPropertyComment(prop.description, propName, "    "));
         lines.push(...emitDataAnnotations(prop, "    ", csharpType));
@@ -1680,6 +1886,9 @@ function emitRpcClass(
         if (isMillisecondsDurationProperty(propName, prop)) lines.push(`    [JsonConverter(typeof(MillisecondsTimeSpanConverter))]`);
         const propVisibility = pushCSharpInternalAttribute(lines, prop);
         lines.push(`    [JsonPropertyName("${propName}")]`);
+        if (preserveRequiredNulls && isReq && csharpType.endsWith("?")) {
+            lines.push(`    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]`);
+        }
 
         let defaultVal = "";
         let propAccessors = "{ get; set; }";
@@ -1861,7 +2070,7 @@ function emitServerInstanceMethod(
         if (method.stability === "experimental" && !nonExperimentalRpcTypes.has(requestClassName)) {
             experimentalRpcTypes.add(requestClassName);
         }
-        const reqClass = emitRpcClass(requestClassName, effectiveParams!, "internal", classes);
+        const reqClass = emitRpcClass(requestClassName, effectiveParams!, "internal", classes, requestClassName, true);
         if (reqClass) classes.push(reqClass);
     }
 
@@ -2035,12 +2244,21 @@ function emitSessionMethod(key: string, method: RpcMethod, lines: string[], clas
                 properties: Object.fromEntries(paramEntries),
                 required: effectiveParams.required?.filter((name) => name !== "sessionId"),
             };
-            const publicReqClass = emitRpcClass(requestClassName, publicParams, methodVisibility, classes);
+            const publicReqClass = emitRpcClass(requestClassName, publicParams, methodVisibility, classes, requestClassName, true);
             if (publicReqClass) classes.push(publicReqClass);
-            const wireReqClass = emitRpcClass(wireRequestClassName, effectiveParams, "internal", classes);
+            // The wire wrapper carries the same properties as the public request
+            // type plus `sessionId`, so both must reuse the same inline types.
+            const wireReqClass = emitRpcClass(
+                wireRequestClassName,
+                effectiveParams,
+                "internal",
+                classes,
+                requestClassName,
+                true
+            );
             if (wireReqClass) classes.push(wireReqClass);
         } else {
-            const reqClass = emitRpcClass(requestClassName, effectiveParams, "internal", classes);
+            const reqClass = emitRpcClass(requestClassName, effectiveParams, "internal", classes, requestClassName, true);
             if (reqClass) classes.push(reqClass);
         }
     }
@@ -2446,11 +2664,13 @@ function emitClientGlobalApiRegistration(clientSchema: Record<string, unknown>, 
     return lines;
 }
 
-function generateRpcCode(
+export function generateRpcCode(
     schema: ApiSchema,
     externalJsonSerializableRefs: Map<string, Set<string>> = new Map(),
     externalValueTypes: Set<string> = new Set()
 ): string {
+    schema = cloneSchemaForCodegen(schema);
+    omitUnrepresentableInternalProperties(schema);
     emittedRpcClassSchemas.clear();
     emittedRpcEnumResultTypes.clear();
     experimentalRpcTypes.clear();
@@ -2563,15 +2783,25 @@ namespace GitHub.Copilot.Rpc;
 export async function generateRpc(schemaPath?: string, sessionEventsSchema?: JSONSchema7): Promise<void> {
     console.log("C#: generating RPC types...");
     const resolvedPath = schemaPath ?? (await getApiSchemaPath());
+    handWrittenCSharpTypeNames = await collectHandWrittenCSharpTypeNames();
     let schema = fixNullableRequiredRefsInApiSchema(cloneSchemaForCodegen((await loadSchemaJson(resolvedPath)) as ApiSchema));
+    let sessionEventsCode: string | undefined;
     if (sessionEventsSchema) {
+        sessionEventsCode = generateSessionEventsCode(sessionEventsSchema);
         const sharedDefinitions = findSharedSchemaDefinitions(
             schema as unknown as Record<string, unknown>,
             sessionEventsSchema as unknown as Record<string, unknown>
         );
         const reachableDefinitions = collectReachableDefinitionNames(sessionEventsSchema as unknown as Record<string, unknown>);
         for (const name of [...sharedDefinitions]) {
-            if (!reachableDefinitions.has(name)) {
+            const typeName = typeToClassName(name);
+            const declarationPattern = new RegExp(
+                `\\bpublic\\s+(?:(?:sealed|abstract|partial|readonly)\\s+)*(?:class|struct|enum)\\s+${typeName}\\b`
+            );
+            if (
+                !reachableDefinitions.has(name) ||
+                (!declarationPattern.test(sessionEventsCode) && !handWrittenCSharpTypeNames.has(typeName))
+            ) {
                 sharedDefinitions.delete(name);
             }
         }
@@ -2579,8 +2809,7 @@ export async function generateRpc(schemaPath?: string, sessionEventsSchema?: JSO
     }
     const externalJsonSerializableRefs = new Map<string, Set<string>>();
     const externalValueTypes = new Set<string>();
-    if (sessionEventsSchema) {
-        const sessionEventsCode = generateSessionEventsCode(sessionEventsSchema);
+    if (sessionEventsSchema && sessionEventsCode) {
         const externalRefs = collectExternalSchemaRefNames(schema);
         const sessionEventRefs = externalRefs.get("session-events.schema.json");
         if (sessionEventRefs && sessionEventRefs.size > 0) {
@@ -2592,7 +2821,9 @@ export async function generateRpc(schemaPath?: string, sessionEventsSchema?: JSO
             for (const name of reachableDefinitions) {
                 const typeName = typeToClassName(name);
                 const declarationPattern = new RegExp(`\\bpublic\\s+(?:(?:sealed|abstract|partial|readonly)\\s+)*(?:class|struct)\\s+${typeName}\\b`);
-                if (declarationPattern.test(sessionEventsCode)) {
+                // A hand-written declaration also lives in `GitHub.Copilot`, so the
+                // reference resolves even though the generated file skipped it.
+                if (declarationPattern.test(sessionEventsCode) || handWrittenCSharpTypeNames.has(typeName)) {
                     emittedDefinitions.add(name);
                 }
                 const valueTypeDeclarationPattern = new RegExp(`\\bpublic\\s+(?:(?:readonly)\\s+)?struct\\s+${typeName}\\b`);

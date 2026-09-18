@@ -33,6 +33,7 @@ from copilot.rpc import (
     ModeSetRequest,
     NameSetAutoRequest,
     NameSetRequest,
+    PermissionsResetSessionApprovalsRequest,
     PermissionsSetApproveAllRequest,
     PlanUpdateRequest,
     SessionSetCredentialsParams,
@@ -103,7 +104,7 @@ class TestRpcSessionState:
     async def test_should_call_session_rpc_model_get_current(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
-            model="claude-sonnet-4.5",
+            model="claude-sonnet-5",
         )
         try:
             result = await session.rpc.model.get_current()
@@ -127,7 +128,7 @@ class TestRpcSessionState:
             )
             session = await isolated_ctx.client.create_session(
                 on_permission_request=PermissionHandler.approve_all,
-                model="claude-sonnet-4.5",
+                model="claude-sonnet-5",
             )
             try:
                 before = await session.rpc.model.get_current()
@@ -259,18 +260,17 @@ class TestRpcSessionState:
     ):
         first_dir = _create_unique_directory(ctx, "metadata-first")
         second_dir = _create_unique_directory(ctx, "metadata-second")
-        context_dir = _create_unique_directory(ctx, "metadata-context")
         branch = f"rpc-context-{uuid.uuid4().hex}"
 
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
-            model="claude-sonnet-4.5",
+            model="claude-sonnet-5",
             working_directory=first_dir,
         )
         try:
             snapshot = await session.rpc.metadata.snapshot()
             assert snapshot.session_id == session.session_id
-            assert snapshot.selected_model == "claude-sonnet-4.5"
+            assert snapshot.selected_model == "claude-sonnet-5"
             assert snapshot.is_remote is False
             assert snapshot.already_in_use is False
             assert _path_equals(first_dir, snapshot.working_directory)
@@ -304,10 +304,13 @@ class TestRpcSessionState:
 
             unsubscribe = session.on(on_event)
             try:
+                # For local sessions the CLI treats the session cwd as authoritative, so a
+                # record_context_change that reports a divergent cwd is ignored and emits
+                # no event. Report the current working directory (second_dir) to observe it.
                 result = await session.rpc.metadata.record_context_change(
                     MetadataRecordContextChangeRequest(
                         context=SessionWorkingDirectoryContext(
-                            cwd=context_dir,
+                            cwd=second_dir,
                             git_root=first_dir,
                             branch=branch,
                             repository="github/copilot-sdk-e2e",
@@ -321,7 +324,7 @@ class TestRpcSessionState:
                 assert result is not None
 
                 event = await asyncio.wait_for(context_future, timeout=15.0)
-                assert _path_equals(context_dir, event.data.cwd)
+                assert _path_equals(second_dir, event.data.cwd)
                 assert _path_equals(first_dir, event.data.git_root)
                 assert event.data.branch == branch
                 assert event.data.repository == "github/copilot-sdk-e2e"
@@ -392,7 +395,7 @@ class TestRpcSessionState:
     async def test_should_set_reasoning_effort_and_auto_name(self, ctx: E2ETestContext):
         session = await ctx.client.create_session(
             on_permission_request=PermissionHandler.approve_all,
-            model="claude-sonnet-4.5",
+            model="claude-sonnet-5",
         )
         try:
             reasoning = await session.rpc.model.set_reasoning_effort(
@@ -400,7 +403,7 @@ class TestRpcSessionState:
             )
             assert reasoning.reasoning_effort == "high"
             current = await session.rpc.model.get_current()
-            assert current.model_id == "claude-sonnet-4.5"
+            assert current.model_id == "claude-sonnet-5"
             assert current.reasoning_effort == "high"
 
             auto_name = f"Auto Session {uuid.uuid4().hex}"
@@ -592,7 +595,9 @@ class TestRpcSessionState:
                 )
                 assert approve_all.success
 
-                reset = await session.rpc.permissions.reset_session_approvals()
+                reset = await session.rpc.permissions.reset_session_approvals(
+                    PermissionsResetSessionApprovalsRequest()
+                )
                 assert reset.success
             finally:
                 await session.rpc.permissions.set_approve_all(
@@ -632,12 +637,12 @@ class TestRpcSessionState:
                 MetadataContextInfoRequest(
                     prompt_token_limit=128_000,
                     output_token_limit=4_096,
-                    selected_model="claude-sonnet-4.5",
+                    selected_model="claude-sonnet-5",
                 )
             )
             if context_info.context_info is not None:
                 context = context_info.context_info
-                assert context.model_name == "claude-sonnet-4.5"
+                assert context.model_name == "claude-sonnet-5"
                 assert context.prompt_token_limit == 128_000
                 assert context.limit >= context.prompt_token_limit
                 assert context.total_tokens > 0
@@ -652,7 +657,7 @@ class TestRpcSessionState:
                 )
 
             recomputed = await session.rpc.metadata.recompute_context_tokens(
-                MetadataRecomputeContextTokensRequest(model_id="claude-sonnet-4.5")
+                MetadataRecomputeContextTokensRequest(model_id="claude-sonnet-5")
             )
             assert recomputed.system_token_count > 0
             assert recomputed.messages_token_count > 0

@@ -3,15 +3,16 @@ use std::collections::HashMap;
 use github_copilot_sdk::Client;
 use github_copilot_sdk::rpc::{
     CompletionsRequestRequest, MetadataContextHeaviestMessagesRequest, ModelSwitchToRequest,
-    NamedProviderConfig, PermissionsSetAllowAllRequest, ProviderAddRequest, ProviderConfigType,
+    NamedProviderConfig, PermissionsSetModeRequest, ProviderAddRequest, ProviderConfigType,
     ProviderConfigWireApi, ProviderModelConfig, SessionVisibilityStatus, SubagentSettingsEntry,
     SubagentSettingsEntryContextTier, UpdateSubagentSettingsRequest,
     UpdateSubagentSettingsRequestSubagents, VisibilitySetRequest,
 };
+use github_copilot_sdk::session_events::PermissionMode;
 
 use super::support::{assistant_message_content, with_e2e_context};
 
-const MODEL_ID: &str = "claude-sonnet-4.5";
+const MODEL_ID: &str = "claude-sonnet-5";
 
 #[tokio::test]
 async fn should_list_models_for_session() {
@@ -54,7 +55,8 @@ async fn should_list_models_for_session() {
 
 #[tokio::test]
 async fn should_report_session_activity_when_idle() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_report_session_activity_when_idle",
         |ctx| {
@@ -86,7 +88,8 @@ async fn should_report_session_activity_when_idle() {
 
 #[tokio::test]
 async fn should_get_and_set_allowall_permissions() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_get_and_set_allowall_permissions",
         |ctx| {
@@ -101,55 +104,55 @@ async fn should_get_and_set_allowall_permissions() {
                 let initial = session
                     .rpc()
                     .permissions()
-                    .get_allow_all()
+                    .get_mode()
                     .await
-                    .expect("get initial allow-all");
-                assert!(!initial.enabled);
+                    .expect("get initial permission mode");
+                assert_eq!(initial.mode, PermissionMode::Manual);
 
                 let enable = session
                     .rpc()
                     .permissions()
-                    .set_allow_all(PermissionsSetAllowAllRequest {
-                        enabled: Some(true),
-                        mode: None,
-                        model: None,
+                    .set_mode(PermissionsSetModeRequest {
+                        assisted_approval_model: None,
+                        mode: PermissionMode::AllowAll,
                         source: None,
                     })
                     .await
-                    .expect("enable allow-all");
+                    .expect("set allow-all mode");
                 assert!(enable.success);
-                assert!(enable.enabled);
-                assert!(
+                assert_eq!(enable.mode, PermissionMode::AllowAll);
+                assert_eq!(
                     session
                         .rpc()
                         .permissions()
-                        .get_allow_all()
+                        .get_mode()
                         .await
-                        .expect("get enabled allow-all")
-                        .enabled
+                        .expect("get allow-all mode")
+                        .mode,
+                    PermissionMode::AllowAll
                 );
 
                 let disable = session
                     .rpc()
                     .permissions()
-                    .set_allow_all(PermissionsSetAllowAllRequest {
-                        enabled: Some(false),
-                        mode: None,
-                        model: None,
+                    .set_mode(PermissionsSetModeRequest {
+                        assisted_approval_model: None,
+                        mode: PermissionMode::Manual,
                         source: None,
                     })
                     .await
-                    .expect("disable allow-all");
+                    .expect("set manual mode");
                 assert!(disable.success);
-                assert!(!disable.enabled);
-                assert!(
-                    !session
+                assert_eq!(disable.mode, PermissionMode::Manual);
+                assert_eq!(
+                    session
                         .rpc()
                         .permissions()
-                        .get_allow_all()
+                        .get_mode()
                         .await
-                        .expect("get disabled allow-all")
-                        .enabled
+                        .expect("get manual mode")
+                        .mode,
+                    PermissionMode::Manual
                 );
 
                 session.disconnect().await.expect("disconnect session");
@@ -162,7 +165,8 @@ async fn should_get_and_set_allowall_permissions() {
 
 #[tokio::test]
 async fn should_read_empty_sql_todos_for_fresh_session() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_read_empty_sql_todos_for_fresh_session",
         |ctx| {
@@ -193,7 +197,8 @@ async fn should_read_empty_sql_todos_for_fresh_session() {
 
 #[tokio::test]
 async fn should_get_telemetry_engagement_id() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_get_telemetry_engagement_id",
         |ctx| {
@@ -222,7 +227,8 @@ async fn should_get_telemetry_engagement_id() {
 
 #[tokio::test]
 async fn should_get_current_tool_metadata_after_initialization() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_get_current_tool_metadata_after_initialization",
         |ctx| {
@@ -262,7 +268,8 @@ async fn should_get_current_tool_metadata_after_initialization() {
 
 #[tokio::test]
 async fn should_add_byok_provider_and_model_at_runtime() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_add_byok_provider_and_model_at_runtime",
         |ctx| {
@@ -298,10 +305,11 @@ async fn should_add_byok_provider_and_model_at_runtime() {
                             id: "small".to_string(),
                             max_context_window_tokens: None,
                             max_output_tokens: None,
-                            max_prompt_tokens: Some(4096.0),
+                            max_prompt_tokens: Some(4096),
                             model_id: None,
                             name: Some("Rust Added Model".to_string()),
                             provider: "rust-e2e-provider".to_string(),
+                            system_message: None,
                             wire_model: None,
                         }]),
                     })
@@ -314,12 +322,8 @@ async fn should_add_byok_provider_and_model_at_runtime() {
                     .rpc()
                     .model()
                     .switch_to(ModelSwitchToRequest {
-                        context_tier: None,
-                        model_capabilities: None,
                         model_id: selection_id.to_string(),
-                        reasoning_effort: None,
-                        reasoning_summary: None,
-                        verbosity: None,
+                        ..Default::default()
                     })
                     .await
                     .expect("switch to added model");
@@ -341,7 +345,8 @@ async fn should_add_byok_provider_and_model_at_runtime() {
 
 #[tokio::test]
 async fn should_return_empty_completions_when_host_does_not_provide_them() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_return_empty_completions_when_host_does_not_provide_them",
         |ctx| {
@@ -374,7 +379,8 @@ async fn should_return_empty_completions_when_host_does_not_provide_them() {
 
 #[tokio::test]
 async fn should_report_visibility_as_unsynced_for_local_session() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_report_visibility_as_unsynced_for_local_session",
         |ctx| {
@@ -417,7 +423,8 @@ async fn should_report_visibility_as_unsynced_for_local_session() {
 
 #[tokio::test]
 async fn should_get_context_attribution_and_heaviest_messages_after_turn() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_get_context_attribution_and_heaviest_messages_after_turn",
         |ctx| {
@@ -463,7 +470,8 @@ async fn should_get_context_attribution_and_heaviest_messages_after_turn() {
 
 #[tokio::test]
 async fn should_update_and_clear_live_subagent_settings() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_update_and_clear_live_subagent_settings",
         |ctx| {
@@ -483,11 +491,13 @@ async fn should_update_and_clear_live_subagent_settings() {
                             agents: Some(HashMap::from([(
                                 "general-purpose".to_string(),
                                 SubagentSettingsEntry {
+                                    auto_invoke: None,
                                     context_tier: Some(
                                         SubagentSettingsEntryContextTier::LongContext,
                                     ),
                                     effort_level: Some("low".to_string()),
                                     model: Some("gpt-5-mini".to_string()),
+                                    model_policy: None,
                                 },
                             )])),
                             disabled_subagents: Some(vec!["legacy-agent".to_string()]),
@@ -514,7 +524,8 @@ async fn should_update_and_clear_live_subagent_settings() {
 
 #[tokio::test]
 async fn should_reload_session_plugins() {
-    with_e2e_context(
+    super::support::with_shared_e2e_context(
+        &E2E,
         "rpc_session_state_extras",
         "should_reload_session_plugins",
         |ctx| {
@@ -553,3 +564,5 @@ async fn should_reload_session_plugins() {
     )
     .await;
 }
+static E2E: super::support::SharedE2eGroup =
+    super::support::SharedE2eGroup::standard("rpc_session_state_extras", 11);

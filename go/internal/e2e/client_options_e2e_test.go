@@ -19,6 +19,9 @@ import (
 // in package-level unit tests.
 func TestClientOptionsE2E(t *testing.T) {
 	t.Run("should listen on configured TCP port", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		port := getAvailableTCPPort(t)
 
@@ -45,6 +48,9 @@ func TestClientOptionsE2E(t *testing.T) {
 	})
 
 	t.Run("should use client cwd for default workingdirectory", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		ctx.ConfigureForTest(t)
 
@@ -85,6 +91,9 @@ func TestClientOptionsE2E(t *testing.T) {
 	})
 
 	t.Run("should propagate process options to spawned cli", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		// Mirrors: Should_Propagate_Process_Options_To_Spawned_Cli
 		// Spawns a fake stdio CLI (a Node.js script) so we can assert that the
 		// SDK passes the right argv / env / cwd / RPC params through to the
@@ -165,12 +174,12 @@ func TestClientOptionsE2E(t *testing.T) {
 			EnableConfigDiscovery:              copilot.Bool(true),
 			EnableOnDemandInstructionDiscovery: copilot.Bool(true),
 			IncludeSubAgentStreamingEvents:     copilot.Bool(false),
+			CustomAgentsLocalOnly:              copilot.Bool(false),
 			OnPermissionRequest:                copilot.PermissionHandler.ApproveAll,
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
 		}
-		t.Cleanup(func() { session.Disconnect() })
 
 		updated := readCapture(t, capturePath)
 		var createReq *capturedRequest
@@ -197,9 +206,116 @@ func TestClientOptionsE2E(t *testing.T) {
 		if v, ok := params["includeSubAgentStreamingEvents"].(bool); !ok || v != false {
 			t.Errorf("Expected session.create.params.includeSubAgentStreamingEvents=false, got %v", params["includeSubAgentStreamingEvents"])
 		}
+		if v, ok := params["customAgentsLocalOnly"].(bool); !ok || v != false {
+			t.Errorf("Expected session.create.params.customAgentsLocalOnly=false, got %v", params["customAgentsLocalOnly"])
+		}
+
+		sessionID := session.SessionID
+		if err := session.Disconnect(); err != nil {
+			t.Fatalf("Disconnect failed: %v", err)
+		}
+		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			CustomAgentsLocalOnly: copilot.Bool(false),
+			OnPermissionRequest:   copilot.PermissionHandler.ApproveAll,
+		})
+		if err != nil {
+			t.Fatalf("ResumeSession failed: %v", err)
+		}
+		t.Cleanup(func() { _ = resumed.Disconnect() })
+
+		resumedCapture := readCapture(t, capturePath)
+		for _, req := range resumedCapture.Requests {
+			if req.Method != "session.resume" {
+				continue
+			}
+			resumeParams, ok := req.Params.(map[string]any)
+			if !ok {
+				t.Fatalf("Expected session.resume params to be an object, got %T", req.Params)
+			}
+			if v, ok := resumeParams["customAgentsLocalOnly"].(bool); !ok || v != false {
+				t.Errorf("Expected session.resume.params.customAgentsLocalOnly=false, got %v",
+					resumeParams["customAgentsLocalOnly"])
+			}
+			return
+		}
+		t.Fatalf("session.resume request was not captured. Captured requests: %+v", resumedCapture.Requests)
+	})
+
+	t.Run("should send empty-mode custom agent locality defaults in initial requests", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
+		ctx := testharness.NewTestContext(t)
+		cliPath := filepath.Join(ctx.WorkDir, "fake-cli-empty-"+randomHex(t)+".js")
+		capturePath := filepath.Join(ctx.WorkDir, "fake-cli-empty-capture-"+randomHex(t)+".json")
+		if err := os.WriteFile(cliPath, []byte(fakeStdioCliScript), 0644); err != nil {
+			t.Fatalf("Failed to write fake CLI script: %v", err)
+		}
+
+		client := ctx.NewClient(func(opts *copilot.ClientOptions) {
+			opts.Connection = copilot.StdioConnection{
+				Path: cliPath,
+				Args: []string{"--capture-file", capturePath},
+			}
+			opts.Mode = copilot.ModeEmpty
+			opts.BaseDirectory = ctx.WorkDir
+			opts.UseLoggedInUser = copilot.Bool(false)
+		})
+		t.Cleanup(func() { client.ForceStop() })
+
+		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
+			AvailableTools:      []string{"builtin:ask_user"},
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
+		if err != nil {
+			t.Fatalf("CreateSession failed: %v", err)
+		}
+		sessionID := session.SessionID
+		if err := session.Disconnect(); err != nil {
+			t.Fatalf("Disconnect failed: %v", err)
+		}
+
+		resumed, err := client.ResumeSession(t.Context(), sessionID, &copilot.ResumeSessionConfig{
+			AvailableTools:      []string{"builtin:ask_user"},
+			OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		})
+		if err != nil {
+			t.Fatalf("ResumeSession failed: %v", err)
+		}
+		t.Cleanup(func() { _ = resumed.Disconnect() })
+
+		capture := readCapture(t, capturePath)
+		foundCreate := false
+		foundResume := false
+		for _, req := range capture.Requests {
+			params, ok := req.Params.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch req.Method {
+			case "session.create":
+				foundCreate = true
+				if v, ok := params["customAgentsLocalOnly"].(bool); !ok || !v {
+					t.Errorf("Expected session.create.params.customAgentsLocalOnly=true, got %v",
+						params["customAgentsLocalOnly"])
+				}
+			case "session.resume":
+				foundResume = true
+				if v, ok := params["customAgentsLocalOnly"].(bool); !ok || !v {
+					t.Errorf("Expected session.resume.params.customAgentsLocalOnly=true, got %v",
+						params["customAgentsLocalOnly"])
+				}
+			}
+		}
+		if !foundCreate || !foundResume {
+			t.Fatalf("Expected create and resume requests, got %+v", capture.Requests)
+		}
 	})
 
 	t.Run("should forward advanced session creation options to the CLI", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		cliPath := filepath.Join(ctx.WorkDir, "fake-cli-"+randomHex(t)+".js")
 		capturePath := filepath.Join(ctx.WorkDir, "fake-cli-capture-"+randomHex(t)+".json")
@@ -228,7 +344,7 @@ func TestClientOptionsE2E(t *testing.T) {
 		session, err := client.CreateSession(t.Context(), &copilot.SessionConfig{
 			SessionID:                          sessionID,
 			ClientName:                         "go-sdk-e2e-client",
-			Model:                              "claude-sonnet-4.5",
+			Model:                              "claude-sonnet-5",
 			ReasoningEffort:                    "low",
 			ReasoningSummary:                   copilot.ReasoningSummaryNone,
 			ContextTier:                        copilot.ContextTierLongContext,
@@ -272,7 +388,7 @@ func TestClientOptionsE2E(t *testing.T) {
 			RequestExtensions:     copilot.Bool(true),
 			ExtensionSDKPath:      &extensionSDKPath,
 			ExtensionInfo:         &copilot.ExtensionInfo{Source: "github-app", Name: "go-e2e-extension"},
-			ExpAssignments:        map[string]any{"feature": "enabled"},
+			ExpAssignments:        &copilot.CopilotExpAssignmentResponse{Flights: map[string]string{"feature": "enabled"}, AssignmentContext: "ctx"},
 		})
 		if err != nil {
 			t.Fatalf("CreateSession failed: %v", err)
@@ -287,7 +403,7 @@ func TestClientOptionsE2E(t *testing.T) {
 		expectedValues := map[string]any{
 			"sessionId":                          sessionID,
 			"clientName":                         "go-sdk-e2e-client",
-			"model":                              "claude-sonnet-4.5",
+			"model":                              "claude-sonnet-5",
 			"reasoningEffort":                    "low",
 			"reasoningSummary":                   "none",
 			"contextTier":                        "long_context",
@@ -342,12 +458,15 @@ func TestClientOptionsE2E(t *testing.T) {
 		if canvas["id"] != "canvas" || canvas["displayName"] != "Canvas" || canvas["description"] != "Canvas description" {
 			t.Fatalf("Expected canvas declaration to be forwarded, got %#v", canvas)
 		}
-		if params["expAssignments"].(map[string]any)["feature"] != "enabled" {
+		if params["expAssignments"].(map[string]any)["Flights"].(map[string]any)["feature"] != "enabled" {
 			t.Fatalf("Expected expAssignments to be forwarded, got %#v", params["expAssignments"])
 		}
 	})
 
 	t.Run("should forward singular provider configuration on session creation", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		cliPath := filepath.Join(ctx.WorkDir, "fake-cli-"+randomHex(t)+".js")
 		capturePath := filepath.Join(ctx.WorkDir, "fake-cli-capture-"+randomHex(t)+".json")
@@ -409,6 +528,9 @@ func TestClientOptionsE2E(t *testing.T) {
 	})
 
 	t.Run("should forward advanced session resume options to the CLI", func(t *testing.T) {
+		if testharness.RunInIsolatedProcess(t) {
+			return
+		}
 		ctx := testharness.NewTestContext(t)
 		cliPath := filepath.Join(ctx.WorkDir, "fake-cli-"+randomHex(t)+".js")
 		capturePath := filepath.Join(ctx.WorkDir, "fake-cli-capture-"+randomHex(t)+".json")
@@ -460,7 +582,7 @@ func TestClientOptionsE2E(t *testing.T) {
 			RequestExtensions:     copilot.Bool(true),
 			ExtensionSDKPath:      &extensionSDKPath,
 			ExtensionInfo:         &copilot.ExtensionInfo{Source: "github-app", Name: "go-e2e-extension"},
-			ExpAssignments:        map[string]any{"resumeFeature": "enabled"},
+			ExpAssignments:        &copilot.CopilotExpAssignmentResponse{Flights: map[string]string{"resumeFeature": "enabled"}, AssignmentContext: "ctx"},
 		})
 		if err != nil {
 			t.Fatalf("ResumeSession failed: %v", err)
@@ -503,7 +625,7 @@ func TestClientOptionsE2E(t *testing.T) {
 		if extensionInfo["source"] != "github-app" || extensionInfo["name"] != "go-e2e-extension" {
 			t.Fatalf("Expected extensionInfo on resume, got %#v", extensionInfo)
 		}
-		if params["expAssignments"].(map[string]any)["resumeFeature"] != "enabled" {
+		if params["expAssignments"].(map[string]any)["Flights"].(map[string]any)["resumeFeature"] != "enabled" {
 			t.Fatalf("Expected resume expAssignments to be forwarded, got %#v", params["expAssignments"])
 		}
 	})
@@ -763,9 +885,13 @@ function handleMessage(message) {
     writeResponse(message.id, { message: "pong", protocolVersion: 3, timestamp: Date.now() });
     return;
   }
-  if (message.method === "session.create") {
+  if (message.method === "session.create" || message.method === "session.resume") {
     const sessionId = (message.params && message.params.sessionId) || "fake-session";
     writeResponse(message.id, { sessionId, workspacePath: null, capabilities: null });
+    return;
+  }
+  if (message.method === "session.detach") {
+    writeResponse(message.id, { success: true });
     return;
   }
   if (message.method === "session.resume") {

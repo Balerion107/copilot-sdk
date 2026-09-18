@@ -29,6 +29,8 @@ internal sealed partial class JsonRpc : IDisposable
 {
     private const int ErrorCodeMethodNotFound = -32601;
     private const int ErrorCodeInternalError = -32603;
+    private const int InitialReadBufferSize = 256;
+    private const int MaximumRetainedReadBufferSize = 1024 * 1024;
 
     private readonly Stream _sendStream;
     private readonly Stream _receiveStream;
@@ -259,7 +261,7 @@ internal sealed partial class JsonRpc : IDisposable
 
     private async Task ReadLoopAsync(CancellationToken cancellationToken)
     {
-        var buffer = new byte[256];
+        var buffer = new byte[InitialReadBufferSize];
         int carried = 0; // bytes in buffer carried over from previous read
         try
         {
@@ -296,6 +298,17 @@ internal sealed partial class JsonRpc : IDisposable
                 if (carried > 0)
                 {
                     Buffer.BlockCopy(buffer, contentLength, buffer, 0, carried);
+                }
+
+                if (buffer.Length > MaximumRetainedReadBufferSize)
+                {
+                    var retainedBuffer = new byte[Math.Max(InitialReadBufferSize, carried)];
+                    if (carried > 0)
+                    {
+                        Buffer.BlockCopy(buffer, 0, retainedBuffer, 0, carried);
+                    }
+
+                    buffer = retainedBuffer;
                 }
 
                 if (message is not { } parsed)
@@ -535,7 +548,11 @@ internal sealed partial class JsonRpc : IDisposable
 
                 if (requestId.HasValue)
                 {
-                    await SendResultResponseAsync(requestId.Value, result, cancellationToken).ConfigureAwait(false);
+                    await SendResultResponseAsync(
+                        requestId.Value,
+                        result,
+                        registration.ResultType,
+                        cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -759,18 +776,20 @@ internal sealed partial class JsonRpc : IDisposable
         return doc.RootElement.Clone();
     }
 
-    private async Task SendResultResponseAsync(JsonElement id, object? result, CancellationToken cancellationToken)
+    private async Task SendResultResponseAsync(
+        JsonElement id,
+        object? result,
+        Type? declaredResultType,
+        CancellationToken cancellationToken)
     {
         try
         {
-            // Convert the result to a JsonElement using the runtime type, looked up via
-            // the merged resolver. Source-gen serialization of an `object`-typed property
-            // would otherwise have no way to find metadata for the actual response type
-            // (e.g. SystemMessageTransformRpcResponse, SessionFsReadFileResult, ...).
+            // Prefer the handler's declared result type so polymorphic base types emit
+            // their discriminator. Fall back to the runtime type for untyped handlers.
             JsonElement? resultElement = null;
             if (result is not null)
             {
-                var typeInfo = _serializerOptions.GetTypeInfo(result.GetType());
+                var typeInfo = _serializerOptions.GetTypeInfo(declaredResultType ?? result.GetType());
                 resultElement = JsonSerializer.SerializeToElement(result, typeInfo);
             }
 
@@ -850,6 +869,11 @@ internal sealed partial class JsonRpc : IDisposable
             {
                 ValueTaskAsTaskMethod = GetMethodFromGenericMethodDefinition(returnType, s_valueTaskAsTask);
                 TaskResultGetter = GetMethodFromGenericMethodDefinition(ValueTaskAsTaskMethod.ReturnType, s_taskGetResult);
+                ResultType = returnType.GetGenericArguments()[0];
+            }
+            else if (returnType != typeof(void) && returnType != typeof(Task) && returnType != typeof(ValueTask))
+            {
+                ResultType = returnType;
             }
         }
 
@@ -858,6 +882,7 @@ internal sealed partial class JsonRpc : IDisposable
         public ParameterInfo[] Parameters { get; }
         public MethodInfo? ValueTaskAsTaskMethod { get; }
         public MethodInfo? TaskResultGetter { get; }
+        public Type? ResultType { get; }
     }
 
     private static MethodInfo GetMethodFromGenericMethodDefinition(Type specializedType, MethodInfo genericMethodDefinition)

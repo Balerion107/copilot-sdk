@@ -29,41 +29,23 @@ jobs:
           distribution: "microsoft"
           cache: "maven"
 
-      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v6
-        with:
-          node-version: 22
-
-      - name: Read pinned @github/copilot version from pom.xml
-        id: cli-version
-        run: |
-          PROP="readonly-copilot-sdk-ref-impl-version-from-lastmerge-file-updated-by-reference-impl-sync"
-          VERSION=$(sed -n "s|.*<${PROP}>\(.*\)</${PROP}>.*|\1|p" pom.xml | head -n 1 | tr -d '[:space:]')
-          if [[ -z "$VERSION" || "$VERSION" == "PRIMER_TO_REPLACE" ]]; then
-            echo "::error::Could not read pinned @github/copilot version from pom.xml property <${PROP}>" >&2
-            exit 1
-          fi
-          echo "Pinned @github/copilot version: $VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Install Copilot CLI globally (pinned to pom.xml version)
-        run: npm install -g "@github/copilot@${{ steps.cli-version.outputs.version }}"
-
-      - name: Verify CLI works
-        run: copilot --version
+      - uses: ./.github/actions/setup-copilot
+        id: setup-copilot
 
       - name: Build SDK and install to local repo
-        run: mvn -DskipTests -Pskip-test-harness clean install
+        run: mvn -DskipTests -DskipITs -Pskip-test-harness clean install
 
       - name: Create and run smoke test via Copilot CLI
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          COPILOT_CLI_JS: ${{ steps.setup-copilot.outputs.javascript-cli-path }}
         run: |
           cat > /tmp/smoke-test-prompt.txt << 'PROMPT_EOF'
           You are running inside the copilot-sdk monorepo, in the java/ subdirectory.
           The SDK has already been built and installed into the local Maven repository.
           JDK 17 and Maven are already installed and on PATH.
 
-          Execute the prompt at `src/test/prompts/PROMPT-smoke-test.md` with the following critical overrides:
+          Execute the prompt at `sdk/src/test/prompts/PROMPT-smoke-test.md` with the following critical overrides:
 
           **Critical override — disable SNAPSHOT updates (but allow downloads):** The goal of this workflow is to validate the SDK SNAPSHOT that was just built and installed locally, not any newer SNAPSHOT that might exist in a remote repository. To ensure Maven does not download a newer timestamped SNAPSHOT of the SDK while still allowing it to download any missing plugins or dependencies, you must run the smoke-test Maven build without `-U` and with `--no-snapshot-updates`, so that it uses the locally installed SDK artifact. Use `mvn --no-snapshot-updates clean package` instead of `mvn -U clean package` or `mvn -o clean package`.
 
@@ -74,7 +56,7 @@ jobs:
           If any step fails, exit with a non-zero exit code. Do not silently fix errors.
           PROMPT_EOF
 
-          copilot --yolo --prompt "$(cat /tmp/smoke-test-prompt.txt)"
+          node "$COPILOT_CLI_JS" --yolo --prompt "$(cat /tmp/smoke-test-prompt.txt)"
 
       - name: Run smoke test jar
         env:
@@ -102,41 +84,23 @@ jobs:
           distribution: "microsoft"
           cache: "maven"
 
-      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v6
-        with:
-          node-version: 22
-
-      - name: Read pinned @github/copilot version from pom.xml
-        id: cli-version
-        run: |
-          PROP="readonly-copilot-sdk-ref-impl-version-from-lastmerge-file-updated-by-reference-impl-sync"
-          VERSION=$(sed -n "s|.*<${PROP}>\(.*\)</${PROP}>.*|\1|p" pom.xml | head -n 1 | tr -d '[:space:]')
-          if [[ -z "$VERSION" || "$VERSION" == "PRIMER_TO_REPLACE" ]]; then
-            echo "::error::Could not read pinned @github/copilot version from pom.xml property <${PROP}>" >&2
-            exit 1
-          fi
-          echo "Pinned @github/copilot version: $VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Install Copilot CLI globally (pinned to pom.xml version)
-        run: npm install -g "@github/copilot@${{ steps.cli-version.outputs.version }}"
-
-      - name: Verify CLI works
-        run: copilot --version
+      - uses: ./.github/actions/setup-copilot
+        id: setup-copilot
 
       - name: Build SDK and install to local repo
-        run: mvn -DskipTests -Pskip-test-harness clean install
+        run: mvn -DskipTests -DskipITs -Pskip-test-harness clean install
 
       - name: Create and run smoke test via Copilot CLI
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          COPILOT_CLI_JS: ${{ steps.setup-copilot.outputs.javascript-cli-path }}
         run: |
           cat > /tmp/smoke-test-prompt.txt << 'PROMPT_EOF'
           You are running inside the copilot-sdk monorepo, in the java/ subdirectory.
           The SDK has already been built and installed into the local Maven repository.
           JDK 25 and Maven are already installed and on PATH.
 
-          Execute the prompt at `src/test/prompts/PROMPT-smoke-test.md` with the following critical overrides:
+          Execute the prompt at `sdk/src/test/prompts/PROMPT-smoke-test.md` with the following critical overrides:
 
           **Critical override — disable SNAPSHOT updates (but allow downloads):** The goal of this workflow is to validate the SDK SNAPSHOT that was just built and installed locally, not any newer SNAPSHOT that might exist in a remote repository. To ensure Maven does not download a newer timestamped SNAPSHOT of the SDK while still allowing it to download any missing plugins or dependencies, you must run the smoke-test Maven build without `-U` and with `--no-snapshot-updates`, so that it uses the locally installed SDK artifact. Use `mvn --no-snapshot-updates clean package` instead of `mvn -U clean package` or `mvn -o clean package`.
 
@@ -150,7 +114,7 @@ jobs:
           If any step fails, exit with a non-zero exit code. Do not silently fix errors.
           PROMPT_EOF
 
-          copilot --yolo --prompt "$(cat /tmp/smoke-test-prompt.txt)"
+          node "$COPILOT_CLI_JS" --yolo --prompt "$(cat /tmp/smoke-test-prompt.txt)"
 
       - name: Run smoke test jar
         env:
