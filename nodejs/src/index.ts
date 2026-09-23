@@ -13,6 +13,7 @@ export { DisableBypassPermissionsModes, RuntimeConnection } from "./types.js";
 export { BuiltInTools, ToolSet } from "./toolSet.js";
 export { CopilotSession, type AssistantMessageEvent } from "./session.js";
 export { defineFactory, FactoryResumeError, isFactoryRunTerminal } from "./factory.js";
+export { defineWorkflow, WorkflowResumeError, isWorkflowRunTerminal } from "./workflow.js";
 export {
     Canvas,
     CanvasError,
@@ -91,6 +92,10 @@ export type {
     ExitPlanModeHandler,
     ExitPlanModeRequest,
     ExitPlanModeResult,
+    ExtensionLaunchProfile,
+    ExtensionLaunchProvider,
+    ExtensionLaunchProviderResolveRequest,
+    ExtensionLaunchProviderResolveResult,
     ExtensionInfo,
     ForegroundSessionInfo,
     GetAuthStatusResponse,
@@ -115,6 +120,7 @@ export type {
     MCPServerConfig,
     DefaultAgentConfig,
     BearerTokenProvider,
+    ExtensionContextAttachment,
     MessageOptions,
     ResponseSchema,
     MessageSource,
@@ -227,3 +233,30 @@ export type {
     FactoryPhaseStatus,
     FactoryAgentSummary,
 } from "./factory.js";
+export type {
+    WorkflowRunOptions,
+    WorkflowResumeOptions,
+    WorkflowLimitOverrides,
+    WorkflowResumeErrorCode,
+    SessionWorkflowApi,
+    WorkflowAgentOptions,
+    WorkflowContext,
+    WorkflowDefinition,
+    WorkflowHandle,
+    WorkflowJsonSchema,
+    WorkflowLimits,
+    WorkflowMeta,
+    WorkflowPipelineStage,
+    WorkflowStepOptions,
+    WorkflowRunResult,
+    WorkflowRunStatus,
+    WorkflowRunSummary,
+    WorkflowListRunsOptions,
+    WorkflowRunsPage,
+    WorkflowRunDetail,
+    WorkflowProgressPage,
+    WorkflowProgressLine,
+    WorkflowPhaseObservation,
+    WorkflowPhaseStatus,
+    WorkflowAgentSummary,
+} from "./workflow.js";

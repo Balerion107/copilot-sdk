@@ -14,10 +14,14 @@ verified `github/copilot-cli` release assets when the SDK is published, so
 starting the SDK performs no runtime download. Set `COPILOT_CLI_PATH` to use an
 existing installation instead.
 
-The checked-in release pin is `copilotCliVersion` in `package.json`. Run
-`npm run set:cli-version -- <version>` to update it and regenerate the compiled
-metadata in `src/cliVersion.ts`. Packaging verifies release assets against the
-release's `SHA256SUMS.txt`.
+The checked-in `copilotCliVersion` in `package.json` and compiled metadata in
+`src/cliVersion.ts` use a development placeholder. The public SDK snapshot
+replaces both with the CLI version published for that snapshot.
+
+Do not change these pins for runtime-repository development. If they contain
+`0.0.0-dev`, use the same-checkout runtime; release snapshot export owns replacing
+development placeholders with a published CLI version. See
+[checkout preparation](../CONTRIBUTING.md#testing-an-unreleased-runtime-api).
 
 `npm run pack:release` builds the main package and all platform packages. Set
 `COPILOT_CLI_DOWNLOAD_BASE_URL` to use a release mirror while packaging.
@@ -25,6 +29,12 @@ Release workflows instead set `COPILOT_SDK_RUNTIME_PACKAGE_DIR` to a directory
 containing validated runtime npm package roots named for all eight platforms.
 This keeps `COPILOT_CLI_USE_NPM_PACKAGE` false and embeds those runtime files in
 the self-contained SDK platform packages.
+
+In the runtime repository, packaging uses the prepared same-checkout runtime.
+Set `COPILOT_SDK_RUNTIME_PLATFORMS` to the available target (for example,
+`linux-x64`) for both `pack:release` and `verify:release-packages`. SDK CI checks
+that target only; public release workflows leave this unset to package and
+verify all eight platforms.
 
 ## Installation
 
@@ -34,7 +44,11 @@ npm install @github/copilot-sdk
 
 ## Run the Sample
 
-Try the interactive chat sample (from the repo root):
+Try the interactive chat sample from the SDK root (`src/sdk` when nested).
+In the runtime repository, first run `pnpm run build:cli` from the runtime root
+to prepare the same-checkout executable, then return to `src/sdk`.
+Building the Node SDK alone does not build the runtime. For dependency
+prerequisites, see [development setup](#development).
 
 ```bash
 cd nodejs
@@ -118,6 +132,7 @@ new CopilotClient(options?: CopilotClientOptions)
 - `mode?: "empty" | "copilot-cli"` - Defaulting strategy. Use `"empty"` for multi-user server mode; defaults to `"copilot-cli"`.
 - `workingDirectory?: string` - Working directory for the runtime process (default: current process cwd).
 - `baseDirectory?: string` - Base directory for Copilot data (session state, config, etc.). Sets `COPILOT_HOME` on the spawned runtime. When not set, the runtime defaults to `~/.copilot`. Ignored when connecting via `RuntimeConnection.forUri`.
+- `extensionLaunchProvider?: ExtensionLaunchProvider` - Experimental connection-level resolver for extension launch profiles. The client installs the reverse-RPC handler and registers the provider during startup before sessions can be created.
 - `logLevel?: "none" | "error" | "warning" | "info" | "debug" | "all"` - Log level. When omitted, the runtime uses its own default (currently `"info"`).
 - `env?: Record<string, string | undefined>` - Environment variables for the runtime process. When omitted, inherits `process.env`.
 - `gitHubToken?: string` - GitHub token for authentication. When provided, takes priority over other auth methods.
@@ -1273,18 +1288,27 @@ try {
 
 ## Development
 
-From the repository root:
+Follow [SDK development setup](../CONTRIBUTING.md#developing-an-sdk) first,
+including the harness and corrections-script dependencies. From the SDK root
+(`src/sdk` in the runtime repository, or the standalone repository root):
 
 ```bash
-cd test/harness
-npm ci
+npm run build:nodejs
+npm run test:nodejs
+npm run check:nodejs
 ```
 
+In the runtime layout, these build/test commands refresh the projection and
+prepare the checked-out runtime for tests. For focused unit tests after
+installing Node dependencies:
+
 ```bash
-cd nodejs
-npm ci
-npm test
+npm --prefix nodejs run test:unit
 ```
+
+For native Vitest selectors on E2Es, use the
+[prepared-runtime instructions](../CONTRIBUTING.md#testing-an-unreleased-runtime-api);
+the SDK facade does not forward selectors.
 
 ## License
 

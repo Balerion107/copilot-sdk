@@ -64,11 +64,16 @@ not download a second runtime artifact.
 
 ## Run the Sample
 
-Try the interactive chat sample (from the repo root):
+Try the interactive chat sample from the SDK root (`src/sdk` when nested).
+In the runtime repository, first run `pnpm run build:cli` from the runtime root,
+then return to `src/sdk`. A Python source install does not pin a downloadable
+runtime, so select the prepared executable explicitly. Run the sample in the
+project's uv environment; see [development setup](#development) for prerequisites.
 
 ```bash
-cd python/samples
-python chat.py
+npm --prefix nodejs ci --ignore-scripts
+export COPILOT_CLI_PATH="$(npm --prefix nodejs run --silent prepare:runtime -- --print-path)"
+uv run --project python python python/samples/chat.py
 ```
 
 ## Quick Start
@@ -238,6 +243,7 @@ All options are kw-only parameters:
 - `env` (dict | None): Environment variables for the CLI process.
 - `github_token` (str | None): GitHub token for authentication. When provided, takes priority over other auth methods.
 - `base_directory` (str | None): Base directory for Copilot data (session state, config, etc.). Sets `COPILOT_HOME` on the spawned CLI process. When `None`, the CLI defaults to `~/.copilot`. Useful in restricted environments where only specific directories are writable. Ignored when using a `UriRuntimeConnection`.
+- `extension_launch_provider` (ExtensionLaunchProviderHandler | None): Experimental connection-level resolver for extension launch profiles. The client installs the reverse-RPC handler and registers the provider during startup before sessions can be created.
 - `use_logged_in_user` (bool | None): Whether to use logged-in user for authentication (default: True, but False when `github_token` is provided).
 - `telemetry` (dict | None): OpenTelemetry configuration for the CLI process. Providing this enables telemetry — no separate flag needed. See [Telemetry](#telemetry) below.
 - `session_fs` (dict | None): Connection-level session filesystem provider configuration.
@@ -1260,22 +1266,22 @@ When `on_elicitation_request` is provided, the SDK automatically:
 
 ## Development
 
-Install [uv](https://docs.astral.sh/uv/) and a supported [Node.js version](../nodejs/README.md#prerequisites), then from the repository root:
+Follow [SDK development setup](../CONTRIBUTING.md#developing-an-sdk) for Python,
+uv, and the Node/replay-harness dependencies. From the SDK root (`src/sdk` in
+the runtime repository, or the standalone repository root):
 
 ```bash
-cd nodejs
-npm ci
+npm run build:python
+npm run test:python
+npm run check:python
 ```
 
-```bash
-cd test/harness
-npm ci
-```
+The build task runs `uv sync --all-extras --dev`. For focused tests after
+[preparing the runtime](../CONTRIBUTING.md#testing-an-unreleased-runtime-api),
+run the native runner from `python/`:
 
 ```bash
-cd python
-uv sync
-uv run pytest
+uv run pytest "<test-file>"
 ```
 
 Signal-based E2E failures from `pytest-timeout` include an **Async timeout diagnostics** report
