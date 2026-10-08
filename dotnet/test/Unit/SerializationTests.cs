@@ -106,6 +106,7 @@ public class SerializationTests
             Headers = new Dictionary<string, string> { ["Authorization"] = "Bearer provider-token" },
             ModelId = "gpt-4o",
             WireModel = "my-finetune-v3",
+            ModelProvider = "lm_studio",
             MaxPromptTokens = 100_000,
             MaxOutputTokens = 4096,
             Transport = "websockets"
@@ -118,6 +119,7 @@ public class SerializationTests
         Assert.Equal("Bearer provider-token", root.GetProperty("headers").GetProperty("Authorization").GetString());
         Assert.Equal("gpt-4o", root.GetProperty("modelId").GetString());
         Assert.Equal("my-finetune-v3", root.GetProperty("wireModel").GetString());
+        Assert.Equal("lm_studio", root.GetProperty("modelProvider").GetString());
         Assert.Equal(100_000, root.GetProperty("maxPromptTokens").GetInt32());
         Assert.Equal(4096, root.GetProperty("maxOutputTokens").GetInt32());
         Assert.Equal("websockets", root.GetProperty("transport").GetString());
@@ -128,9 +130,33 @@ public class SerializationTests
         Assert.Equal("Bearer provider-token", deserialized.Headers!["Authorization"]);
         Assert.Equal("gpt-4o", deserialized.ModelId);
         Assert.Equal("my-finetune-v3", deserialized.WireModel);
+        Assert.Equal("lm_studio", deserialized.ModelProvider);
         Assert.Equal(100_000, deserialized.MaxPromptTokens);
         Assert.Equal(4096, deserialized.MaxOutputTokens);
         Assert.Equal("websockets", deserialized.Transport);
+    }
+
+    [Fact]
+    public void NamedProviderConfig_CanSerializeModelProvider_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var original = new NamedProviderConfig
+        {
+            Name = "local",
+            Type = "openai",
+            BaseUrl = "http://localhost:11434/v1",
+            ModelProvider = "ollama"
+        };
+
+        var json = JsonSerializer.Serialize(original, options);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.Equal("local", root.GetProperty("name").GetString());
+        Assert.Equal("ollama", root.GetProperty("modelProvider").GetString());
+
+        var deserialized = JsonSerializer.Deserialize<NamedProviderConfig>(json, options);
+        Assert.NotNull(deserialized);
+        Assert.Equal("ollama", deserialized.ModelProvider);
     }
 
     [Fact]
@@ -987,6 +1013,7 @@ public class SerializationTests
             OauthClientId = "client-id",
             OauthPublicClient = false,
             OauthGrantType = McpHttpServerConfigOauthGrantType.ClientCredentials,
+            OauthScopes = ["configured.read", "configured.write"],
             Tools = ["*"],
             Timeout = 3000
         };
@@ -1000,6 +1027,9 @@ public class SerializationTests
         Assert.Equal("client-id", root.GetProperty("oauthClientId").GetString());
         Assert.False(root.GetProperty("oauthPublicClient").GetBoolean());
         Assert.Equal("client_credentials", root.GetProperty("oauthGrantType").GetString());
+        Assert.Equal(
+            ["configured.read", "configured.write"],
+            root.GetProperty("oauthScopes").EnumerateArray().Select(scope => scope.GetString()));
         Assert.Equal("*", root.GetProperty("tools")[0].GetString());
         Assert.Equal(3000, root.GetProperty("timeout").GetInt32());
 
@@ -1010,6 +1040,7 @@ public class SerializationTests
         Assert.Equal("client-id", httpConfig.OauthClientId);
         Assert.False(httpConfig.OauthPublicClient);
         Assert.Equal(McpHttpServerConfigOauthGrantType.ClientCredentials, httpConfig.OauthGrantType);
+        Assert.Equal(["configured.read", "configured.write"], httpConfig.OauthScopes);
         Assert.Equal("*", Assert.Single(httpConfig.Tools!));
         Assert.Equal(3000, httpConfig.Timeout);
     }
@@ -1252,7 +1283,7 @@ public class SerializationTests
         Assert.True(switchAutoTierDocument.RootElement.TryGetProperty("autoTier", out var requiredAutoTier));
         Assert.Equal(JsonValueKind.Null, requiredAutoTier.ValueKind);
 
-        var switchToType = assembly.GetType("GitHub.Copilot.Rpc.ModelSwitchToRequest");
+        var switchToType = assembly.GetType("GitHub.Copilot.Rpc.ModelSwitchToRequestWithSession");
         Assert.NotNull(switchToType);
         var switchToRequest = CreateInternalRequest(
             switchToType!,

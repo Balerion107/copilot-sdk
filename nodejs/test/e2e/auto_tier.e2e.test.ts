@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { approveAll } from "../../src/index.js";
 import { createSdkTestContext } from "./harness/sdkTestContext.js";
 import { getNextEventOfType } from "./harness/sdkTestHelper.js";
+import { isByokBackend } from "./harness/testBackend";
 
 /**
  * The runtime stages an Auto routing preference instead of applying it immediately: a
@@ -15,6 +16,21 @@ import { getNextEventOfType } from "./harness/sdkTestHelper.js";
  */
 describe("Auto tier switching", async () => {
     const { copilotClient: client, createClient } = await createSdkTestContext();
+
+    it("rejects new tier activation while dynamic discovery is disabled", async () => {
+        const session = await client.createSession({
+            onPermissionRequest: approveAll,
+            model: "auto",
+            capi: { autoTier: "balance" },
+        });
+        await expect(session.setAutoTier("premium-v2")).rejects.toThrow(
+            "requires dynamic Auto tiers"
+        );
+        const current = await session.rpc.model.getCurrent();
+        expect(current.autoTier).toBe("balance");
+        expect(current.pendingAutoTier).toBeUndefined();
+        await session.disconnect();
+    });
 
     it("should stage and reset auto tier preference", async () => {
         const session = await client.createSession({
@@ -129,7 +145,9 @@ describe("Auto tier switching", async () => {
         await overrideClient.stop();
     }, 120_000);
 
-    it("should commit fast auto tier after successful turn", async () => {
+    // Activating Auto tiers requires CAPI routing, not a fixed BYOK provider.
+    it("should commit fast auto tier after successful turn", async ({ skip }) => {
+        skip(isByokBackend);
         const session = await client.createSession({
             onPermissionRequest: approveAll,
             model: "auto",
@@ -164,7 +182,8 @@ describe("Auto tier switching", async () => {
         await session.disconnect();
     }, 120_000);
 
-    it("should preserve effective tier when fast activation fails", async () => {
+    it("should preserve effective tier when fast activation fails", async ({ skip }) => {
+        skip(isByokBackend);
         const session = await client.createSession({
             onPermissionRequest: approveAll,
             model: "auto",

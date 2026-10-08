@@ -10,10 +10,11 @@ package com.github.copilot.generated;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.github.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
- * Session event "permission.contextualAuthorization". Freezes a blinded contextual authorization proposal whose verbatim human span was deterministically bound to the immediately preceding blocked permission request. The event carries no action fields; replay re-derives the exact action from the earlier permission request and mints a one-shot message grant only when the binding and span still verify.
+ * Session event "permission.contextualAuthorization". Historical decode-only contextual authorization claim. Current runtimes preserve the payload but do not establish authority from it.
  * @since 1.0.0
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -35,16 +36,22 @@ public final class PermissionContextualAuthorizationEvent extends SessionEvent {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record PermissionContextualAuthorizationEventData(
         /** Deterministic identity of the contextual message grant. */
+        @CopilotExperimental
         @JsonProperty("recordId") String recordId,
         /** Original blocked permission request selected by deterministic event ordering, never by the extraction model. */
+        @CopilotExperimental
         @JsonProperty("requestId") String requestId,
         /** Human turn containing the contextual decision. */
+        @CopilotExperimental
         @JsonProperty("turnIndex") Long turnIndex,
         /** Whether the contextual human span granted or denied authority. */
+        @CopilotExperimental
         @JsonProperty("polarity") PermissionMessageAuthorizationPolarity polarity,
         /** Start byte offset of the contextual decision span within the turn. */
+        @CopilotExperimental
         @JsonProperty("spanStart") Long spanStart,
         /** End byte offset of the contextual decision span within the turn. */
+        @CopilotExperimental
         @JsonProperty("spanEnd") Long spanEnd
     ) {
     }

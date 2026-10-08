@@ -10,6 +10,7 @@ package com.github.copilot.generated;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.github.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
@@ -46,6 +47,9 @@ public final class AssistantFusionPhaseFailedEvent extends SessionEvent {
         @JsonProperty("conversationScope") FusionConversationScope conversationScope,
         /** Concrete model that attempted the phase. */
         @JsonProperty("model") String model,
+        /** Explicit reasoning effort selected for this phase, if supplied. */
+        @CopilotExperimental
+        @JsonProperty("reasoningEffort") String reasoningEffort,
         /** Durable outcome status of the phase. */
         @JsonProperty("status") FusionPhaseStatus status,
         /** Stable machine-readable reason for the phase failure. */

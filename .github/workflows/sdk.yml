@@ -4,6 +4,9 @@ name: "SDK build and test"
 
 env:
   COPILOT_BAZEL_ANG_ENABLED: ${{ vars.COPILOT_BAZEL_ANG_ENABLED }}
+  COPILOT_BAZEL_ANG_SCOPE: ${{ vars.COPILOT_BAZEL_ANG_SCOPE }}
+  COPILOT_BAZEL_ANG_PR_SAMPLE_PERCENTAGE: ${{ vars.COPILOT_BAZEL_ANG_PR_SAMPLE_PERCENTAGE }}
+  COPILOT_BAZEL_ANG_PR_SAMPLED_MODE: ${{ vars.COPILOT_BAZEL_ANG_PR_SAMPLED_MODE }}
   HUSKY: 0
   POWERSHELL_UPDATECHECK: Off
   SETUP_NODE_TIMEOUT_MINUTES: 10
@@ -24,8 +27,150 @@ permissions:
   contents: read
 
 jobs:
+  detect-sdk-changes:
+    name: "Detect SDK-impacting changes"
+    runs-on: ubuntu-slim
+    outputs:
+      has_sdk_changes: ${{ steps.full-coverage.outputs.has_sdk_changes || steps.classify.outputs.has_sdk_changes || steps.recover.outputs.has_sdk_changes }}
+    steps:
+      - name: Require full coverage outside pull requests
+        id: full-coverage
+        if: github.event_name != 'pull_request'
+        run: echo "has_sdk_changes=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        id: checkout
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        timeout-minutes: 4
+        with:
+          # Include the synthetic merge commit's base parent without fetching
+          # repository history.
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Detect repository layout
+        id: repository-layout
+        if: steps.checkout.outcome == 'success'
+        continue-on-error: true
+        run: |
+          trusted_revision="$(git rev-parse "$GITHUB_SHA^1")"
+          echo "base-sha=$trusted_revision" >> "$GITHUB_OUTPUT"
+          if git cat-file -e "${trusted_revision}:src/sdk/package.json" 2>/dev/null &&
+             git cat-file -e "${trusted_revision}:script/sea-build.ts" 2>/dev/null; then
+            echo "layout=runtime" >> "$GITHUB_OUTPUT"
+          elif git cat-file -e "${trusted_revision}:package.json" 2>/dev/null &&
+               git cat-file -e "${trusted_revision}:nodejs/package.json" 2>/dev/null; then
+            echo "layout=standalone" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Unable to identify the SDK repository layout; requiring full coverage."
+            exit 1
+          fi
+
+      - name: Find SDK-impacting paths
+        id: filter
+        if: steps.repository-layout.outcome == 'success'
+        continue-on-error: true
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          base_sha: ${{ steps.repository-layout.outputs.base-sha }}
+          sha: ${{ github.sha }}
+          skip_initial_fetch: true
+          fail_on_initial_diff_error: true
+          quotepath: false
+          files_yaml: |
+            runtime:
+              - .github/actions/**
+              - .github/workflows/sdk*.yml
+              - .github/workflows/sdk*.yaml
+              - .github/workflows/shared-cli-build.yml
+              - .github/workflows/publish.yml
+              - .editorconfig
+              - .gitattributes
+              - .nvmrc
+              - package.json
+              - package-lock.json
+              - pnpm-lock.yaml
+              - sdk-protocol-version.json
+              - assets/**
+              - BUILD.bazel
+              - src/**
+              - generated/**
+              - schema/**
+              - files/**
+              - third_party/**
+              - patches/**
+              - tools/bazel/**
+              - .cargo/**
+              - bazel/**
+              - script/**
+              - .bazelignore
+              - .bazelrc
+              - .bazelversion
+              - Cargo.lock
+              - Cargo.toml
+              - MODULE.bazel
+              - MODULE.bazel.lock
+              - pnpm-workspace.yaml
+              - rust-toolchain.toml
+              - esbuild.ts
+              - tsconfig*.json
+            standalone:
+              - .github/actions/**
+              - .github/workflows/sdk*.yml
+              - .github/workflows/sdk*.yaml
+              - .github/workflows/shared-cli-build.yml
+              - .github/workflows/publish.yml
+              - .editorconfig
+              - .gitattributes
+              - .nvmrc
+              - package.json
+              - package-lock.json
+              - pnpm-lock.yaml
+              - sdk-protocol-version.json
+              - assets/**
+              - BUILD.bazel
+              - nodejs/**
+              - python/**
+              - go/**
+              - dotnet/**
+              - java/**
+              - rust/**
+              - scripts/**
+              - samples/**
+              - test/**
+              - docs/**
+              - README.md
+              - vitest.config.ts
+
+      - name: Select layout-specific result
+        id: classify
+        if: steps.filter.outcome == 'success'
+        env:
+          LAYOUT: ${{ steps.repository-layout.outputs.layout }}
+          RUNTIME_CHANGED: ${{ steps.filter.outputs.runtime_any_modified }}
+          STANDALONE_CHANGED: ${{ steps.filter.outputs.standalone_any_modified }}
+        run: |
+          if [[ "$LAYOUT" == "runtime" ]]; then
+            has_sdk_changes="$RUNTIME_CHANGED"
+          elif [[ "$LAYOUT" == "standalone" ]]; then
+            has_sdk_changes="$STANDALONE_CHANGED"
+          else
+            exit 1
+          fi
+          echo "has_sdk_changes=$has_sdk_changes" >> "$GITHUB_OUTPUT"
+
+      - name: Require full coverage after detection errors
+        id: recover
+        if: github.event_name == 'pull_request' && (steps.checkout.outcome != 'success' || steps.repository-layout.outcome != 'success' || steps.filter.outcome != 'success' || steps.classify.outcome != 'success')
+        run: |
+          echo "::warning::SDK change detection failed; requiring full coverage."
+          echo "has_sdk_changes=true" >> "$GITHUB_OUTPUT"
+
   detect-layout:
     name: "Detect SDK layout"
+    needs: detect-sdk-changes
+    if: ${{ !cancelled() && (needs.detect-sdk-changes.result != 'success' || needs.detect-sdk-changes.outputs.has_sdk_changes == 'true') }}
     runs-on: ubuntu-latest
     outputs:
       runtime-source: ${{ steps.detect.outputs.runtime-source }}
@@ -49,8 +194,9 @@ jobs:
           fi
 
   # TEMPORARY MERGE QUEUE REDUCTION: pull requests and main pushes retain the
-  # full platform matrix. Merge groups rerun Linux x64 as the representative
-  # compatibility lane. Remove the merge_group gates below to restore it.
+  # full SDK matrix. Merge groups rerun only Linux x64 Node.js out-of-process
+  # CAPI coverage. Remove the merge_group gates here and in sdk-platform.yml
+  # and sdk-nodejs.yml to restore the full matrix.
   build-runtime-windows-x64-addons:
     name: "Build runtime addons (win32-x64)"
     needs: detect-layout
@@ -70,6 +216,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Resolve identity before cache restoration and Bazel configuration. The
+      # composite setup below remains cache-miss-only because it also installs dependencies.
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Capture verified addon source identity
+        run: node --experimental-strip-types script/resolve-cli-build-identity.ts --github-env
+
       - name: Restore completed Windows x64 addons
         id: cache
         uses: actions/cache/restore@v6
@@ -77,11 +232,13 @@ jobs:
           path: |
             windows-x64-addons-receipt.txt
             src/native/runtime/runtime.win32-x64-msvc.node
+            src/native/runtime/runtime.win32-x64-msvc.node.metadata
             src/native/runtime/copilot-runtime.win32-x64-msvc.exe
             src/native/runtime/index.d.ts
             src/native/cli/cli-native.win32-x64-msvc.node
             src/native/cli/index.d.ts
-          key: windows-x64-addons-v1-release-windows-e2e-no-icf-${{ github.sha }}
+          # v2 evicts addons created before producer build identity was required.
+          key: windows-x64-addons-v2-release-windows-e2e-no-icf-${{ github.sha }}
 
       - uses: ./.github/actions/setup-node
         if: steps.cache.outputs.cache-hit != 'true'
@@ -91,6 +248,13 @@ jobs:
         with:
           datadog-api-key: ${{ secrets.DATADOG_API_KEY }}
           datadog-site: ${{ vars.DATADOG_SITE || vars.DD_SITE }}
+
+      - name: Set up private source authentication
+        if: steps.cache.outputs.cache-hit != 'true' && github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: ./.github/actions/setup-private-source-auth
+        with:
+          client-id: ${{ vars.RUNTIME_ACCESSOR_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RUNTIME_ACCESSOR_APP_PRIVATE_KEY }}
 
       - name: Cache xwin downloads
         if: steps.cache.outputs.cache-hit != 'true'
@@ -109,6 +273,9 @@ jobs:
       - name: Cross-build Windows x64 addons
         if: steps.cache.outputs.cache-hit != 'true'
         env:
+          # The CI-owned Bazel override is intentionally trusted; without this
+          # identity the producer stamps an empty source while consumers verify the SHA.
+          COPILOT_NAPI_ADDONS_BUILD_IDENTITY: ${{ github.sha }}
           CLI_GIT_COMMIT: ${{ github.sha }}
           CLI_PACKAGE_NAME: "@github/copilot"
           CLI_TARGET: win32-x64
@@ -122,8 +289,13 @@ jobs:
             --bazel-config=windows-e2e-no-icf
 
       - name: Verify Windows x64 addons
-        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          CLI_PACKAGE_NAME: "@github/copilot"
         run: |
+          export CLI_VERSION="0.0.1-${GITHUB_SHA::7}"
+          node --experimental-strip-types script/assert-runtime-build-metadata.ts \
+            src/native/runtime win32-x64-msvc
+          test -s src/native/runtime/runtime.win32-x64-msvc.node.metadata
           for artifact in \
             src/native/runtime/runtime.win32-x64-msvc.node \
             src/native/runtime/copilot-runtime.win32-x64-msvc.exe \
@@ -143,6 +315,7 @@ jobs:
           path: |
             windows-x64-addons-receipt.txt
             src/native/runtime/runtime.win32-x64-msvc.node
+            src/native/runtime/runtime.win32-x64-msvc.node.metadata
             src/native/runtime/copilot-runtime.win32-x64-msvc.exe
             src/native/runtime/index.d.ts
             src/native/cli/cli-native.win32-x64-msvc.node
@@ -154,6 +327,7 @@ jobs:
           name: sdk-bazel-cross-addons-win32-x64-release
           path: |
             src/native/runtime/runtime.win32-x64-msvc.node
+            src/native/runtime/runtime.win32-x64-msvc.node.metadata
             src/native/runtime/copilot-runtime.win32-x64-msvc.exe
             src/native/runtime/index.d.ts
             src/native/cli/cli-native.win32-x64-msvc.node
@@ -201,6 +375,26 @@ jobs:
       timeout-minutes: 60
     secrets: inherit
 
+  build-runtime-linuxmusl-arm64:
+    name: "Build runtime (linuxmusl-arm64)"
+    needs: detect-layout
+    if: github.event_name != 'merge_group'
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      packages: read
+    uses: ./.github/workflows/sdk-runtime-artifact.yml
+    with:
+      runtime-source: ${{ needs.detect-layout.outputs.runtime-source }}
+      sdk-home: ${{ needs.detect-layout.outputs.sdk-home }}
+      os: ubuntu-latest-xl
+      target: linuxmusl-arm64
+      artifact: Linux-ARM64-musl
+      bazel-config: e2e-no-lto
+      timeout-minutes: 60
+    secrets: inherit
+
   build-runtime-darwin-arm64:
     name: "Build runtime (darwin-arm64)"
     needs: detect-layout
@@ -214,7 +408,7 @@ jobs:
     with:
       runtime-source: ${{ needs.detect-layout.outputs.runtime-source }}
       sdk-home: ${{ needs.detect-layout.outputs.sdk-home }}
-      os: macos-latest-xlarge
+      os: macos-26-xlarge
       target: darwin-arm64
       artifact: macOS-ARM64
       bazel-config: e2e-no-lto
@@ -264,6 +458,16 @@ jobs:
       sdk-home: ${{ needs.detect-layout.outputs.sdk-home }}
     secrets: inherit
 
+  sdk-linuxmusl-arm64:
+    name: "Linux musl ARM64 (Java)"
+    needs: [detect-layout, build-runtime-linuxmusl-arm64]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/sdk-java.yml
+    with:
+      platform: linuxmusl-arm64
+      sdk-home: ${{ needs.detect-layout.outputs.sdk-home }}
+    secrets: inherit
+
   sdk-darwin-arm64:
     name: "macOS ARM64"
     needs: [detect-layout, build-runtime-darwin-arm64]
@@ -285,20 +489,43 @@ jobs:
       sdk-home: ${{ needs.detect-layout.outputs.sdk-home }}
     secrets: inherit
 
-  sdk-docs:
-    name: "Documentation"
-    needs: detect-layout
-    if: github.event_name != 'merge_group'
-    uses: ./.github/workflows/sdk-platform.yml
-    with:
-      platform: docs
-      sdk-home: ${{ needs.detect-layout.outputs.sdk-home }}
-    secrets: inherit
+  # Only Linux CAPI gates this rollup; the full SDK aggregate still reports all coverage.
+  sdk-typescript:
+    name: sdk-typescript
+    if: always()
+    needs: [detect-sdk-changes, sdk-linux-x64]
+    runs-on: ubuntu-slim
+    steps:
+      - name: Check Linux CAPI Node.js SDK result
+        env:
+          DETECT_RESULT: ${{ needs.detect-sdk-changes.result }}
+          EVENT_NAME: ${{ github.event_name }}
+          HAS_SDK_CHANGES: ${{ needs.detect-sdk-changes.outputs.has_sdk_changes }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          linux_result=$(jq -r '.["sdk-linux-x64"].result' <<< "$RESULTS")
+          if [[ "$EVENT_NAME" == "pull_request" && "$DETECT_RESULT" == "success" && "$HAS_SDK_CHANGES" == "false" ]]; then
+            if [[ "$linux_result" != "skipped" ]]; then
+              echo "::error::Non-SDK pull request did not skip sdk-linux-x64: $linux_result"
+              exit 1
+            fi
+            echo "No SDK-impacting changes; Linux CAPI Node.js SDK job skipped"
+            exit 0
+          fi
+
+          result=$(jq -r '.["sdk-linux-x64"].outputs["nodejs-capi-result"]' <<< "$RESULTS")
+          if [[ "$result" != "success" ]]; then
+            echo "::error::Linux CAPI Node.js SDK job: expected success, got $result"
+            exit 1
+          fi
 
   check-freshness:
     name: "Check schema and SDK freshness"
     needs: detect-layout
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         timeout-minutes: 10
@@ -311,11 +538,10 @@ jobs:
         with:
           install-deps: "false"
       - if: needs.detect-layout.outputs.runtime-source == 'checkout'
-        uses: ./.github/actions/setup-rust-cache
-        timeout-minutes: 8
-        continue-on-error: true
+        uses: ./.github/actions/setup-bazel
         with:
-          cache-key: sdk-codegen
+          datadog-api-key: ${{ secrets.DATADOG_API_KEY }}
+          datadog-site: ${{ vars.DATADOG_SITE || vars.DD_SITE }}
       - uses: actions/setup-go@v6
         with:
           go-version: "1.24"
@@ -374,26 +600,45 @@ jobs:
     name: "SDK"
     if: always()
     needs:
+      - detect-sdk-changes
       - build-runtime-windows-x64-addons
       - build-runtime-linux-x64
       - build-runtime-linuxmusl-x64
+      - build-runtime-linuxmusl-arm64
       - build-runtime-darwin-arm64
       - build-runtime-win32-x64
       - detect-layout
       - sdk-linux-x64
       - sdk-linuxmusl-x64
+      - sdk-linuxmusl-arm64
       - sdk-darwin-arm64
       - sdk-win32-x64
-      - sdk-docs
       - check-freshness
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     steps:
       - name: Check SDK results
         env:
+          DETECT_RESULT: ${{ needs.detect-sdk-changes.result }}
           EVENT_NAME: ${{ github.event_name }}
+          HAS_SDK_CHANGES: ${{ needs.detect-sdk-changes.outputs.has_sdk_changes }}
           RESULTS: ${{ toJSON(needs) }}
           RUNTIME_SOURCE: ${{ needs.detect-layout.outputs.runtime-source }}
         run: |
+          if [[ "$EVENT_NAME" == "pull_request" && "$DETECT_RESULT" == "success" && "$HAS_SDK_CHANGES" == "false" ]]; then
+            unexpected=$(jq -r '
+              to_entries[]
+              | select(.key != "detect-sdk-changes" and .value.result != "skipped")
+              | "\(.key): \(.value.result)"
+            ' <<< "$RESULTS")
+            if [[ -n "$unexpected" ]]; then
+              echo "::error::Non-SDK pull request did not skip all SDK jobs:"
+              echo "$unexpected"
+              exit 1
+            fi
+            echo "No SDK-impacting changes; SDK build and test matrix skipped"
+            exit 0
+          fi
+
           # TEMPORARY MERGE QUEUE REDUCTION: keep this branch aligned with the
           # gated jobs above until the full merge-group matrix is restored.
           if [[ "$EVENT_NAME" == "merge_group" ]]; then
@@ -406,12 +651,13 @@ jobs:
             skipped_jobs=(
               build-runtime-windows-x64-addons
               build-runtime-linuxmusl-x64
+              build-runtime-linuxmusl-arm64
               build-runtime-darwin-arm64
               build-runtime-win32-x64
               sdk-linuxmusl-x64
+              sdk-linuxmusl-arm64
               sdk-darwin-arm64
               sdk-win32-x64
-              sdk-docs
             )
             for job in "${required_jobs[@]}"; do
               if [[ "$(jq -r --arg job "$job" '.[$job].result' <<< "$RESULTS")" != "success" ]]; then
@@ -427,7 +673,7 @@ jobs:
                 exit 1
               fi
             done
-            echo "Linux x64 SDK compatibility and generated clients passed"
+            echo "Linux x64 Node.js SDK compatibility and generated clients passed"
             exit 0
           fi
 
@@ -442,6 +688,7 @@ jobs:
           failures=$(jq -r --arg runtime_source "$RUNTIME_SOURCE" '
             to_entries[]
             | select(.value.result != "success")
+            | select(.key != "detect-sdk-changes")
             | select(
                 $runtime_source != "published"
                 or .key != "build-runtime-windows-x64-addons"

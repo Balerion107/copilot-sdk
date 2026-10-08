@@ -116,6 +116,107 @@ describe("Session MCP and skills RPC", async () => {
         });
     }
 
+    it("captures opt-in MCP diagnostics without exposing configured credentials", async () => {
+        const defaultSession = await client.createSession({ onPermissionRequest: approveAll });
+        try {
+            const defaultLogs = await defaultSession.rpc.diagnostics.read({ sources: ["mcp"] });
+            expect(defaultLogs.entries).toEqual([]);
+        } finally {
+            await defaultSession.disconnect();
+        }
+
+        const credentialCanary = "mcp-diagnostics-credential-canary";
+        const stderrSentinel = "mcp-diagnostics-stderr-sentinel";
+        const session = await client.createSession({
+            onPermissionRequest: approveAll,
+            diagnostics: { sources: { mcp: { level: "debug" } } },
+            mcpServers: {
+                diagnostics: {
+                    type: "stdio",
+                    command: "node",
+                    args: [
+                        TEST_MCP_SERVER,
+                        "--diagnostic-stderr",
+                        `${stderrSentinel} ${credentialCanary}`,
+                    ],
+                    env: { MCP_API_KEY: credentialCanary },
+                    workingDirectory: TEST_HARNESS_DIR,
+                    tools: ["*"],
+                } as MCPStdioServerConfig,
+            },
+        });
+
+        try {
+            try {
+                await session.rpc.mcp.startServer({ serverName: "diagnostics" });
+            } catch (error) {
+                const kind = error instanceof Error ? error.name : typeof error;
+                throw new Error(`MCP diagnostics server start failed (${kind})`);
+            }
+
+            let startupLogs: Awaited<ReturnType<typeof session.rpc.diagnostics.read>> | undefined;
+            await expect
+                .poll(
+                    async () => {
+                        startupLogs = await session.rpc.diagnostics.read({
+                            sources: ["mcp"],
+                            max: 500,
+                            waitMs: 0,
+                        });
+                        const server = (await session.rpc.mcp.list()).servers.find(
+                            (candidate) => candidate.name === "diagnostics"
+                        );
+                        return {
+                            serverStatus: server?.status ?? "<not listed>",
+                            entryCount: startupLogs.entries.length,
+                            entries: startupLogs.entries.map((entry) => ({
+                                connectionId: entry.details.connectionId,
+                                kind: entry.details.kind,
+                                level: entry.level,
+                                serverName: entry.details.serverName,
+                            })),
+                            hasDiagnosticsServer: startupLogs.entries.some(
+                                (entry) => entry.details.serverName === "diagnostics"
+                            ),
+                            hasProtocol: startupLogs.entries.some(
+                                (entry) => entry.details.kind === "protocol"
+                            ),
+                            hasStderr: startupLogs.entries.some(
+                                (entry) => entry.details.kind === "stderr"
+                            ),
+                        };
+                    },
+                    { interval: 200, timeout: 9_000 }
+                )
+                .toMatchObject({
+                    hasDiagnosticsServer: true,
+                    hasProtocol: true,
+                    hasStderr: true,
+                });
+
+            if (!startupLogs) {
+                throw new Error("MCP diagnostics polling completed without a read result");
+            }
+            expect(JSON.stringify(startupLogs.entries)).not.toContain(credentialCanary);
+            expect(JSON.stringify(startupLogs.entries)).toContain(stderrSentinel);
+            expect(JSON.stringify(startupLogs.entries)).toContain("[REDACTED]");
+
+            const info = await session.rpc.diagnostics.configure({
+                sources: { mcp: { level: "info" } },
+            });
+            expect(info.sources.mcp?.level).toBe("info");
+
+            const off = await session.rpc.diagnostics.configure({
+                sources: { mcp: { level: "off" } },
+            });
+            expect(off.sources.mcp?.level).toBe("off");
+            const clearedLogs = await session.rpc.diagnostics.read({ sources: ["mcp"] });
+            expect(clearedLogs.entries).toEqual([]);
+        } finally {
+            await session.disconnect();
+        }
+    });
+
     it("should list and toggle session skills", async () => {
         const skillName = `session-rpc-skill-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const skillsDir = createSkillDirectory(skillName, "Session skill controlled by RPC.");
@@ -213,6 +314,106 @@ describe("Session MCP and skills RPC", async () => {
         expect(typeof server!.status).toBe("string");
 
         await session.disconnect();
+    });
+
+    it("should paginate and get MCP prompts without interpreting their content", async () => {
+        const serverName = "rpc-prompts-server";
+        const fixtures = JSON.parse(
+            fs.readFileSync(path.join(TEST_HARNESS_DIR, "mcp-prompt-fixtures.json"), "utf8")
+        );
+        const session = await client.createSession({
+            onPermissionRequest: approveAll,
+            mcpServers: createTestMcpServers(serverName),
+        });
+        const changedServers: string[] = [];
+        const unsubscribe = session.on("mcp.prompts.list_changed", (event) => {
+            changedServers.push(event.data.serverName);
+        });
+        try {
+            await waitForMcpServerStatus(session, serverName);
+            const first = await session.rpc.mcp.prompts.list({ serverName });
+            expect(first).toEqual(fixtures.firstPage);
+            const second = await session.rpc.mcp.prompts.list({
+                serverName,
+                cursor: first.nextCursor,
+            });
+            expect(second).toEqual(fixtures.secondPage);
+            expect(second.nextCursor).toBeUndefined();
+            await expectFailure(
+                () => session.rpc.mcp.prompts.list({ serverName, cursor: "invalid-cursor" }),
+                "Unknown prompt cursor"
+            );
+
+            const rich = await session.rpc.mcp.prompts.get({
+                serverName,
+                promptName: "rich",
+                arguments: { topic: "opaque content", style: "", extra: "日本語" },
+            });
+            expect(rich).toEqual(fixtures.richPrompt);
+
+            const isolatedSession = await client.createSession({ onPermissionRequest: approveAll });
+            try {
+                await expect(
+                    isolatedSession.rpc.mcp.prompts.list({ serverName })
+                ).rejects.toThrow();
+                await expect(
+                    isolatedSession.rpc.mcp.prompts.get({
+                        serverName,
+                        promptName: "rich",
+                        arguments: { topic: "opaque content" },
+                    })
+                ).rejects.toThrow();
+                expect(await session.rpc.mcp.prompts.list({ serverName })).toEqual(
+                    fixtures.firstPage
+                );
+            } finally {
+                await isolatedSession.disconnect();
+            }
+
+            const argumentSets: (Record<string, string> | undefined)[] = [
+                undefined,
+                {},
+                { value: "日本語", empty: "" },
+            ];
+            for (const args of argumentSets) {
+                const result = await session.rpc.mcp.prompts.get({
+                    serverName,
+                    promptName: "echo",
+                    ...(args === undefined ? {} : { arguments: args }),
+                });
+                expect(result).toEqual({
+                    messages: [
+                        {
+                            role: "user",
+                            content: { type: "text", text: expect.any(String) },
+                        },
+                    ],
+                });
+                const content = result.messages[0].content as { text: string };
+                expect(JSON.parse(content.text)).toEqual(args ?? null);
+            }
+            await expectFailure(
+                () => session.rpc.mcp.prompts.get({ serverName, promptName: "unknown" }),
+                "Unknown prompt"
+            );
+            await expectFailure(
+                () =>
+                    session.rpc.mcp.prompts.get({ serverName, promptName: "rich", arguments: {} }),
+                "Missing required argument"
+            );
+
+            changedServers.length = 0;
+            await session.rpc.mcp.prompts.get({ serverName, promptName: "refresh" });
+            await expect.poll(() => changedServers, { timeout: 30_000 }).toContain(serverName);
+            const refreshed = await session.rpc.mcp.prompts.list({
+                serverName,
+                cursor: first.nextCursor,
+            });
+            expect(refreshed.prompts).toEqual([...fixtures.secondPage.prompts, { name: "added" }]);
+        } finally {
+            unsubscribe();
+            await session.disconnect();
+        }
     });
 
     it("should set mcp env value mode and remove github server", async () => {
@@ -419,16 +620,12 @@ describe("Session MCP and skills RPC", async () => {
         }
     });
 
-    it("should report error when mcp host is not initialized", async () => {
+    it("should allow cold enablement while rejecting operations that require an MCP host", async () => {
         const session = await client.createSession({ onPermissionRequest: approveAll });
 
-        await expectFailure(
-            () => session.rpc.mcp.enable({ serverName: "missing-server" }),
-            "No MCP host initialized"
-        );
-        await expectFailure(
-            () => session.rpc.mcp.disable({ serverName: "missing-server" }),
-            "No MCP host initialized"
+        await expect(session.rpc.mcp.enable({ serverName: "missing-server" })).resolves.toEqual({});
+        await expect(session.rpc.mcp.disable({ serverName: "missing-server" })).resolves.toEqual(
+            {}
         );
         await expectFailure(() => session.rpc.mcp.reload(), "MCP config reload not available");
         await expectFailure(
@@ -488,6 +685,9 @@ describe("Session MCP and skills RPC", async () => {
             "Extensions not available"
         );
         await expectFailure(() => session.rpc.extensions.reload(), "Extensions not available");
+        await expect(session.rpc.extensions.reconcile()).rejects.toMatchObject({
+            data: { code: "extension_reconciliation_unavailable", lifecycleChangesApplied: false },
+        });
 
         await session.disconnect();
     });

@@ -8,11 +8,14 @@ import os from "os";
 import { basename, dirname, join, resolve } from "path";
 import { rimraf } from "rimraf";
 import { fileURLToPath } from "url";
-import { afterAll, afterEach, beforeEach, onTestFailed, TestContext } from "vitest";
+import { afterAll, afterEach, beforeEach, onTestFailed, onTestFinished, TestContext } from "vitest";
 import { CopilotClient, CopilotClientOptions, RuntimeConnection } from "../../../src";
+import type { ResumeSessionConfig, SessionConfig } from "../../../src";
 import { CapiProxy } from "./CapiProxy";
 import { formatError, retry } from "./sdkTestHelper";
 import { resolvePreparedRuntimePath } from "../../../scripts/prepare-runtime.js";
+import { testBackend, withTestBackend } from "./testBackend";
+import { readDiagnosticTail } from "../../../../test/harness/sdk-diagnostics.mjs";
 
 export const isCI = process.env.GITHUB_ACTIONS === "true";
 export const DEFAULT_GITHUB_TOKEN = "fake-token-for-e2e-tests";
@@ -60,11 +63,15 @@ export async function createSdkTestContext({
     logLevel,
     useStdio,
     copilotClientOptions,
+    replayOnly = process.env.COPILOT_SDK_E2E_REPLAY_ONLY === "true",
+    modelNames,
 }: {
     logLevel?: "error" | "none" | "warning" | "info" | "debug" | "all";
     cliPath?: string;
     useStdio?: boolean;
     copilotClientOptions?: CopilotClientOptions;
+    replayOnly?: boolean;
+    modelNames?: Record<string, string>;
 } = {}) {
     const homeDir = realpathSync(fs.mkdtempSync(join(os.tmpdir(), "copilot-test-config-")));
     const copilotHomeDir = realpathSync(fs.mkdtempSync(join(os.tmpdir(), "copilot-test-home-")));
@@ -74,6 +81,7 @@ export async function createSdkTestContext({
     const proxyUrl = await openAiEndpoint.start();
     await openAiEndpoint.setCopilotUserByToken(DEFAULT_GITHUB_TOKEN, {
         login: "e2e-test-user",
+        id: 12345,
         copilot_plan: "individual_pro",
         is_mcp_enabled: true,
         endpoints: {
@@ -96,6 +104,8 @@ export async function createSdkTestContext({
         // CI runners and makes MCP servers time out before reaching connected.
         COPILOT_DEBUG_GITHUB_API_URL: proxyUrl,
         COPILOT_HOME: copilotHomeDir,
+        // Proxy ports can be reused by later fixtures with different account metadata.
+        COPILOT_CACHE_HOME: join(copilotHomeDir, "cache"),
         COPILOT_SDK_AUTH_TOKEN: "",
         GH_CONFIG_DIR: homeDir,
         // Use the proxy-recognized token rather than blanking these. Tests that spin up
@@ -120,7 +130,7 @@ export async function createSdkTestContext({
     if (userConn) {
         // Caller supplied a RuntimeConnection — merge in the harness-managed
         // CLI path (and stay on the same transport variant). Strip `kind`
-        // before forwarding to the factory opts since the factories don't
+        // before forwarding to the workflow opts since the workflows don't
         // accept it in their argument shape.
         if (userConn.kind === "tcp") {
             const { kind: _k, ...tcp } = userConn;
@@ -157,6 +167,16 @@ export async function createSdkTestContext({
     } = copilotClientOptions ?? {};
 
     const mergedEnv = { ...env, ...userEnv };
+
+    class TestClient extends CopilotClient {
+        override createSession(config: SessionConfig) {
+            return super.createSession(withTestBackend(config, testBackend, proxyUrl));
+        }
+
+        override resumeSession(sessionId: string, config: ResumeSessionConfig) {
+            return super.resumeSession(sessionId, withTestBackend(config, testBackend, proxyUrl));
+        }
+    }
 
     // The in-process (FFI) transport loads the runtime into this test host process,
     // and its worker inherits this process's ambient environment rather than a
@@ -209,7 +229,7 @@ export async function createSdkTestContext({
         }
         const effectiveInProcess = effectiveConnection.kind === "inprocess";
 
-        return new CopilotClient({
+        return new TestClient({
             // The in-process transport rejects a per-client workingDirectory (it would have to
             // mutate the shared host process cwd). Instead the harness changes this process's
             // cwd to workDir around the in-process worker's startup (see beforeEach below), so
@@ -223,7 +243,7 @@ export async function createSdkTestContext({
             env: effectiveInProcess ? undefined : mergedEnv,
             logLevel: logLevel || "error",
             connection: effectiveConnection,
-            gitHubToken: authTokenToUse,
+            gitHubToken: effectiveConnection.kind === "uri" ? undefined : authTokenToUse,
             ...rest,
         });
     }
@@ -244,8 +264,29 @@ export async function createSdkTestContext({
     // Wire up to Vitest lifecycle
     beforeEach(async (testContext) => {
         // Must be inside beforeEach - vitest requires test context
-        onTestFailed(() => {
+        onTestFailed(async () => {
             anyTestFailed = true;
+            // Preserve only the bounded, metadata-only runtime diagnostics before afterAll removes the home.
+            if (logLevel === "debug") {
+                try {
+                    const diagnostics = await readDiagnosticTail(copilotHomeDir);
+                    console.error(
+                        `[SDK diagnostics: last ${diagnostics.length} audited records]\n${diagnostics.join("\n")}`
+                    );
+                } catch {
+                    console.error("SDK diagnostics unavailable");
+                }
+            }
+        });
+        // Finished hooks run in reverse order, so test-owned clients stop before files are removed.
+        onTestFinished(async () => {
+            // The in-process runtime retains open state files until afterAll shuts it down.
+            // Keep its isolated home intact while it is alive; removing open files on POSIX
+            // can leave later tests using unlinked database state.
+            const cleanupPaths = isInProcess
+                ? [join(workDir, "*")]
+                : [join(homeDir, "*"), join(workDir, "*")];
+            await rimraf(cleanupPaths, { glob: true });
         });
 
         // Mirror this context's environment onto the real process for in-process
@@ -268,8 +309,10 @@ export async function createSdkTestContext({
         }
 
         await openAiEndpoint.updateConfig({
+            replayOnly,
             filePath: getTrafficCapturePath(testContext),
             workDir,
+            modelNames,
             testInfo: {
                 file: testContext.task.file.filepath,
                 line: testContext.task.location?.line,
@@ -292,13 +335,6 @@ export async function createSdkTestContext({
             process.chdir(restoreCwd);
             restoreCwd = undefined;
         }
-        // The in-process runtime retains open state files until afterAll shuts it down.
-        // Keep its isolated home intact while it is alive; removing open files on POSIX
-        // can leave later tests using unlinked database state.
-        const cleanupPaths = isInProcess
-            ? [join(workDir, "*")]
-            : [join(homeDir, "*"), join(workDir, "*")];
-        await rimraf(cleanupPaths, { glob: true });
     });
 
     afterAll(async () => {

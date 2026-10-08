@@ -12,6 +12,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import com.github.copilot.CopilotExperimental;
+import com.github.copilot.generated.rpc.DiagnosticsConfiguration;
 import com.github.copilot.generated.rpc.SessionLimitsConfig;
 
 /**
@@ -119,6 +120,9 @@ public final class CreateSessionRequest {
     @JsonProperty("mcpOAuthTokenStorage")
     private String mcpOAuthTokenStorage;
 
+    @JsonProperty("diagnostics")
+    private DiagnosticsConfiguration diagnostics;
+
     @JsonProperty("authClientIdMetadataUrl")
     private String authClientIdMetadataUrl;
 
@@ -182,6 +186,9 @@ public final class CreateSessionRequest {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean enableOnDemandInstructionDiscovery;
 
+    @JsonProperty("refreshCustomInstructions")
+    private Boolean refreshCustomInstructions;
+
     @JsonProperty("enableFileHooks")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean enableFileHooks;
@@ -197,6 +204,10 @@ public final class CreateSessionRequest {
     @JsonProperty("enableSkills")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean enableSkills;
+
+    @JsonProperty("hasSkillProvider")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean hasSkillProvider;
 
     @JsonProperty("embeddingCacheStorage")
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -248,6 +259,10 @@ public final class CreateSessionRequest {
     @JsonProperty("enableManagedSettings")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean enableManagedSettings;
+
+    @JsonProperty("enforceManagedModelDefaults")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean enforceManagedModelDefaults;
 
     @JsonProperty("managedSettings")
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -600,6 +615,19 @@ public final class CreateSessionRequest {
     }
 
     /**
+     * Gets the diagnostics configuration. @return the level, or {@code null} when
+     * unset
+     */
+    public DiagnosticsConfiguration getDiagnostics() {
+        return diagnostics;
+    }
+
+    /** Sets the diagnostics configuration. @param diagnostics the level */
+    public void setDiagnostics(DiagnosticsConfiguration diagnostics) {
+        this.diagnostics = diagnostics;
+    }
+
+    /**
      * Sets MCP OAuth token storage mode. @param mcpOAuthTokenStorage the storage
      * mode
      */
@@ -846,6 +874,31 @@ public final class CreateSessionRequest {
         this.enableOnDemandInstructionDiscovery = null;
     }
 
+    /**
+     * Gets the instruction discovery cache invalidation flag.
+     *
+     * @return the flag
+     */
+    public Boolean getRefreshCustomInstructions() {
+        return refreshCustomInstructions;
+    }
+
+    /**
+     * Sets the instruction discovery cache invalidation flag.
+     *
+     * @param refreshCustomInstructions
+     *            the flag
+     * @see SessionConfig#setRefreshCustomInstructions(boolean)
+     */
+    public void setRefreshCustomInstructions(boolean refreshCustomInstructions) {
+        this.refreshCustomInstructions = refreshCustomInstructions;
+    }
+
+    /** Clears the instruction discovery cache invalidation flag. */
+    public void clearRefreshCustomInstructions() {
+        this.refreshCustomInstructions = null;
+    }
+
     /** Gets enable file hooks flag. @return the flag */
     public Boolean getEnableFileHooks() {
         return enableFileHooks;
@@ -909,6 +962,23 @@ public final class CreateSessionRequest {
     /** Clears the enableSkills setting, reverting to the default behavior. */
     public void clearEnableSkills() {
         this.enableSkills = null;
+    }
+
+    /** Gets skill-provider availability flag. @return the flag */
+    public Boolean getHasSkillProvider() {
+        return hasSkillProvider;
+    }
+
+    /** Sets skill-provider availability flag. @param hasSkillProvider the flag */
+    public void setHasSkillProvider(boolean hasSkillProvider) {
+        this.hasSkillProvider = hasSkillProvider;
+    }
+
+    /**
+     * Clears the hasSkillProvider setting, reverting to the default behavior.
+     */
+    public void clearHasSkillProvider() {
+        this.hasSkillProvider = null;
     }
 
     /** Gets embedding cache storage mode. @return the mode */
@@ -1173,6 +1243,21 @@ public final class CreateSessionRequest {
      */
     public void clearEnableManagedSettings() {
         this.enableManagedSettings = null;
+    }
+
+    /** Gets managed model lock enforcement. @return the flag, or {@code null} */
+    public Boolean getEnforceManagedModelDefaults() {
+        return enforceManagedModelDefaults;
+    }
+
+    /** Sets managed model lock enforcement. @param enforce whether to enforce */
+    public void setEnforceManagedModelDefaults(boolean enforce) {
+        this.enforceManagedModelDefaults = enforce;
+    }
+
+    /** Clears managed model lock enforcement. */
+    public void clearEnforceManagedModelDefaults() {
+        this.enforceManagedModelDefaults = null;
     }
 
     /** @return host-injected managed settings, or {@code null} when unset */

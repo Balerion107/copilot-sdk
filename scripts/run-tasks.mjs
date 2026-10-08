@@ -10,6 +10,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { bazelActionEnvironmentArgument, prepareSdkSources } from "./build-prerequisites.mjs";
 import { findRuntimeRoot, getRuntimeCliPaths } from "./runtime-layout.mjs";
+import { installNpmDependencies } from "./install-dependencies.mjs";
 
 const sdkRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const languages = ["nodejs", "python", "go", "dotnet", "java", "rust"];
@@ -35,7 +36,7 @@ const tasks = {
     "generate:schemas": {},
     build: {
         nodejs: [
-            command("nodejs", "npm", ["ci", "--ignore-scripts"]),
+            command("nodejs", "npm", ["ci", "--ignore-scripts", "--include=dev"]),
             command("nodejs", "npm", ["run", "build"]),
         ],
         python: [
@@ -142,13 +143,26 @@ const tasks = {
         python: [command("scripts/docs-validation", "npm", ["run", "validate:py"])],
         go: [command("scripts/docs-validation", "npm", ["run", "validate:go"])],
         dotnet: [command("scripts/docs-validation", "npm", ["run", "validate:cs"])],
-        java: [command("scripts/docs-validation", "npm", ["run", "validate:java"])],
+        java: [
+            command("java", maven, [
+                "install",
+                "-Dmaven.test.skip=true",
+                "-Dskip.test.harness=true",
+                "-Dcopilot.native.skip.download=true",
+            ]),
+            command("scripts/docs-validation", "npm", ["run", "validate:java"]),
+        ],
     },
 };
 
 tasks["test:default"] = {
     nodejs: [command("nodejs", "npm", ["run", "test:unit"])],
     rust: tasks.test.rust,
+};
+
+tasks["build:default"] = {
+    nodejs: tasks.build.nodejs,
+    rust: tasks.build.rust,
 };
 
 tasks.check.rust = [...tasks["format:check"].rust, ...tasks.lint.rust];
@@ -304,7 +318,7 @@ export function runTasks(verb, language, options = {}) {
     if (
         runtimeSource === "checkout" &&
         runtimeRoot &&
-        ["build", "generate", "generate:schemas", "test", "test:default"].includes(verb)
+        ["build", "build:default", "generate", "generate:schemas", "test", "test:default"].includes(verb)
     ) {
         const selectedLanguages = language ? [language] : Object.keys(tasks[verb]);
         prepareSdkSources({ languages: selectedLanguages, runtimeRoot, sdkRoot });
@@ -341,12 +355,20 @@ export function runTasks(verb, language, options = {}) {
         if (step.kind === "gofmt") {
             runGoFormat(step.write);
         } else {
-            if (resolvedRuntimeSource === "checkout" && verb === "build" && step.language === "rust") {
+            if (
+                resolvedRuntimeSource === "checkout" &&
+                (verb === "build" || verb === "build:default") &&
+                step.language === "rust"
+            ) {
                 runRootCommand(
                     runtimeRoot,
                     "pnpm",
                     ["bazel", "build", bazelActionEnvironmentArgument(environment), "//src/sdk/rust:github-copilot-sdk"],
                     environment,
+                );
+            } else if (step.executable === "npm" && step.args[0] === "ci") {
+                installNpmDependencies(resolve(sdkRoot, step.cwd), (args) =>
+                    runCommand({ ...step, args }, environment),
                 );
             } else {
                 runCommand(step, environment);

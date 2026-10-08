@@ -2,12 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { approveAll, defineTool, RuntimeConnection } from "../../src/index.js";
-import { createSdkTestContext } from "./harness/sdkTestContext.js";
+import { createSdkTestContext, DEFAULT_GITHUB_TOKEN } from "./harness/sdkTestContext.js";
 
 interface TelemetryEntry {
     type?: string;
@@ -55,8 +55,15 @@ describe("Telemetry export", async () => {
 
     const telemetryFileName = `telemetry-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`;
 
-    const { copilotClient: client, workDir } = await createSdkTestContext({
+    const {
+        copilotClient: client,
+        createClient,
+        workDir,
+    } = await createSdkTestContext({
+        logLevel: "debug",
         copilotClientOptions: {
+            env: { RUST_LOG: "error,sdk_diagnostics=debug" },
+            gitHubToken: DEFAULT_GITHUB_TOKEN,
             // Telemetry is lowered to environment variables the native runtime reads, which
             // the in-process transport cannot carry per-client (the runtime runs in the shared
             // host process); see https://github.com/github/copilot-sdk/issues/1934. Pin the
@@ -73,6 +80,8 @@ describe("Telemetry export", async () => {
     });
 
     it("should export file telemetry for sdk interactions", { timeout: 90_000 }, async () => {
+        await client.start();
+        expect((await client.getAuthStatus()).isAuthenticated).toBe(true);
         const session = await client.createSession({
             onPermissionRequest: approveAll,
             tools: [
@@ -84,6 +93,11 @@ describe("Telemetry export", async () => {
             ],
         });
 
+        // Resolve account metadata before the first invocation snapshots its identity.
+        expect(await session.rpc.gitHubAuth.getStatus()).toMatchObject({
+            isAuthenticated: true,
+            login: "e2e-test-user",
+        });
         const assistantMessage = await session.sendAndWait({ prompt }, 90_000);
         expect(assistantMessage).toBeDefined();
         expect(assistantMessage?.data.content ?? "").toContain("TELEMETRY_E2E_DONE");
@@ -113,6 +127,10 @@ describe("Telemetry export", async () => {
             session.sessionId
         );
         expect(isRootSpan(invokeAgentSpan!)).toBe(true);
+        expect(getStringAttribute(invokeAgentSpan!, "enduser.pseudo.id")).toBe(
+            "e2e-test-tracking-id"
+        );
+        expect(invokeAgentSpan!.attributes).not.toHaveProperty("user.name");
         const invokeAgentSpanId = invokeAgentSpan!.spanId;
         expect(invokeAgentSpanId).toBeTruthy();
         const invokeAgentTraceId = invokeAgentSpan!.traceId;
@@ -131,6 +149,23 @@ describe("Telemetry export", async () => {
                 (getStringAttribute(span, "gen_ai.input.messages") ?? "").includes(prompt)
             )
         ).toBe(true);
+
+        const toolDefinitions = chatSpans.flatMap((span) => {
+            const definitions = getStringAttribute(span, "gen_ai.tool.definitions");
+            return definitions ? (JSON.parse(definitions) as unknown[]) : [];
+        });
+        expect(toolDefinitions).toContainEqual(
+            expect.objectContaining({
+                name: toolName,
+                description: "Echoes a marker string for telemetry validation.",
+                parameters: expect.objectContaining({
+                    type: "object",
+                    properties: expect.objectContaining({
+                        value: expect.objectContaining({ type: "string" }),
+                    }),
+                }),
+            })
+        );
         expect(
             chatSpans.some((span) =>
                 (getStringAttribute(span, "gen_ai.output.messages") ?? "").includes(
@@ -151,5 +186,106 @@ describe("Telemetry export", async () => {
             `{"value":"${marker}"}`
         );
         expect(getStringAttribute(toolSpan!, "gen_ai.tool.call.result")).toBe(marker);
+    });
+
+    it("should export per request subagent chat spans", { timeout: 90_000 }, async () => {
+        const sourceName = "ts-sdk-subagent-telemetry-e2e";
+        const telemetryFileName = "subagent-telemetry.jsonl";
+        const prompt =
+            "Use the task tool in sync mode to ask a task agent to read subagent-otel.txt with the view tool. Then reply with SUBAGENT_OTEL_DONE.";
+        await writeFile(join(workDir, "subagent-otel.txt"), "SUBAGENT_OTEL_FILE_CONTENT");
+
+        const subagentClient = createClient({
+            connection: RuntimeConnection.forStdio(),
+            gitHubToken: DEFAULT_GITHUB_TOKEN,
+            telemetry: {
+                filePath: telemetryFileName,
+                exporterType: "file",
+                sourceName,
+                captureContent: true,
+            },
+        });
+        let sessionId: string;
+        try {
+            await subagentClient.start();
+            expect((await subagentClient.getAuthStatus()).isAuthenticated).toBe(true);
+            const session = await subagentClient.createSession({ onPermissionRequest: approveAll });
+            sessionId = session.sessionId;
+            try {
+                expect((await session.rpc.gitHubAuth.getStatus()).isAuthenticated).toBe(true);
+                const response = await session.sendAndWait({ prompt }, 90_000);
+                expect(response?.data.content ?? "").toContain("SUBAGENT_OTEL_DONE");
+            } finally {
+                await session.disconnect();
+            }
+        } finally {
+            await subagentClient.stop();
+        }
+
+        const spans = (await readTelemetryEntries(join(workDir, telemetryFileName))).filter(
+            (entry) => entry.type === "span"
+        );
+        expect(spans.every((span) => span.instrumentationScope?.name === sourceName)).toBe(true);
+        expect(spans.every((span) => span.status?.code !== 2)).toBe(true);
+        const invocationSpans = spans.filter(
+            (span) => getStringAttribute(span, "gen_ai.operation.name") === "invoke_agent"
+        );
+        expect(invocationSpans).toHaveLength(2);
+        for (const span of invocationSpans) {
+            expect(getStringAttribute(span, "enduser.pseudo.id")).toBe("e2e-test-tracking-id");
+            expect(span.attributes).not.toHaveProperty("user.name");
+        }
+        const roots = invocationSpans.filter(isRootSpan);
+        expect(roots).toHaveLength(1);
+        const root = roots[0]!;
+        expect(getStringAttribute(root, "gen_ai.conversation.id")).toBe(sessionId!);
+        expect(root.spanId).toBeTruthy();
+        expect(root.traceId).toBeTruthy();
+
+        const taskTools = spans.filter(
+            (span) =>
+                getStringAttribute(span, "gen_ai.operation.name") === "execute_tool" &&
+                getStringAttribute(span, "gen_ai.tool.name") === "task"
+        );
+        expect(taskTools).toHaveLength(1);
+        const taskTool = taskTools[0]!;
+        expect(taskTool.parentSpanId).toBe(root.spanId);
+        const subagents = invocationSpans.filter((span) => span.parentSpanId === taskTool.spanId);
+        expect(subagents).toHaveLength(1);
+        const subagent = subagents[0]!;
+        expect(taskTool.traceId).toBe(root.traceId);
+        expect(subagent.traceId).toBe(root.traceId);
+
+        const chats = spans.filter(
+            (span) => getStringAttribute(span, "gen_ai.operation.name") === "chat"
+        );
+        expect(chats).toHaveLength(4);
+        const parentChats = chats.filter((span) => span.parentSpanId === root.spanId);
+        expect(parentChats).toHaveLength(2);
+        for (const chat of parentChats) {
+            expect(chat.traceId).toBe(root.traceId);
+        }
+        const childChats = chats.filter((span) => span.parentSpanId === subagent.spanId);
+        expect(childChats).toHaveLength(2);
+        for (const chat of childChats) {
+            expect(chat.traceId).toBe(root.traceId);
+            expect(getStringAttribute(chat, "github.copilot.initiator")).toBe("sub-agent");
+        }
+        const requestingChats = childChats.filter((span) =>
+            (getStringAttribute(span, "gen_ai.output.messages") ?? "").includes('"view"')
+        );
+        expect(requestingChats).toHaveLength(1);
+        expect(
+            getStringAttribute(requestingChats[0]!, "gen_ai.input.messages") ?? ""
+        ).not.toContain("SUBAGENT_OTEL_FILE_CONTENT");
+        const finalChats = childChats.filter((span) =>
+            (getStringAttribute(span, "gen_ai.output.messages") ?? "").includes(
+                "SUBAGENT_OTEL_CHILD_DONE"
+            )
+        );
+        expect(finalChats).toHaveLength(1);
+        expect(getStringAttribute(finalChats[0]!, "gen_ai.input.messages")).toContain(
+            "SUBAGENT_OTEL_FILE_CONTENT"
+        );
     });
 });

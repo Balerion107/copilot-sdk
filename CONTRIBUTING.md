@@ -71,7 +71,7 @@ are not necessarily sufficient to build the repository.
 | --- | --- |
 | Node.js and shared tooling | [Node.js](https://nodejs.org/en/download) satisfying [the SDK engines](nodejs/package.json): `^20.19.0 \|\| >=22.12.0`; SDK CI uses Node 22. Nested runtime builds require **Node >=24** and the parent repository's pinned pnpm. Use npm for SDK-local projects and their lockfiles. |
 | Python | [Python >=3.11](python/pyproject.toml) and [uv](https://docs.astral.sh/uv/getting-started/installation/). `uv sync` installs the project, development tools, and pinned Ruff; do not install those globally. CI tests on 3.11 and validates docs on 3.12. |
-| Go | [Install Go](https://go.dev/doc/install) at the version selected by [go.mod](go/go.mod), currently 1.24, also required by [samples](go/samples/go.mod). Go includes `gofmt`. Checks additionally need [golangci-lint](https://golangci-lint.run/docs/welcome/install/); [CI](.github/workflows/sdk-go.yml) currently uses `latest`, not an exact repository pin. |
+| Go | [Install Go](https://go.dev/doc/install) at the version selected by [go.mod](go/go.mod), currently 1.24, also required by [samples](go/samples/go.mod). Go includes `gofmt`; generation fails if `go fmt` cannot run rather than emitting unformatted projections. Checks additionally need [golangci-lint](https://golangci-lint.run/docs/welcome/install/); [CI](.github/workflows/sdk-go.yml) currently uses `latest`, not an exact repository pin. |
 | .NET | [.NET SDK](https://dotnet.microsoft.com/download/dotnet) selected by [global.json](dotnet/global.json): 10.0.100 with major roll-forward. Also install the **[.NET 8 runtime](https://dotnet.microsoft.com/download/dotnet/8.0)** for the `net8.0` [tests](dotnet/test/GitHub.Copilot.SDK.Test.csproj). SDK 10 alone does not supply that runtime. Windows additionally runs `net472` tests and needs a compatible .NET Framework runtime. |
 | Java | [Install a JDK](https://learn.microsoft.com/java/openjdk/download) meeting the [build requirement](java/sdk/pom.xml), currently >=25. The artifact targets Java 17; a second JDK 17 is needed only to reproduce that compatibility test. From `java/`, use `./mvnw` (`.\mvnw.cmd` on Windows): the [wrapper](java/.mvn/wrapper/maven-wrapper.properties) downloads pinned Maven. Normal builds/tests do not require a global Maven install. |
 | Rust | [rustup](https://rustup.rs/) with the SDK's [pinned toolchain and components](rust/rust-toolchain.toml), currently 1.94.0. Formatting/check tasks also need rustfmt from the toolchain selected in [run-tasks.mjs](scripts/run-tasks.mjs). This is separate from the parent runtime's Rust toolchain. |
@@ -101,11 +101,20 @@ download missing tools on first use.
 ### Prepare project dependencies
 
 Build tasks restore the selected SDK's dependencies: Node runs
-`npm ci --ignore-scripts`, Python runs `uv sync --all-extras --dev`, and the
+`npm ci --ignore-scripts --include=dev`, Python runs `uv sync --all-extras --dev`, and the
 other native build tools restore their project dependencies. In the runtime
 layout, build/test/generate tasks also install the codegen npm dependencies
 and refresh public schemas and the selected projections through Bazel.
 This preparation can update generated source files.
+
+Node SDK builds and codegen preparation explicitly include development
+dependencies even with `NODE_ENV=production` or `npm_config_omit=dev`, because
+these packages provide the build tools. They skip installation when the npm
+arguments, `package.json`, and `package-lock.json` match the last successful install's
+`node_modules/.copilot-sdk-install-stamp`. Changing either file, removing
+`node_modules` or its stamp, or an unsuccessful install requires a fresh install.
+The runtime root's `build:sdk:link` uses the same stamp for Node dependencies.
+Java codegen dependencies are installed only when Java is selected.
 
 Tests and checks need additional tools that `pnpm install` does not provide.
 Before Node, Python, Go, .NET, or Rust SDK tests, prepare Node tooling and the
@@ -114,6 +123,15 @@ shared replay harness if they are not already installed:
 ```bash
 npm --prefix nodejs ci --ignore-scripts
 npm --prefix test/harness ci --ignore-scripts
+```
+
+Node tests, including the unit-only profile, run generator subprocesses and
+require the codegen package's own dependencies. Prepare these before invoking
+Node tests directly or from a standalone SDK checkout (runtime build/test tasks
+already prepare them):
+
+```bash
+npm --prefix scripts/codegen ci --ignore-scripts
 ```
 
 The full Node test task also runs the corrections-script tests:
@@ -133,6 +151,7 @@ Substitute `nodejs`, `python`, `go`, `dotnet`, `java`, or `rust` for `<language>
 | From the SDK root | Scope |
 | --- | --- |
 | `npm run build:<language>` | Build one SDK; `npm run build` builds all six. |
+| `npm run build:default` | Build the Node and Rust SDKs, in that order. |
 | `npm run test:<language>` | Run that language's suite; `npm test` runs all six. |
 | `npm run test:default` | Node SDK unit tests and default-feature Rust SDK tests with `test-support`. |
 | `npm run check:<language>` | Language-specific checks. Java includes `verify` (tests), .NET includes a solution build, and Rust includes Clippy and nightly formatting. |
@@ -149,11 +168,17 @@ sources. Runtime-root aliases live in the parent runtime's
 SDK-local commands live in [package.json](package.json) and
 [run-tasks.mjs](scripts/run-tasks.mjs).
 
+The runtime root's `pnpm run build` builds the CLI first, then invokes
+`pnpm run build:sdk:default`. This default SDK profile prepares Node and Rust
+projections together once and does not rebuild the CLI or build the other four SDKs.
+Node declaration generation uses TypeScript's incremental build information in
+`nodejs/dist/tsconfig.tsbuildinfo`; removing `dist` also clears that state.
+
 In a runtime checkout, SDK tests request a current host `build:cli` before
-running; Java and aggregate SDK builds also prepare the CLI. Unchanged Bazel
+running; Java and all-six SDK builds also prepare the CLI. Unchanged Bazel
 actions remain cached. The Rust SDK build uses Bazel, but its tests use the
 independent SDK Cargo toolchain. Standalone tasks instead use the SDK's pinned
-published runtime inputs. Do not work around a missing checkout artifact by
+published runtime inputs and build Rust with Cargo's `--all-features`. Do not work around a missing checkout artifact by
 changing release pins or switching to a published runtime.
 
 Rust's `test:rust` and `test:default` run `cargo test --features test-support`;
@@ -171,6 +196,17 @@ Language-specific details:
 - [.NET](dotnet/README.md#development)
 - [Rust](rust/README.md#development)
 - [Java](java/README.md#development-setup)
+
+### E2E test ownership
+
+Keep end-to-end coverage of the runtime's individual generated RPC methods,
+their response shapes, and built-in tool behavior in the TypeScript SDK
+(`nodejs/test/e2e/`). The .NET, Go, Python, Rust, and Java suites retain a
+small number of generated RPC round trips to verify each language's transport
+and generated bindings, but should not repeat the per-method or built-in tool
+matrices. Their remaining E2E tests should exercise handwritten SDK behavior
+such as connection lifecycle, session orchestration, callbacks, custom tools,
+configuration, and language-specific integrations.
 
 ### Testing an unreleased runtime API
 
@@ -218,6 +254,33 @@ npm --prefix java/scripts/codegen ci
 npm run generate
 ```
 
+A standalone checkout can also consume schemas exported by a separate runtime
+checkout for local development through the same facade:
+
+```bash
+npm run generate -- --runtime-source checkout --schema-dir /absolute/path/to/runtime/generated
+```
+
+Generate both `api.schema.json` and `session-events.schema.json` in the runtime
+checkout first, using that revision's supported commands. Keep them from the
+same immutable runtime revision and record the producer commit and both file
+digests when handing off an unreleased API. The equivalent generator environment
+is `COPILOT_RUNTIME_SOURCE=checkout` with `COPILOT_CLI_SCHEMA_DIR` pointing to
+their shared directory. Missing or invalid schemas fail rather than falling
+back to a published package.
+
+This selects generation inputs only: it does not publish or install a runtime,
+change the CLI release pin, or make a new RPC callable on an older runtime.
+Use the matching runtime build for integration checks and retain capability
+checks for unsupported runtimes. Do not replace installed package sources or
+edit generated files to emulate an unreleased contract.
+
+Author SDK implementation changes in the runtime repository's `src/sdk`.
+The runtime release's `sdk-release-snapshot` job exports that entire tree to
+`github/copilot-sdk`, with release-derived pins. Standalone development results
+must be reconciled into that source before release; an independent standalone
+change can otherwise be replaced by the next snapshot.
+
 Do not replace runtime-checkout pins with a published version to make setup
 work. If the shared CLI version is `0.0.0-dev`, it is a development placeholder:
 local work still uses same-checkout artifacts. Release snapshot export, not
@@ -238,10 +301,13 @@ export COPILOT_CLI_PATH="$(npm --prefix nodejs run --silent prepare:runtime -- -
 export COPILOT_LEGACY_CLI_PATH="$(npm --prefix nodejs run --silent prepare:runtime -- --print-legacy-path)"
 npm --prefix nodejs test -- test/e2e/structured_output.e2e.test.ts
 (cd dotnet && dotnet test test/GitHub.Copilot.SDK.Test.csproj \
+  -p:CopilotSkipCliDownload=true \
   --filter FullyQualifiedName~StructuredOutputE2ETests)
 ```
 
 These are shell-local overrides for focused runs, not machine-wide settings.
+The .NET flag skips MSBuild's separate release download; the tests use the
+prepared runtime from `COPILOT_CLI_PATH`.
 The facade sets runtime paths only for its own child processes and clears
 stale or cross-target overrides before building the host CLI. Cross-target CI
 instead stages explicit artifacts and uses native test commands; do not copy
@@ -250,7 +316,12 @@ additional feature/acquisition choices documented in [rust/AGENTS.md](rust/AGENT
 
 ### Documentation checks
 
-API snippet validation is separate from SDK tests. From the SDK root:
+[SDK CI](.github/workflows/sdk.yml) validates Node.js, Python, Go, .NET, and Java
+API snippets after successful tests in their standard Linux jobs (JDK 25 for Java).
+These checks run on pull requests, pushes to `main`, and manual workflow runs,
+but not merge groups. A documentation failure fails the corresponding language job.
+
+To validate snippets without running SDK tests, run these commands from the SDK root:
 
 ```bash
 npm --prefix scripts/docs-validation ci
@@ -261,11 +332,87 @@ uv run --locked --project python npm run docs:python
 ```
 
 This extracts and validates snippets for Node.js, Python, Go, .NET, or Java.
-Java's current docs validator calls `mvn` directly,
-so this task also needs Maven 3.9+ on PATH. There is no `docs:rust` facade;
+`docs:java` installs the SDK once through its Maven wrapper, with tests, replay
+harness setup, and native downloads disabled, then compiles the snippets using
+the same wrapper. CI supplies that installation in its existing post-test step;
+the validator does not reinstall it. A separate Maven installation is not required.
+Java validation also compiles the exact [README Quick Start](java/README.md#quick-start).
+The regular Maven integration suite checks a standalone consumer JAR with a manifest
+classpath and runtime dependencies, without a live model, credentials, or native runtime.
+These checks replace the former agent-driven Java smoke workflow.
+There is no `docs:rust` facade;
 follow [the Rust SDK workflow](.github/workflows/sdk-rust.yml) for rustdoc.
 
 ### Recording and replaying SDK tests
+
+For new E2E coverage of runtime functionality available entirely through the
+SDK, use the TypeScript SDK suite in `nodejs/test/e2e/` rather than the CLI
+suite in the runtime repository. CLI E2Es are for terminal interactions,
+rendered UI, CLI-only commands or flags, and other CLI-specific contracts.
+Add E2Es in other SDK languages only when they test that language's SDK surface
+area, not shared runtime behavior.
+
+For TypeScript SDK E2Es, use the existing
+`nodejs/test/e2e/harness/sdkTestContext.ts` fixture. In the runtime repository,
+also follow the `e2e-test-author` skill's SDK section.
+
+All six SDKs run full subprocess coverage followed by a short in-process
+smoke step on the same runner on Linux/glibc x64, macOS ARM64, Windows x64,
+and Linux/musl x64. Smoke still runs if the subprocess tests fail, and either
+failure fails the job. Java uses JDK 25 on all four platforms, plus a
+Linux/glibc JDK 17 compatibility job using precompiled classes.
+Merge groups retain the reduced Linux TypeScript CAPI subprocess coverage.
+
+The `sdk-typescript` required rollup checks only the Linux CAPI job, including
+its build, packaging, and applicable static checks. Other platforms, BYOK
+backends, and languages keep their existing scheduling and failure reporting;
+they do not gate this rollup. The full `SDK` aggregate still requires all
+scheduled coverage to succeed.
+
+The three BYOK backend sweeps run in separate Linux TypeScript jobs, alongside
+the normal CAPI job; they do not repeat unit tests, packaging, or static
+checks. After preparing the runtime as described above, run a sweep from the
+SDK root:
+
+```bash
+COPILOT_SDK_E2E_BACKEND=anthropic-messages GITHUB_ACTIONS=true \
+  npm --prefix nodejs test -- test/e2e
+```
+
+Use `openai-completions` or `openai-responses` for the other sweeps; unset the
+variable or use `capi` for the normal suite. BYOK uses the shared captures
+through the corresponding protocol adapter and never forwards replay misses
+to a live provider. Use the fixture's `createClient()` for secondary clients
+that create or resume model-backed sessions. Tests that require CAPI or own
+their provider/request-handler setup stay in the normal job, with exclusions
+in `vitest.config.ts` or individual `it.skipIf(isByokBackend)` cases. Other SDK
+languages retain their language-specific provider tests in their normal suites.
+
+The Node.js Vitest global setup bundles the shared replay proxy once per run
+into Vitest's project-owned temporary directory (and refreshes it on watch
+reruns). Each E2E context launches that bundle directly with the test runner's
+Node executable, without an npm, shell, or TypeScript-loader subprocess.
+Focused Vitest commands use the same setup; no separate proxy build is needed.
+If startup or shutdown cleanup cannot confirm that the child exited, `CapiProxy`
+retains the child handle so callers can retry cleanup with `stop()`.
+Once shutdown is acknowledged, it waits for the child to finish flushing captures
+and exit rather than applying a forced-termination timeout to the flush.
+
+Owned-stdio shutdown regressions share
+`test/harness/stdio-shutdown-runtime.cjs` across all six SDKs. Launch it with
+Node and arguments `<cleanup-marker> <mode> <pid-file>`. The fixture acknowledges
+`runtime.shutdown`, but writes its cleanup marker only after stdin EOF, matching
+the native wrapper's host-finalization boundary. Language-native tests exercise
+graceful stop/disposal, force-stop where exposed, a child that ignores EOF, and
+failed-startup cleanup. Keep those lifecycle expectations aligned when changing
+an SDK transport; test watchdogs must allow all cleanup phases their separate
+budgets, rather than treating the graceful-exit timeout as a total shutdown cap.
+
+Java also exercises the opt-in `shutdown-error` mode. It rejects
+`runtime.shutdown`, writes `<cleanup-marker>.eof` when stdin closes, and holds
+cleanup-marker creation and process exit until the test creates
+`<cleanup-marker>.release`. This handshake verifies that a failed shutdown RPC
+still allows EOF-driven finalization before forced cleanup.
 
 The shared harness records real inference responses under `test/snapshots`.
 Record new captures with `GITHUB_TOKEN` set and `GITHUB_ACTIONS` unset;
@@ -281,10 +428,12 @@ environment. If the host proxy substitutes a protected credential, set
 `GITHUB_TOKEN="$GH_TOKEN"` using its issued placeholder; do not print or persist
 the credential. Keep localhost and loopback in `NO_PROXY`.
 
-Equivalent cross-language E2Es must share snapshot names and prompts, not
-language-specific copies. The structured-output suite in **all six SDKs** reuses
-the following captures in `test/snapshots/structured_output/`, recorded using
-real CAPI `gpt-4.1` calls through the shared harness:
+Where E2Es for equivalent language-specific SDK APIs are needed in multiple
+languages, share snapshot names and prompts instead of making language-specific
+copies. The existing structured-output suite in **all six SDKs** reuses the
+following captures in `test/snapshots/structured_output/`, recorded using real
+CAPI `gpt-4.1` calls through the shared harness. New shared-runtime E2Es do not
+need copies across languages:
 
 | Shared capture (without `.yaml`) | Flow |
 | --- | --- |
@@ -299,16 +448,18 @@ real CAPI `gpt-4.1` calls through the shared harness:
 
 Typed cases call the public idiomatic APIs: Node/Zod, C# generics, Python/Pydantic,
 Go generics, Java annotated records using the existing tool schema generator,
-and Rust generics with `derive`/schemars. The tool/follow-up case also checks the
-actual provider request's inferred schema, so a recorded JSON response alone
-cannot mask missing schema forwarding. Explicit-schema and event-stream cases
-exercise the corresponding raw public APIs instead.
+and Rust generics with `derive`/schemars. The CAPI leg's tool/follow-up case also
+checks the configured OpenAI provider request's inferred schema, so a recorded
+JSON response alone cannot mask missing schema forwarding there. BYOK sweeps
+retain the typed-result assertions without assuming the same wire-format
+encoding. Explicit-schema and event-stream cases exercise the corresponding
+raw public APIs instead.
 
-Every language additionally checks rejection before admission and zero provider
-calls for oversized schemas and typed immediate steering. These cases have no
-model responses and therefore need **no snapshot**. Do not create canned responses
-or empty model captures for them. Unit tests supplement, rather than replace,
-the shared runtime E2Es.
+The existing suite in each language also checks rejection before admission
+and zero provider calls for oversized schemas and typed immediate steering.
+These cases have no model responses and therefore need **no snapshot**. Do not
+create canned responses or empty model captures for them. Unit tests supplement,
+rather than replace, the shared runtime E2Es.
 
 ## Submitting a Pull Request
 

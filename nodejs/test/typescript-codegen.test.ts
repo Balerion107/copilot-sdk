@@ -1,19 +1,56 @@
 import type { JSONSchema7 } from "json-schema";
 import { compile } from "json-schema-to-typescript";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
     assertNoPublicInternalReferences,
     filterPublicSessionEventVariants,
-    isTypeScriptCodegenEntrypoint,
     normalizeSchemaForTypeScript,
+    tsNullableResultTypeName,
 } from "../../scripts/codegen/typescript.ts";
-import type { DefinitionCollections } from "../../scripts/codegen/utils.ts";
+import type { AssistantMessageReasoningBlocks } from "../src/generated/session-events.ts";
+import { isCodegenEntrypoint, type DefinitionCollections } from "../../scripts/codegen/utils.ts";
 
 describe("typescript schema codegen", () => {
+    it("preserves an explicit nullable reference result's named union", () => {
+        expect(
+            tsNullableResultTypeName(
+                {
+                    rpcMethod: "session.accounts.getCurrent",
+                    params: null,
+                    result: { $ref: "#/definitions/SessionAccountResult" },
+                },
+                {
+                    title: "SessionAccountResult",
+                    anyOf: [{ $ref: "#/definitions/SessionAccount" }, { type: "null" }],
+                }
+            )
+        ).toBe("SessionAccountResult");
+    });
+
+    it("retains the existing undefined result type for omission sentinels", () => {
+        expect(
+            tsNullableResultTypeName({
+                rpcMethod: "session.accounts.getCurrent",
+                params: null,
+                result: {
+                    anyOf: [{ $ref: "#/definitions/SessionAccount" }, { not: {} }],
+                },
+            })
+        ).toBe("SessionAccount | undefined");
+    });
+
+    it("keeps reasoning-block SDK types permissive like the other language projections", () => {
+        expectTypeOf<{
+            provider: string;
+            blocks: [];
+            orderedBlocks: [];
+        }>().toExtend<AssistantMessageReasoningBlocks>();
+    });
+
     it("recognizes Windows entrypoint paths case-insensitively", () => {
         expect(
-            isTypeScriptCodegenEntrypoint(
+            isCodegenEntrypoint(
                 "C:\\b\\execroot\\src\\sdk\\scripts\\codegen\\typescript.ts",
                 "c:\\B\\execroot\\src\\sdk\\scripts\\codegen\\typescript.ts",
                 "win32"
@@ -60,6 +97,40 @@ describe("typescript schema codegen", () => {
         expect(code).toContain('inlineMode: /** Use a direct value. */ "direct" | "indirect";');
     });
 
+    it("accepts future reload values without widening other enum definitions", async () => {
+        const enumDefinition = (value: string): JSONSchema7 => ({
+            type: "string",
+            enum: [value],
+            "x-enumDescriptions": { [value]: `Known ${value} value.` },
+        });
+        const code = await compile(
+            normalizeSchemaForTypeScript({
+                title: "ReloadOptions",
+                type: "object",
+                properties: {
+                    status: { $ref: "#/definitions/CustomizationReloadStatus" },
+                    subsystem: { $ref: "#/definitions/CustomizationReloadSubsystem" },
+                    other: { $ref: "#/definitions/OtherStatus" },
+                },
+                definitions: {
+                    CustomizationReloadStatus: enumDefinition("reloaded"),
+                    CustomizationReloadSubsystem: enumDefinition("skills"),
+                    OtherStatus: enumDefinition("known"),
+                },
+            }),
+            "ReloadOptions",
+            { bannerComment: "", style: { semi: true, singleQuote: false } }
+        );
+
+        expect(code).toMatch(
+            /export type CustomizationReloadStatus\s*=\s*\/\*\* Known reloaded value\. \*\/ "reloaded" \| \(string & \{\}\);/
+        );
+        expect(code).toMatch(
+            /export type CustomizationReloadSubsystem\s*=\s*\/\*\* Known skills value\. \*\/ "skills" \| \(string & \{\}\);/
+        );
+        expect(code).toContain('export type OtherStatus = /** Known known value. */ "known";');
+    });
+
     it("maps bare opaque properties to their marker aliases", async () => {
         const code = await compile(
             normalizeSchemaForTypeScript({
@@ -91,6 +162,32 @@ describe("typescript schema codegen", () => {
         );
 
         expect(code).toContain("[k: string]: JsonValue;");
+    });
+
+    it("keeps a titled discriminator literal inline", async () => {
+        const variant = (action: string) => ({
+            type: "object" as const,
+            properties: {
+                action: { type: "string" as const, const: action, title: "ReviewAction" },
+            },
+            required: ["action"],
+        });
+        const code = await compile(
+            normalizeSchemaForTypeScript({
+                title: "Review",
+                anyOf: [variant("install"), variant("uninstall")],
+            }),
+            "Review",
+            {
+                bannerComment: "",
+                style: { semi: true, singleQuote: false },
+                additionalProperties: false,
+            }
+        );
+
+        expect(code).toContain('action: "install";');
+        expect(code).toContain('action: "uninstall";');
+        expect(code).not.toContain("ReviewAction");
     });
 
     it("maps a bare opaque JSON array item to JsonValue", async () => {

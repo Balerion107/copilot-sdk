@@ -12,7 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { c as createTar } from "tar";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import {
     defaultRuntimeCacheRoot,
@@ -23,7 +23,7 @@ import {
     materializeRuntimeBundle,
 } from "../src/runtimeArtifacts.js";
 import { COPILOT_CLI_USE_NPM_PACKAGE, COPILOT_CLI_VERSION } from "../src/cliVersion.js";
-import { ensureCopilotPackage } from "../scripts/releaseArtifacts.js";
+import { downloadVerifiedReleaseAsset, ensureCopilotPackage } from "../scripts/releaseArtifacts.js";
 import { getLegacyCliPathForTests } from "./e2e/harness/sdkTestContext.js";
 import * as runtimeLayout from "../../scripts/runtime-layout.mjs";
 
@@ -162,7 +162,9 @@ describe("materializeRuntimeBundle", () => {
         writeFileSync(wrapper, "wrapper");
         writeFileSync(runtimeNode, "runtime");
         mkdirSync(join(sourceDir, "ripgrep", "bin", platform), { recursive: true });
-        writeFileSync(join(sourceDir, "ripgrep", "bin", platform, "rg"), "ripgrep");
+        writeFileSync(join(sourceDir, "ripgrep", "bin", platform, "rg"), "ripgrep", {
+            mode: 0o755,
+        });
         mkdirSync(join(sourceDir, "definitions"), { recursive: true });
         writeFileSync(join(sourceDir, "definitions", "future.json"), "{}");
         mkdirSync(join(sourceDir, "copilot-sdk"), { recursive: true });
@@ -170,6 +172,7 @@ describe("materializeRuntimeBundle", () => {
         mkdirSync(join(sourceDir, "preloads"), { recursive: true });
         writeFileSync(join(sourceDir, "preloads", "extension_bootstrap.mjs"), "bootstrap");
         writeFileSync(join(sourceDir, "app.js"), "excluded");
+        writeFileSync(join(sourceDir, "cli-main.js"), "excluded");
         writeFileSync(join(sourceDir, "copilot"), "excluded");
         writeFileSync(join(sourceDir, "copilot.exe"), "excluded");
         writeFileSync(join(sourceDir, "LICENSE.md"), "excluded");
@@ -204,12 +207,16 @@ describe("materializeRuntimeBundle", () => {
             "bootstrap"
         );
         expect(existsSync(join(installDir, "app.js"))).toBe(false);
+        expect(existsSync(join(installDir, "cli-main.js"))).toBe(false);
         expect(existsSync(join(installDir, "copilot"))).toBe(false);
         expect(existsSync(join(installDir, "copilot.exe"))).toBe(false);
         expect(existsSync(join(installDir, "LICENSE.md"))).toBe(false);
         expect(existsSync(join(installDir, "README.md"))).toBe(false);
         if (process.platform !== "win32") {
             expect(statSync(installedWrapper).mode & 0o111).not.toBe(0);
+            expect(
+                statSync(join(installDir, "ripgrep", "bin", platform, "rg")).mode & 0o111
+            ).not.toBe(0);
         }
     });
 
@@ -409,48 +416,73 @@ describe("release package acquisition", () => {
         expect(fetcher).toHaveBeenCalledTimes(2);
     });
 
-    it("downloads, verifies, and caches a release package for packaging", async () => {
-        const sourceRoot = mkdtempSync(join(tmpdir(), "copilot-release-source-"));
-        const packageRoot = join(sourceRoot, "package");
-        const platform = "linux-x64";
-        const prebuilds = join(packageRoot, "prebuilds", platform);
-        mkdirSync(prebuilds, { recursive: true });
-        writeFileSync(join(prebuilds, "copilot-runtime"), "wrapper");
-        writeFileSync(join(prebuilds, "runtime.node"), "runtime");
-        mkdirSync(join(packageRoot, "schemas"), { recursive: true });
-        writeFileSync(join(packageRoot, "schemas", "api.schema.json"), "{}");
+    it.each([
+        ["7.8.9", "copilot-cli", "v7.8.9"],
+        ["7.8.9-2", "copilot-cli", "v7.8.9-2"],
+        ["7.8.9-unstable.r123.gabcdef0", "copilot-sdk", "runtime-7.8.9-unstable.r123.gabcdef0"],
+        ["7.8.9-2.unstable.r123.gabcdef0", "copilot-sdk", "runtime-7.8.9-2.unstable.r123.gabcdef0"],
+    ])(
+        "downloads, verifies, and caches %s for source packaging",
+        async (version, repository, tag) => {
+            const sourceRoot = mkdtempSync(join(tmpdir(), "copilot-release-source-"));
+            onTestFinished(() => rmSync(sourceRoot, { recursive: true, force: true }));
+            const packageRoot = join(sourceRoot, "package");
+            const platform = "linux-x64";
+            const prebuilds = join(packageRoot, "prebuilds", platform);
+            mkdirSync(prebuilds, { recursive: true });
+            writeFileSync(join(prebuilds, "copilot-runtime"), "wrapper");
+            writeFileSync(join(prebuilds, "runtime.node"), "runtime");
+            mkdirSync(join(packageRoot, "schemas"), { recursive: true });
+            writeFileSync(join(packageRoot, "schemas", "api.schema.json"), "{}");
 
-        const archivePath = join(sourceRoot, "runtime.tgz");
-        await createTar({ cwd: sourceRoot, file: archivePath, gzip: true }, ["package"]);
-        const archive = readFileSync(archivePath);
-        const version = "1.2.3-4";
-        const assetName = getRuntimeReleaseAssetName(version, platform);
-        const checksum = createHash("sha256").update(archive).digest("hex");
-        const fetcher = vi.fn(async (input: string | URL | Request) =>
-            String(input).endsWith("/SHA256SUMS.txt")
-                ? new Response(`${checksum}  ${assetName}\n`)
-                : new Response(archive)
-        );
-        const cacheRoot = join(sourceRoot, "cache");
-
-        const downloadedPackage = await ensureCopilotPackage(version, {
-            cacheRoot,
-            fetch: fetcher,
-            platform,
-        });
-        expect(readFileSync(join(downloadedPackage, "schemas", "api.schema.json"), "utf8")).toBe(
-            "{}"
-        );
-
-        await expect(
-            ensureCopilotPackage(version, {
-                cacheRoot,
-                fetch: fetcher,
-                platform,
-            })
-        ).resolves.toBe(downloadedPackage);
-        expect(fetcher).toHaveBeenCalledTimes(2);
-    });
+            const archivePath = join(sourceRoot, "runtime.tgz");
+            await createTar({ cwd: sourceRoot, file: archivePath, gzip: true }, ["package"]);
+            const archive = readFileSync(archivePath);
+            const assetName = getRuntimeReleaseAssetName(version, platform);
+            const checksum = createHash("sha256").update(archive).digest("hex");
+            vi.stubEnv("COPILOT_CLI_DOWNLOAD_BASE_URL", "https://ambient.example.invalid/releases");
+            onTestFinished(() => vi.unstubAllEnvs());
+            for (const mirror of [undefined, "https://mirror.example.invalid/releases///"]) {
+                const base =
+                    mirror?.replace(/\/+$/, "") ??
+                    `https://github.com/github/${repository}/releases/download`;
+                const releaseUrl = `${base}/${tag}`;
+                const fetcher = vi.fn(async (input: string | URL | Request) => {
+                    const url = String(input);
+                    if (url === `${releaseUrl}/SHA256SUMS.txt`)
+                        return new Response(`${checksum}  ${assetName}\n`);
+                    if (url === `${releaseUrl}/${assetName}`) return new Response(archive);
+                    return new Response("Unexpected release URL", { status: 404 });
+                });
+                const environment = { COPILOT_CLI_DOWNLOAD_BASE_URL: mirror };
+                const cacheRoot = join(sourceRoot, mirror ? "mirror-cache" : "cache");
+                await expect(
+                    downloadVerifiedReleaseAsset(version, assetName, {
+                        environment,
+                        fetch: fetcher,
+                    })
+                ).resolves.toEqual(archive);
+                const options = {
+                    cacheRoot,
+                    fetch: fetcher,
+                    platform,
+                    environment,
+                };
+                const downloadedPackage = await ensureCopilotPackage(version, options);
+                expect(
+                    readFileSync(join(downloadedPackage, "schemas", "api.schema.json"), "utf8")
+                ).toBe("{}");
+                await expect(ensureCopilotPackage(version, options)).resolves.toBe(
+                    downloadedPackage
+                );
+                expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+                    `${releaseUrl}/SHA256SUMS.txt`,
+                    `${releaseUrl}/${assetName}`,
+                    `${releaseUrl}/${assetName}`,
+                ]);
+            }
+        }
+    );
 
     it("rejects a release package that does not match SHA256SUMS.txt", async () => {
         const cacheRoot = mkdtempSync(join(tmpdir(), "copilot-release-mismatch-"));

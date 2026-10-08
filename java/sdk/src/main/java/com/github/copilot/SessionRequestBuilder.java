@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.github.copilot.rpc.CopilotClientMode;
 import com.github.copilot.rpc.CreateSessionRequest;
 import com.github.copilot.rpc.ProviderConfig;
@@ -23,6 +24,10 @@ import com.github.copilot.rpc.SectionOverride;
 import com.github.copilot.rpc.SectionOverrideAction;
 import com.github.copilot.rpc.SessionConfig;
 import com.github.copilot.rpc.SystemMessageConfig;
+import com.github.copilot.rpc.ToolDefinition;
+import com.github.copilot.rpc.ToolDefer;
+import com.github.copilot.generated.rpc.ProtocolExternalToolDefer;
+import com.github.copilot.generated.rpc.ProtocolExternalToolDefinition;
 
 /**
  * Builds JSON-RPC request objects from session configuration.
@@ -89,6 +94,39 @@ final class SessionRequestBuilder {
         return new ExtractedTransforms(wireConfig, callbacks);
     }
 
+    static List<ProtocolExternalToolDefinition> toProtocolExternalTools(List<ToolDefinition> tools) {
+        if (tools == null) {
+            return null;
+        }
+        return tools.stream().map(SessionRequestBuilder::toProtocolExternalTool).toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ProtocolExternalToolDefinition toProtocolExternalTool(ToolDefinition tool) {
+        Map<String, Object> parameters = null;
+        if (tool.parameters() instanceof Map<?, ?> map) {
+            parameters = (Map<String, Object>) map;
+        } else if (tool.parameters() != null) {
+            parameters = JsonRpcClient.getObjectMapper().convertValue(tool.parameters(),
+                    new TypeReference<Map<String, Object>>() {
+                    });
+        }
+        return new ProtocolExternalToolDefinition(tool.name(), tool.description() != null ? tool.description() : "",
+                null, parameters, tool.overridesBuiltInTool(), tool.skipPermission(), toProtocolDefer(tool.defer()),
+                tool.isTerminal(), tool.metadata());
+    }
+
+    private static ProtocolExternalToolDefer toProtocolDefer(ToolDefer defer) {
+        if (defer == null || defer == ToolDefer.NONE) {
+            return null;
+        }
+        return switch (defer) {
+            case AUTO -> ProtocolExternalToolDefer.AUTO;
+            case NEVER -> ProtocolExternalToolDefer.NEVER;
+            case NONE -> null;
+        };
+    }
+
     /**
      * Builds a CreateSessionRequest from the given configuration.
      *
@@ -148,6 +186,7 @@ final class SessionRequestBuilder {
         }
         config.getIncludeSubAgentStreamingEvents().ifPresent(request::setIncludeSubAgentStreamingEvents);
         request.setMcpServers(config.getMcpServers());
+        request.setDiagnostics(config.getDiagnostics());
         request.setMcpOAuthTokenStorage(config.getMcpOAuthTokenStorage());
         request.setAuthClientIdMetadataUrl(config.getAuthClientIdMetadataUrl());
         request.setCustomAgents(config.getCustomAgents());
@@ -171,10 +210,14 @@ final class SessionRequestBuilder {
             request.setOrganizationCustomInstructions(config.getOrganizationCustomInstructions());
         }
         config.getEnableOnDemandInstructionDiscovery().ifPresent(request::setEnableOnDemandInstructionDiscovery);
+        config.getRefreshCustomInstructions().ifPresent(request::setRefreshCustomInstructions);
         config.getEnableFileHooks().ifPresent(request::setEnableFileHooks);
         config.getEnableHostGitOperations().ifPresent(request::setEnableHostGitOperations);
         config.getEnableSessionStore().ifPresent(request::setEnableSessionStore);
         config.getEnableSkills().ifPresent(request::setEnableSkills);
+        if (config.getSkillProvider() != null) {
+            request.setHasSkillProvider(true);
+        }
         if (config.getEmbeddingCacheStorage() != null) {
             request.setEmbeddingCacheStorage(config.getEmbeddingCacheStorage());
         }
@@ -205,6 +248,7 @@ final class SessionRequestBuilder {
         request.setFeatureFlags(config.getFeatureFlags());
         request.setExpAssignments(config.getExpAssignments());
         config.getEnableManagedSettings().ifPresent(request::setEnableManagedSettings);
+        config.getEnforceManagedModelDefaults().ifPresent(request::setEnforceManagedModelDefaults);
         request.setManagedSettings(config.getManagedSettings());
 
         return request;
@@ -254,6 +298,8 @@ final class SessionRequestBuilder {
         }
 
         request.setModel(config.getModel());
+        config.getContinuePendingWork().ifPresent(request::setContinuePendingWork);
+        config.getAllowTranscriptRecovery().ifPresent(request::setAllowTranscriptRecovery);
         request.setClientName(config.getClientName());
         request.setReasoningEffort(config.getReasoningEffort());
         request.setReasoningSummary(config.getReasoningSummary());
@@ -293,6 +339,9 @@ final class SessionRequestBuilder {
         config.getEnableHostGitOperations().ifPresent(request::setEnableHostGitOperations);
         config.getEnableSessionStore().ifPresent(request::setEnableSessionStore);
         config.getEnableSkills().ifPresent(request::setEnableSkills);
+        if (config.getSkillProvider() != null) {
+            request.setHasSkillProvider(true);
+        }
         if (config.getEmbeddingCacheStorage() != null) {
             request.setEmbeddingCacheStorage(config.getEmbeddingCacheStorage());
         }
@@ -304,6 +353,7 @@ final class SessionRequestBuilder {
         }
         config.getIncludeSubAgentStreamingEvents().ifPresent(request::setIncludeSubAgentStreamingEvents);
         request.setMcpServers(config.getMcpServers());
+        request.setDiagnostics(config.getDiagnostics());
         request.setMcpOAuthTokenStorage(config.getMcpOAuthTokenStorage());
         request.setAuthClientIdMetadataUrl(config.getAuthClientIdMetadataUrl());
         request.setCustomAgents(config.getCustomAgents());
@@ -346,6 +396,7 @@ final class SessionRequestBuilder {
         request.setFeatureFlags(config.getFeatureFlags());
         request.setExpAssignments(config.getExpAssignments());
         config.getEnableManagedSettings().ifPresent(request::setEnableManagedSettings);
+        config.getEnforceManagedModelDefaults().ifPresent(request::setEnforceManagedModelDefaults);
         request.setManagedSettings(config.getManagedSettings());
 
         return request;
@@ -391,6 +442,9 @@ final class SessionRequestBuilder {
         }
         if (config.getOnUserInputRequest() != null) {
             session.registerUserInputHandler(config.getOnUserInputRequest());
+        }
+        if (config.getSkillProvider() != null) {
+            session.registerSkillProvider(config.getSkillProvider());
         }
         if (config.getHooks() != null) {
             session.registerHooks(config.getHooks());
@@ -443,6 +497,9 @@ final class SessionRequestBuilder {
         }
         if (config.getOnUserInputRequest() != null) {
             session.registerUserInputHandler(config.getOnUserInputRequest());
+        }
+        if (config.getSkillProvider() != null) {
+            session.registerSkillProvider(config.getSkillProvider());
         }
         if (config.getHooks() != null) {
             session.registerHooks(config.getHooks());

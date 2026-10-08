@@ -223,7 +223,10 @@ describe("disabled MCP servers", async () => {
         },
     });
 
-    function createPluginDirectory(prefix: string): {
+    function createPluginDirectory(
+        prefix: string,
+        controlArgs: string[] = []
+    ): {
         pluginDirectory: string;
         controlMarker: string;
         disabledMarker: string;
@@ -253,6 +256,7 @@ describe("disabled MCP servers", async () => {
                             controlMarker,
                             "--server-name",
                             "control",
+                            ...controlArgs,
                         ],
                     },
                     disabled: {
@@ -339,6 +343,250 @@ describe("disabled MCP servers", async () => {
         );
     }
 
+    it.each(["connected", "failed"] as const)(
+        "lists cold configured servers without starting or awaiting them before a %s first-turn startup",
+        { timeout: 120_000 },
+        async (expectedStatus) => {
+            const startupGate = join(workDir, `startup-gate-${randomUUID()}`);
+            const { pluginDirectory, controlMarker, disabledMarker } = createPluginDirectory(
+                "configured-mcp",
+                [
+                    "--startup-gate",
+                    startupGate,
+                    ...(expectedStatus === "failed" ? ["--fail-startup"] : []),
+                ]
+            );
+            await using session = await client.createSession({
+                onPermissionRequest: approveAll,
+                pluginDirectories: [pluginDirectory],
+                disabledMcpServers: ["disabled"],
+            });
+
+            for (let i = 0; i < 2; i++) {
+                const inventory = await session.rpc.mcp.listConfigured();
+                expect(
+                    inventory.servers
+                        .filter((server) => ["control", "disabled"].includes(server.name))
+                        .map(({ name, enabled, live }) => ({ name, enabled, live }))
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                ).toEqual([
+                    { name: "control", enabled: true, live: { status: "not_configured" } },
+                    { name: "disabled", enabled: false, live: { status: "not_configured" } },
+                ]);
+                expect(markerCount(controlMarker)).toBe(0);
+                expect(markerCount(disabledMarker)).toBe(0);
+            }
+
+            const [response] = await Promise.all([
+                session.sendAndWait({ prompt: MCP_TRIGGER_PROMPT }, 90_000),
+                (async () => {
+                    try {
+                        await waitForMarkerCount(controlMarker, 1);
+                        // Inventory must also return while initialize is held behind the gate.
+                        const inventory = await session.rpc.mcp.listConfigured();
+                        expect(
+                            inventory.servers.find((server) => server.name === "control")?.live
+                                ?.status
+                        ).toBe("pending");
+                        expect(markerCount(controlMarker)).toBe(1);
+                    } finally {
+                        writeFileSync(startupGate, "release");
+                    }
+                })(),
+            ]);
+            expectSyntheticResponse(response);
+            const startsAfterTurn = markerCount(controlMarker);
+            if (expectedStatus === "connected") {
+                expect(startsAfterTurn).toBe(1);
+            }
+            // Turn initialization may retry a failed server; inventory must not.
+            for (let i = 0; i < 2; i++) {
+                const inventory = await session.rpc.mcp.listConfigured();
+                expect(
+                    inventory.servers.find((server) => server.name === "control")?.live?.status
+                ).toBe(expectedStatus);
+                expect(markerCount(controlMarker)).toBe(startsAfterTurn);
+            }
+            expect(markerCount(disabledMarker)).toBe(0);
+        }
+    );
+
+    it.each([false, true])(
+        "restores cold default inheritance for disabled default %s without starting MCP",
+        async (configDisabled) => {
+            const configDirectory = join(workDir, `cold-file-mcp-${randomUUID()}`);
+            mkdirSync(configDirectory, { recursive: true });
+            const marker = join(configDirectory, "server-started.log");
+            const serverName = "cold-file-server";
+            await using session = await client.createSession({
+                onPermissionRequest: approveAll,
+                configDirectory,
+                enableConfigDiscovery: true,
+                requestExtensions: false,
+            });
+            await drainPostCreateRpc(session);
+
+            // These names are entirely unconfigured; every call must remain inert.
+            for (let i = 0; i < 2; i++) {
+                await session.rpc.mcp.enable({ serverName });
+                await session.rpc.mcp.enable({ serverName });
+                await session.rpc.mcp.disable({ serverName });
+                await session.rpc.mcp.disable({ serverName });
+            }
+            await session.rpc.mcp.enable({ serverName });
+
+            writeFileSync(
+                join(configDirectory, "mcp-config.json"),
+                JSON.stringify({
+                    mcpServers: {
+                        [serverName]: {
+                            type: "stdio",
+                            command: process.execPath,
+                            args: [TEST_MCP_SERVER, "--startup-marker", marker],
+                            tools: ["*"],
+                            disabled: configDisabled,
+                        },
+                    },
+                })
+            );
+            const after = await session.rpc.mcp.listConfigured();
+            expect(after.servers.find((server) => server.name === serverName)).toMatchObject({
+                enabled: !configDisabled,
+            });
+            expect(after.servers.find((server) => server.name === serverName)?.live).toEqual({
+                status: "not_configured",
+            });
+            expect(markerCount(marker)).toBe(0);
+
+            // A live-list read is the first operation that may materialize the graph.
+            const loaded = await session.rpc.mcp.list();
+            expect(loaded.servers.find((server) => server.name === serverName)?.status).toBe(
+                configDisabled ? "disabled" : "connected"
+            );
+            expect(markerCount(marker)).toBe(configDisabled ? 0 : 1);
+        }
+    );
+
+    // SDK runners provide a sandbox backend only on macOS (no bwrap/BaseContainer elsewhere).
+    it.skipIf(process.platform !== "darwin").each([
+        ["create", "connected"],
+        ["create", "failed"],
+        ["resume", "connected"],
+        ["resume", "failed"],
+    ] as const)(
+        "%s applies sandbox without starting MCP and skips a gated %s startup",
+        { timeout: 120_000 },
+        async (mode, expectedStatus) => {
+            const startupGate = join(workDir, `sandbox-startup-gate-${randomUUID()}`);
+            const { pluginDirectory, controlMarker, disabledMarker } = createPluginDirectory(
+                "sandbox-mcp",
+                [
+                    "--startup-gate",
+                    startupGate,
+                    ...(expectedStatus === "failed" ? ["--fail-startup"] : []),
+                ]
+            );
+            const createOptions = {
+                onPermissionRequest: approveAll,
+                enableSessionStore: true,
+                pluginDirectories: [pluginDirectory],
+                disabledMcpServers: ["disabled"],
+            };
+            const activeClient = createClient({
+                connection: RuntimeConnection.forStdio({ path: process.env.COPILOT_CLI_PATH }),
+                requestHandler: new PersistingRequestHandler(),
+            });
+            let sessionId: string | undefined;
+            if (mode === "resume") {
+                const seedClient = createClient({
+                    connection: RuntimeConnection.forStdio({ path: process.env.COPILOT_CLI_PATH }),
+                    requestHandler: new PersistingRequestHandler(),
+                });
+                try {
+                    const seed = await seedClient.createSession({
+                        onPermissionRequest: approveAll,
+                        enableSessionStore: true,
+                    });
+                    sessionId = seed.sessionId;
+                    expectSyntheticResponse(await seed.sendAndWait({ prompt: MCP_TRIGGER_PROMPT }));
+                } finally {
+                    await seedClient.stop();
+                }
+            }
+            try {
+                await using session = sessionId
+                    ? await activeClient.resumeSession(sessionId, createOptions)
+                    : await activeClient.createSession(createOptions);
+                let startupFailure: string | undefined;
+                const unsubscribe = session.on("session.mcp_server_status_changed", (event) => {
+                    if (event.data.serverName === "control" && event.data.status === "failed") {
+                        startupFailure = event.data.error ?? "MCP startup failed";
+                    }
+                });
+                try {
+                    const updated = await session.rpc.options.update({
+                        sandboxConfig: {
+                            enabled: true,
+                            allowBypass: true,
+                            addCurrentWorkingDirectory: true,
+                            allowDevToolAccess: true,
+                            userPolicy: {
+                                // The fixture and its dependencies live outside the session workspace.
+                                filesystem: {
+                                    readonlyPaths: [resolve(__dirname, "../../../../..")],
+                                },
+                            },
+                        },
+                    });
+                    expect(updated.success).toBe(true);
+                    const inventory = await session.rpc.mcp.listConfigured();
+                    expect(inventory.servers.filter((s) => s.name === "control")).toMatchObject([
+                        { enabled: true },
+                    ]);
+                    expect(markerCount(controlMarker)).toBe(0);
+                    expect(markerCount(disabledMarker)).toBe(0);
+                    const [response] = await Promise.all([
+                        session.sendAndWait({ prompt: MCP_TRIGGER_PROMPT }, 60_000),
+                        (async () => {
+                            await waitForCondition(
+                                () => {
+                                    if (startupFailure) {
+                                        throw new Error(startupFailure);
+                                    }
+                                    return markerCount(controlMarker) === 1;
+                                },
+                                { timeoutMs: 60_000, intervalMs: 100 }
+                            );
+                            const background = await session.rpc.mcp.moveLoadingToBackground();
+                            expect(background.movedToBackground).toBe(true);
+                        })(),
+                    ]);
+                    expectSyntheticResponse(response);
+                    expect(existsSync(startupGate)).toBe(false);
+                    expect(markerCount(controlMarker)).toBe(1);
+                    expect(markerCount(disabledMarker)).toBe(0);
+                    writeFileSync(startupGate, "release");
+                    await waitForCondition(
+                        async () => {
+                            const configured = await session.rpc.mcp.listConfigured();
+                            return (
+                                configured.servers.find((server) => server.name === "control")?.live
+                                    ?.status === expectedStatus
+                            );
+                        },
+                        { timeoutMs: 60_000, intervalMs: 100 }
+                    );
+                    expect(markerCount(controlMarker)).toBe(1);
+                } finally {
+                    unsubscribe();
+                    writeFileSync(startupGate, "release");
+                }
+            } finally {
+                await activeClient.stop();
+            }
+        }
+    );
+
     it(
         "keeps disabled plugin MCP servers per-session on create",
         { timeout: 120_000 },
@@ -395,6 +643,8 @@ describe("disabled MCP servers", async () => {
             const disabledSession = await client.createSession({
                 onPermissionRequest: approveAll,
                 enableConfigDiscovery: true,
+                // This exercises MCP discovery, not standalone extension hosting.
+                requestExtensions: false,
                 enableMcpApps: true,
                 githubMcpToolConfig: { enableAllTools: true },
                 disabledMcpServers: ["github-mcp-server"],
@@ -420,6 +670,7 @@ describe("disabled MCP servers", async () => {
             await using enabledSession = await client.createSession({
                 onPermissionRequest: approveAll,
                 enableConfigDiscovery: true,
+                requestExtensions: false,
                 enableMcpApps: true,
                 githubMcpToolConfig: { enableAllTools: true },
             });

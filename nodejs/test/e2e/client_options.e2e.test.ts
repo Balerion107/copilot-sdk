@@ -29,6 +29,7 @@ function saveCapture() {
     clientResponses,
     env: {
       COPILOT_HOME: process.env.COPILOT_HOME,
+      COPILOT_RUNTIME_PROCESS_FILE_LOGGING: process.env.COPILOT_RUNTIME_PROCESS_FILE_LOGGING,
       COPILOT_SDK_AUTH_TOKEN: process.env.COPILOT_SDK_AUTH_TOKEN,
       COPILOT_OTEL_ENABLED: process.env.COPILOT_OTEL_ENABLED,
       OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -205,7 +206,7 @@ function getArray(value: unknown): unknown[] {
 }
 
 describe("Client options", async () => {
-    const { copilotClient: defaultClient, env, workDir } = await createSdkTestContext();
+    const { createClient, env, workDir } = await createSdkTestContext();
 
     it("createSession starts the client lazily", async () => {
         const client = new CopilotClient({
@@ -259,11 +260,7 @@ describe("Client options", async () => {
         fs.mkdirSync(clientCwd, { recursive: true });
         fs.writeFileSync(path.join(clientCwd, "marker.txt"), "I am in the client cwd");
 
-        // Reference defaultClient to keep the shared test context (and its CAPI proxy/env)
-        // alive for the duration of this test; we deliberately spin up a fresh client with
-        // a custom cwd to assert that the custom cwd is honored.
-        void defaultClient;
-        const client = new CopilotClient({
+        const client = createClient({
             workingDirectory: clientCwd,
             env,
             connection: RuntimeConnection.forStdio({ path: process.env.COPILOT_CLI_PATH }),
@@ -349,6 +346,7 @@ describe("Client options", async () => {
         expect(path.resolve(capture.cwd)).toBe(path.resolve(workDir));
 
         expect(capture.env.COPILOT_HOME).toBe(copilotHomeFromOption);
+        expect(capture.env.COPILOT_RUNTIME_PROCESS_FILE_LOGGING).toBe("1");
         expect(capture.env.COPILOT_SDK_AUTH_TOKEN).toBe("process-option-token");
         expect(capture.env.COPILOT_OTEL_ENABLED).toBe("true");
         expect(capture.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://127.0.0.1:4318");
@@ -402,6 +400,34 @@ describe("Client options", async () => {
         expect(resumeRequests).toHaveLength(1);
         expect(resumeRequests[0].params.customAgentsLocalOnly).toBe(false);
         await resumed.disconnect();
+    });
+
+    it("preserves an explicit process-file logging setting in empty mode", async () => {
+        const cliPath = path.join(workDir, `fake-cli-empty-logging-${Date.now()}.js`);
+        const capturePath = path.join(workDir, `fake-cli-empty-logging-${Date.now()}.json`);
+        fs.writeFileSync(cliPath, FAKE_STDIO_CLI_SCRIPT);
+        const client = new CopilotClient({
+            mode: "empty",
+            baseDirectory: workDir,
+            logLevel: "debug",
+            env: {
+                ...env,
+                COPILOT_RUNTIME_PROCESS_FILE_LOGGING: "1",
+            },
+            connection: RuntimeConnection.forStdio({
+                path: cliPath,
+                args: ["--capture-file", capturePath],
+            }),
+        });
+        onTestFinished(() => client.stop());
+        await client.start();
+
+        const capture = JSON.parse(fs.readFileSync(capturePath, "utf8")) as {
+            env: Record<string, string | undefined>;
+            args: string[];
+        };
+        expect(capture.env.COPILOT_RUNTIME_PROCESS_FILE_LOGGING).toBe("1");
+        assertArgumentValue(capture.args, "--log-level", "debug");
     });
 
     it("should register and invoke an extension launch provider during startup", async () => {

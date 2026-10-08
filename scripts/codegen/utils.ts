@@ -8,6 +8,7 @@
 
 import { execFile } from "child_process";
 import fs from "fs/promises";
+import { realpathSync } from "fs";
 import type { JSONSchema7, JSONSchema7Definition } from "json-schema";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -15,6 +16,7 @@ import { promisify } from "util";
 import { COPILOT_CLI_VERSION } from "../../nodejs/src/cliVersion.js";
 import { ensureCopilotPackage } from "../../nodejs/scripts/releaseArtifacts.js";
 import { findRuntimeRoot } from "../runtime-layout.mjs";
+import { extensibleEnumValues } from "./extensible-enums.js";
 
 export const execFileAsync = promisify(execFile);
 
@@ -23,6 +25,32 @@ const __dirname = path.dirname(__filename);
 
 /** Root of the copilot-sdk repo */
 export const REPO_ROOT = path.resolve(__dirname, "../..");
+
+/** Recognizes entrypoints reached through Bazel links or Windows path casing. */
+export function isCodegenEntrypoint(
+    entryPath: string | undefined,
+    modulePath: string,
+    platform = process.platform,
+): boolean {
+    if (!entryPath) {
+        return false;
+    }
+    const canonicalize = (filePath: string) => {
+        try {
+            return realpathSync.native(filePath);
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                throw error;
+            }
+            return path.resolve(filePath);
+        }
+    };
+    const canonicalEntryPath = canonicalize(entryPath);
+    const canonicalModulePath = canonicalize(modulePath);
+    return platform === "win32"
+        ? canonicalEntryPath.toLowerCase() === canonicalModulePath.toLowerCase()
+        : canonicalEntryPath === canonicalModulePath;
+}
 
 /** Event types to exclude from generation (internal/legacy types) */
 export const EXCLUDED_EVENT_TYPES = new Set(["session.import_legacy"]);
@@ -218,6 +246,11 @@ export function postProcessSchema(schema: JSONSchema7): JSONSchema7 {
     if (typeof schema !== "object" || schema === null) return schema;
 
     const processed = { ...schema } as JSONSchema7WithDefs;
+    const knownValues = extensibleEnumValues(processed);
+    if (knownValues) {
+        // Enum emitters retain the familiar constants; open-value emitters must also retain unknown strings.
+        processed.enum = knownValues;
+    }
 
     if (processed.title === "ProviderModelConfig" && processed.properties) {
         const tokenFields = new Set([
@@ -1691,8 +1724,13 @@ function normalizeDefinitionForComparison(definition: JSONSchema7Definition): un
     }
 
     const result: Record<string, unknown> = {};
+    const knownValues = extensibleEnumValues(definition);
     for (const [key, value] of Object.entries(definition as Record<string, unknown>)) {
-        if (key === "description" || key === "markdownDescription" || key === "x-enumDescriptions") {
+        if (key === "enum" && knownValues && Array.isArray(value) &&
+            value.length === knownValues.length && value.every((item) => knownValues.includes(item))) {
+            // The processed event schema adds known values for codegen, not a wire restriction.
+            continue;
+        } else if (key === "description" || key === "markdownDescription" || key === "x-enumDescriptions") {
             continue;
         } else if (key === "$ref" && typeof value === "string") {
             const localRef = parseLocalDefinitionRef(value);

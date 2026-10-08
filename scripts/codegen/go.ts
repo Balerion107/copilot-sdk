@@ -29,6 +29,7 @@ import {
     getNullableInner,
     getRpcSchemaTypeName,
     getSessionEventsSchemaPath,
+    isCodegenEntrypoint,
     getSessionEventVariantSchemas,
     getSharedSessionEventEnvelopeProperties,
     hasSchemaPayload,
@@ -58,6 +59,8 @@ import {
     type RpcMethod,
     type SessionEventEnvelopeProperty,
 } from "./utils.js";
+import { validateLegacyRequests, validateLegacyDefinitions } from "./legacy-parameters.js";
+import { normalizeExtensibleEnums } from "./extensible-enums.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -409,8 +412,8 @@ async function formatGoFile(filePath: string): Promise<void> {
     try {
         await execFileAsync("go", ["fmt", filePath]);
         console.log(`  ✓ Formatted with go fmt`);
-    } catch {
-        // go fmt not available, skip
+    } catch (cause) {
+        throw new Error(`Failed to format ${filePath}. Go is required for SDK generation; install the version specified in go/go.mod and ensure go is on PATH.`, { cause });
     }
 }
 
@@ -490,6 +493,9 @@ function goParamsTypeName(method: RpcMethod): string {
     if (method.rpcMethod.startsWith("session.") && method.params?.$ref) {
         return fallback;
     }
+    if (method.params?.$ref) {
+        return toPascalCase(refTypeName(method.params.$ref, rpcDefinitions));
+    }
     return getRpcSchemaTypeName(getMethodParamsSchema(method), fallback);
 }
 
@@ -500,6 +506,7 @@ interface GoEventVariant {
     dataClassName: string;
     dataSchema: JSONSchema7;
     dataDescription?: string;
+    eventDeprecated: boolean;
     eventExperimental: boolean;
     dataExperimental: boolean;
 }
@@ -593,6 +600,7 @@ function extractGoEventVariants(schema: JSONSchema7): GoEventVariant[] {
                 dataClassName: `${toPascalCase(typeName)}Data`,
                 dataSchema,
                 dataDescription: dataSchema.description,
+                eventDeprecated: isSchemaDeprecated(variant),
                 eventExperimental: isSchemaExperimental(variant),
                 dataExperimental: isSchemaExperimental(dataSchema),
             };
@@ -3009,8 +3017,54 @@ function emitGoAlias(typeName: string, schema: JSONSchema7, ctx: GoCodegenCtx): 
     ctx.structs.push(lines.join("\n"));
 }
 
+/**
+ * A named definition is wire-nullable when its `anyOf` pairs a single `$ref`
+ * with a real `type: "null"` branch. The `{ "not": {} }` omission sentinel is
+ * deliberately excluded: it means "absent", not "null on the wire". Returns
+ * the referenced definition name, or undefined when the shape does not match.
+ */
+function goWireNullableRefName(schema: JSONSchema7): string | undefined {
+    if (!Array.isArray(schema.anyOf)) return undefined;
+    const branches = schema.anyOf.filter((branch): branch is JSONSchema7 => typeof branch === "object" && branch !== null);
+    if (branches.length !== schema.anyOf.length) return undefined;
+    if (!branches.some((branch) => branch.type === "null")) return undefined;
+    const refBranches = branches.filter((branch) => typeof branch.$ref === "string");
+    if (refBranches.length !== 1 || branches.length !== 2) return undefined;
+    return refBranches[0].$ref!.split("/").pop();
+}
+
+/**
+ * Emits a nullable result definition as a pointer alias so the exported name
+ * matches what the corresponding method already returns and a JSON `null`
+ * cannot decode into a zero value.
+ */
+function emitGoNullableRefAlias(typeName: string, refName: string, schema: JSONSchema7, ctx: GoCodegenCtx): void {
+    if (ctx.generatedNames.has(typeName)) return;
+    ctx.generatedNames.add(typeName);
+
+    const lines: string[] = [];
+    if (schema.description) {
+        pushGoCommentForContext(lines, schema.description, ctx);
+    }
+    if (isSchemaExperimental(schema)) {
+        pushGoExperimentalTypeComment(lines, typeName, ctx);
+    }
+    if (isSchemaDeprecated(schema)) {
+        pushGoCommentForContext(lines, `Deprecated: ${typeName} is deprecated and will be removed in a future version.`, ctx);
+    }
+    lines.push(`type ${typeName} = *${goDefinitionName(refName)}`);
+    ctx.structs.push(lines.join("\n"));
+}
+
 function emitGoRpcDefinition(definitionName: string, schema: JSONSchema7, ctx: GoCodegenCtx): string {
     const typeName = goDefinitionName(definitionName);
+
+    const wireNullableRef = goWireNullableRefName(schema);
+    if (wireNullableRef) {
+        emitGoNullableRefAlias(typeName, wireNullableRef, schema, ctx);
+        return typeName;
+    }
+
     const effectiveSchema = resolveObjectSchema(schema, ctx.definitions) ?? resolveSchema(schema, ctx.definitions) ?? schema;
 
     if (isStringEnumDefinition(effectiveSchema)) {
@@ -3212,6 +3266,10 @@ export function generateGoSessionEventsCode(
         if (variant.dataExperimental || isSchemaExperimental(variant.dataSchema)) {
             pushGoExperimentalTypeComment(lines, variant.dataClassName, ctx);
         }
+        if (variant.eventDeprecated || isSchemaDeprecated(variant.dataSchema)) {
+            lines.push("//");
+            pushGoCommentForContext(lines, `Deprecated: ${variant.dataClassName} is deprecated.`, ctx);
+        }
         lines.push(`type ${variant.dataClassName} struct {`);
 
         const fields: GoStructField[] = [];
@@ -3285,6 +3343,9 @@ export function generateGoSessionEventsCode(
         const variant = variants.find((candidate) => candidate.typeName === typeName);
         if (variant?.eventExperimental) {
             pushGoExperimentalEventComment(eventTypeEnum, constName, "\t");
+        }
+        if (variant?.eventDeprecated) {
+            pushGoComment(eventTypeEnum, `Deprecated: ${constName} identifies a deprecated event.`, "\t");
         }
         eventTypeEnum.push(`\t${constName} SessionEventType = "${typeName}"`);
     }
@@ -3529,11 +3590,30 @@ function collectGoTopLevelNames(code: string, keyword: "type" | "const"): string
     return [...names].sort(compareGoTypeNames);
 }
 
-function generateGoSessionEventAliasFile(
+export function collectGoDeprecatedEventNames(sessionSchema: JSONSchema7): ReadonlySet<string> {
+    const deprecatedNames = new Set<string>();
+    for (const variant of extractGoEventVariants(sessionSchema)) {
+        if (variant.eventDeprecated || isSchemaDeprecated(variant.dataSchema)) {
+            deprecatedNames.add(variant.dataClassName);
+        }
+        if (variant.eventDeprecated) {
+            deprecatedNames.add(
+                "SessionEventType" + variant.typeName
+                    .split(/[._]/)
+                    .map((word) => goIdentifierWord(word))
+                    .join("")
+            );
+        }
+    }
+    return deprecatedNames;
+}
+
+export function generateGoSessionEventAliasFile(
     generatedSessionTypeCode: string,
     additionalTypeNames: Iterable<string> = [],
     additionalConstNames: Iterable<string> = [],
-    excludeTypeNames: Iterable<string> = []
+    excludeTypeNames: Iterable<string> = [],
+    deprecatedNames: ReadonlySet<string> = new Set()
 ): string {
     const excluded = new Set(excludeTypeNames);
     const typeNames = [...new Set([...collectGoTopLevelNames(generatedSessionTypeCode, "type"), ...additionalTypeNames])]
@@ -3555,6 +3635,9 @@ function generateGoSessionEventAliasFile(
         lines.push(`// Session-event types are generated in the rpc package and aliased here for source compatibility.`);
         lines.push(`type (`);
         for (const typeName of typeNames) {
+            if (deprecatedNames.has(typeName)) {
+                pushGoComment(lines, `Deprecated: ${typeName} is deprecated.`, "\t");
+            }
             lines.push(`\t${typeName} = rpc.${typeName}`);
         }
         lines.push(`)`);
@@ -3565,6 +3648,9 @@ function generateGoSessionEventAliasFile(
         lines.push(`// Session-event constants are generated in the rpc package and re-exported here for source compatibility.`);
         lines.push(`const (`);
         for (const constName of constNames) {
+            if (deprecatedNames.has(constName)) {
+                pushGoComment(lines, `Deprecated: ${constName} identifies a deprecated event.`, "\t");
+            }
             lines.push(`\t${constName} = rpc.${constName}`);
         }
         lines.push(`)`);
@@ -3822,9 +3908,10 @@ async function generateSessionEvents(schemaPath?: string, apiSchema?: ApiSchema)
     // aliases that clash with the existing hand-written `copilot.ContextTier`.
     const handWrittenPublicNames = await collectHandWrittenGoPublicNames();
     const aliasExcludes = new Set<string>([...internalTypesInSession, ...handWrittenPublicNames]);
+    const deprecatedNames = collectGoDeprecatedEventNames(sessionSchema);
     const aliasOutPath = await writeGeneratedFile(
         "go/zsession_events.go",
-        generateGoSessionEventAliasFile(generatedTypeCode, sharedAliasNames.typeNames, sharedAliasNames.constNames, aliasExcludes)
+        generateGoSessionEventAliasFile(generatedTypeCode, sharedAliasNames.typeNames, sharedAliasNames.constNames, aliasExcludes, deprecatedNames)
     );
     console.log(`  ✓ ${aliasOutPath}`);
 
@@ -3838,7 +3925,7 @@ async function generateRpc(schemaPath?: string): Promise<void> {
     console.log("Go: generating RPC types...");
 
     const resolvedPath = schemaPath ?? (await getApiSchemaPath());
-    const schema = propagateInternalVisibility(fixNullableRequiredRefsInApiSchema(cloneSchemaForCodegen((await loadSchemaJson(resolvedPath)) as ApiSchema)) as JSONSchema7) as unknown as ApiSchema;
+    const schema = propagateInternalVisibility(normalizeExtensibleEnums(fixNullableRequiredRefsInApiSchema(cloneSchemaForCodegen((await loadSchemaJson(resolvedPath)) as ApiSchema))) as JSONSchema7) as unknown as ApiSchema;
 
     const allMethods = [
         ...collectRpcMethods(schema.server || {}),
@@ -3850,6 +3937,15 @@ async function generateRpc(schemaPath?: string): Promise<void> {
     // Build a combined definition map, including shared API definitions plus
     // method-specific request/result wrapper types.
     rpcDefinitions = collectDefinitionCollections(schema as Record<string, unknown>);
+    // Added inputs are optional pointer fields of the same request struct, so keyed literals are unchanged.
+    validateLegacyRequests(
+        schema,
+        (node) => collectRpcMethods(node),
+        getMethodParamsSchema,
+        (method) => !!method.params && !!getNullableInner(method.params)
+    );
+    // Response structs gain optional pointer fields, so keyed literals are unchanged.
+    validateLegacyDefinitions(rpcDefinitions);
     const allDefinitions: Record<string, JSONSchema7> = {
         ...Object.fromEntries(
             Object.entries(rpcDefinitions.$defs ?? {}).filter(([, value]) => typeof value === "object" && value !== null)
@@ -4265,6 +4361,12 @@ function emitMethod(lines: string[], receiver: string, name: string, method: Rpc
         }
         lines.push(`\traw, err := ${clientRef}.Request(ctx, "${method.rpcMethod}", req)`);
     } else {
+        if (method.rpcMethod === "managedSettings.resolve") {
+            // A typed nil inside Request's any argument marshals as null, not omitted params.
+            lines.push(`\tif ${paramsRef} == nil {`);
+            lines.push(`\t\t${paramsRef} = &${paramsType}{}`);
+            lines.push(`\t}`);
+        }
         const arg = hasParams ? paramsRef : "nil";
         lines.push(`\traw, err := ${clientRef}.Request(ctx, "${method.rpcMethod}", ${arg})`);
     }
@@ -4279,11 +4381,11 @@ function emitMethod(lines: string[], receiver: string, name: string, method: Rpc
         lines.push(`\t}`);
         lines.push(`\treturn result, nil`);
     } else {
-        lines.push(`\tvar result ${resultType}`);
+        lines.push(`\tvar result ${nullableInner ? "*" : ""}${resultType}`);
         lines.push(`\tif err := json.Unmarshal(raw, &result); err != nil {`);
         lines.push(`\t\treturn nil, err`);
         lines.push(`\t}`);
-        lines.push(`\treturn &result, nil`);
+        lines.push(`\treturn ${nullableInner ? "" : "&"}result, nil`);
     }
     lines.push(`}`);
     lines.push(``);
@@ -4419,7 +4521,7 @@ export function emitClientSessionApiRegistration(lines: string[], clientSchema: 
     lines.push(``);
 }
 
-function emitClientGlobalApiRegistration(lines: string[], clientSchema: Record<string, unknown>, resolveType: (name: string) => string, unionInfos: Map<string, GoDiscriminatedUnionInfo>): void {
+export function emitClientGlobalApiRegistration(lines: string[], clientSchema: Record<string, unknown>, resolveType: (name: string) => string, unionInfos: Map<string, GoDiscriminatedUnionInfo>): void {
     const groups = collectClientGroups(clientSchema);
 
     for (const { groupName, groupNode, methods } of groups) {
@@ -4569,7 +4671,7 @@ async function generate(sessionSchemaPath?: string, apiSchemaPath?: string): Pro
 
 const __filename = fileURLToPath(import.meta.url);
 
-if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+if (isCodegenEntrypoint(process.argv[1], __filename)) {
     const sessionArg = process.argv[2] || undefined;
     const apiArg = process.argv[3] || undefined;
     generate(sessionArg, apiArg).catch((err) => {

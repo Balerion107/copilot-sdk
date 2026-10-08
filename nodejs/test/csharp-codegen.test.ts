@@ -2,7 +2,189 @@ import type { JSONSchema7 } from "json-schema";
 import { describe, expect, it } from "vitest";
 
 import { generateRpcCode, generateSessionEventsCode } from "../../scripts/codegen/csharp.ts";
-import type { ApiSchema } from "../../scripts/codegen/utils.ts";
+import type { ApiSchema, RpcMethod } from "../../scripts/codegen/utils.ts";
+import { postProcessSchema } from "../../scripts/codegen/utils.ts";
+import { legacyRequestSchema } from "./legacy-parameters-fixture.ts";
+
+function legacySignatureFixture(scope: "server" | "session", legacy: unknown) {
+    const params: JSONSchema7 & { "x-legacy-parameters"?: unknown } = {
+        title: "SampleRequest",
+        type: "object",
+        properties: {
+            ...(scope === "session" ? { sessionId: { type: "string" as const } } : {}),
+            name: { type: "string" },
+            config: { "x-opaque-json": true } as JSONSchema7,
+            expectedIdentity: { type: "string" },
+        },
+        required: scope === "session" ? ["sessionId", "name"] : ["name"],
+        additionalProperties: false,
+    };
+    if (legacy !== undefined) params["x-legacy-parameters"] = legacy;
+    const methods: Record<string, RpcMethod> = {
+        run: {
+            rpcMethod: `${scope === "session" ? "session." : ""}sample.run`,
+            params,
+            result: null,
+        },
+    };
+    const schema: ApiSchema = { [scope]: { sample: methods } };
+    return { schema, params, methods };
+}
+
+describe("C# additive request entry compatibility", () => {
+    it.each(["server", "session"] as const)(
+        "preserves the exact legacy %s signature and adds a same-name request overload",
+        (scope) => {
+            const { schema } = legacySignatureFixture(scope, ["name", "config"]);
+            const code = generateRpcCode(schema);
+            expect(code).toContain(
+                "RunAsync(string name, object? config = null, CancellationToken cancellationToken = default)"
+            );
+            expect(code).toContain(
+                "RunAsync(SampleRequest request, CancellationToken cancellationToken = default)"
+            );
+            expect(code).not.toContain("WithRequestAsync");
+            expect(code).toContain("public sealed class SampleRequest\n");
+            expect(code).toContain("public required string Name { get; set; }");
+            expect(code).toContain("ArgumentNullException.ThrowIfNull(request);");
+            expect(code).toContain("ArgumentNullException.ThrowIfNull(request.Name);");
+            expect(code).toContain("Config = CopilotClient.ToJsonElementForWire(config)");
+            expect(code).not.toContain("ExpectedIdentity = expectedIdentity");
+            if (scope === "session") {
+                expect(code).toContain("internal sealed class SampleRequestWithSession\n");
+                expect(code).toContain(
+                    "new SampleRequestWithSession { SessionId = _session.SessionId, Name = request.Name, Config = request.Config, ExpectedIdentity = request.ExpectedIdentity }"
+                );
+                const publicRequest = code.match(
+                    /public sealed class SampleRequest\n\{[\s\S]*?\n\}/
+                )?.[0];
+                expect(publicRequest).toBeDefined();
+                expect(publicRequest).not.toContain("SessionId");
+                expect(code).toContain("[JsonSerializable(typeof(SampleRequestWithSession))]");
+            } else {
+                expect(code).toContain('(_rpc, "sample.run", [request], cancellationToken)');
+            }
+        }
+    );
+
+    it.each(["server", "session"] as const)(
+        "leaves unmarked %s method output unchanged",
+        (scope) => {
+            const { schema, methods, params } = legacySignatureFixture(scope, undefined);
+            methods.control = {
+                ...methods.run,
+                rpcMethod: methods.run.rpcMethod.replace(/run$/, "control"),
+                params: { ...params, title: "ControlRequest" },
+            };
+            const before = generateRpcCode(schema);
+            params["x-legacy-parameters"] = ["name", "config"];
+            const after = generateRpcCode(schema);
+            const method = /    public async Task ControlAsync\([\s\S]*?\n    \}/;
+            const request = /internal sealed class ControlRequest\n\{[\s\S]*?\n\}/;
+            expect(before.match(method)?.[0]).toBeDefined();
+            expect(after.match(method)?.[0]).toBe(before.match(method)?.[0]);
+            expect(before.match(request)?.[0]).toBeDefined();
+            expect(after.match(request)?.[0]).toBe(before.match(request)?.[0]);
+            expect(before).not.toContain("WithRequestAsync");
+            expect(after).not.toContain("ControlWithRequestAsync");
+        }
+    );
+
+    it.each([
+        ["not an array", "name"],
+        ["non-string", ["name", 1]],
+        ["duplicate", ["name", "name"]],
+        ["unknown", ["name", "missing"]],
+        ["session envelope", ["sessionId", "name"]],
+        ["missing required", ["config"]],
+        ["optional before required", ["config", "name"]],
+        ["no new arguments", ["name", "config", "expectedIdentity"]],
+    ])("rejects invalid legacy metadata: %s", (_reason, legacy) => {
+        const { schema } = legacySignatureFixture("session", legacy);
+        expect(() => generateRpcCode(schema)).toThrow("Invalid x-legacy-parameters");
+    });
+
+    it("rejects nullable request metadata rather than changing the existing request entry", () => {
+        const { schema, methods, params } = legacySignatureFixture("session", ["name", "config"]);
+        methods.run.params = { anyOf: [params, { type: "null" }] };
+        expect(() => generateRpcCode(schema)).toThrow("nullable requests");
+    });
+
+    it("keeps both overloads unchanged across two successive optional additions", () => {
+        const signatures = (additions: 1 | 2) => {
+            const code = generateRpcCode(legacyRequestSchema(additions).schema);
+            return {
+                code,
+                overloads: code.match(/public async Task<[A-Za-z]+> PlanAsync\([^)]*\)/g),
+            };
+        };
+        const one = signatures(1);
+        const two = signatures(2);
+        expect(one.overloads).toEqual([
+            "public async Task<SamplePlanResult> PlanAsync(string contract, string source, string? scope = null, CancellationToken cancellationToken = default)",
+            "public async Task<SamplePlanResult> PlanAsync(SamplePlanRequest request, CancellationToken cancellationToken = default)",
+        ]);
+        expect(two.overloads).toEqual(one.overloads);
+        expect(one.code).not.toContain("TraceId");
+        expect(two.code).toContain("public string? TraceId { get; set; }");
+        expect(two.code).toContain("public required string Contract { get; set; }");
+    });
+});
+
+describe("C# session event deprecation", () => {
+    it.each([
+        { eventDeprecated: true, dataDeprecated: false },
+        { eventDeprecated: false, dataDeprecated: true },
+        { eventDeprecated: true, dataDeprecated: true },
+        { eventDeprecated: false, dataDeprecated: false },
+    ])(
+        "preserves target-compatible event=$eventDeprecated and payload=$dataDeprecated annotations",
+        ({ eventDeprecated, dataDeprecated }) => {
+            const code = generateSessionEventsCode({
+                definitions: {
+                    Payload: {
+                        type: "object",
+                        properties: { toolCallId: { type: "string" } },
+                        ...(dataDeprecated ? { deprecated: true } : {}),
+                    },
+                    SessionEvent: {
+                        anyOf: [
+                            {
+                                type: "object",
+                                ...(eventDeprecated ? { deprecated: true } : {}),
+                                properties: {
+                                    type: { const: "tool.execution_partial_result" },
+                                    data: { $ref: "#/definitions/Payload" },
+                                },
+                                required: ["type", "data"],
+                            },
+                        ],
+                    },
+                },
+            });
+            const attributes = [
+                "[EditorBrowsable(EditorBrowsableState.Never)]",
+                "#if NET5_0_OR_GREATER",
+                '[Obsolete("This member is deprecated and will be removed in a future version.", DiagnosticId = "GHCP001")]',
+                "#else",
+                '[Obsolete("This member is deprecated and will be removed in a future version.")]',
+                "#endif",
+            ].join("\n");
+
+            for (const [name, deprecated] of [
+                ["ToolExecutionPartialResultEvent", eventDeprecated],
+                ["ToolExecutionPartialResultData", dataDeprecated],
+            ] as const) {
+                const declaration = `${attributes}\npublic sealed partial class ${name}`;
+                if (deprecated) expect(code).toContain(declaration);
+                else expect(code).not.toContain(declaration);
+            }
+            expect(code.match(/\[Obsolete\(/g) ?? []).toHaveLength(
+                2 * (Number(eventDeprecated) + Number(dataDeprecated))
+            );
+        }
+    );
+});
 
 describe("C# root event payload unions", () => {
     it.each(["anyOf", "oneOf"] as const)("preserves referenced %s payload variants", (keyword) => {
@@ -51,7 +233,254 @@ describe("C# root event payload unions", () => {
     });
 });
 
+describe("C# session event dispatch", () => {
+    it.each([
+        ["sample.\u00E9", 9],
+        ["sample.\u{1F600}", 11],
+        ["sample.'\\", 9],
+    ])("groups and compares UTF-8 discriminators for %s", (discriminator, byteLength) => {
+        const code = generateSessionEventsCode({
+            definitions: {
+                SessionEvent: {
+                    anyOf: [
+                        {
+                            type: "object",
+                            properties: {
+                                type: { const: discriminator },
+                                data: { type: "object", properties: {} },
+                            },
+                            required: ["type", "data"],
+                        },
+                    ],
+                },
+            },
+        });
+
+        expect(code).toContain(`case ${byteLength}:`);
+        expect(code).toContain(`type.SequenceEqual(${JSON.stringify(discriminator)}u8)`);
+        expect(code).toContain("switch (type.Length)");
+        expect(code).not.toContain("switch (type)");
+    });
+
+    it("generates concrete dispatch and a schema-derived fallback envelope", () => {
+        const code = generateSessionEventsCode({
+            definitions: {
+                SessionEvent: {
+                    anyOf: ["sample.first", "sample.second"].map((type) => ({
+                        type: "object",
+                        properties: {
+                            id: { type: "string", format: "uuid" },
+                            futureEnvelopeField: { type: "string" },
+                            type: { const: type },
+                            data: { type: "object", properties: {} },
+                        },
+                        required: ["id", "type", "data"],
+                    })),
+                },
+            },
+        });
+
+        for (const suffix of ["First", "Second"]) {
+            expect(code).toContain(`type.SequenceEqual("sample.${suffix.toLowerCase()}"u8)`);
+            expect(code).toContain(`return SessionEventsJsonContext.Default.Sample${suffix}Event;`);
+            expect(code).toContain(`[JsonSerializable(typeof(Sample${suffix}Event))]`);
+        }
+        expect(code).toContain("switch (type.Length)");
+        expect(code).toContain("SessionEventJsonConverter.Deserialize(json)");
+        expect(code).toContain("ReadEventTypeInfo(ref probe)");
+        expect(code).toContain('reader.ValueTextEquals("type"u8)');
+        expect(code).toContain("internal sealed class SessionEventEnvelope");
+        expect(code).toContain("[JsonSerializable(typeof(SessionEventEnvelope))]");
+        expect(code).toContain("Id = Id,");
+        expect(code).toContain("FutureEnvelopeField = FutureEnvelopeField,");
+        expect(code.match(/public string\? FutureEnvelopeField \{ get; set; \}/g)).toHaveLength(2);
+        expect(code).toContain(
+            "JsonSerializer.Serialize(this, SessionEventsJsonContext.Default.SessionEvent)"
+        );
+    });
+});
+
 describe("C# RPC codegen", () => {
+    it("emits parameterless MCP list methods", () => {
+        const code = generateRpcCode({
+            session: {
+                mcp: {
+                    list: {
+                        rpcMethod: "session.mcp.list",
+                        params: null,
+                    },
+                },
+            },
+        });
+        expect(code).toContain(
+            "public async Task ListAsync(CancellationToken cancellationToken = default)"
+        );
+        expect(code).not.toContain("ListWithParamsAsync");
+        expect(code).not.toContain("StartServers");
+        expect(code).toContain('"session.mcp.list"');
+    });
+
+    it("uses ordinal identity for open tiers without changing closed string enums", () => {
+        const tier = {
+            type: "string",
+            title: "AutoTier",
+            "x-extensible-enum": ["efficiency", "balance", "intelligence", "fast"],
+        };
+        const code = generateRpcCode({
+            definitions: {
+                AutoTier: tier,
+                ClosedMode: { type: "string", enum: ["on", "off"] },
+            },
+            server: {
+                sample: {
+                    rpcMethod: "sample",
+                    params: {
+                        type: "object",
+                        properties: {
+                            tier: { $ref: "#/definitions/AutoTier" },
+                            mode: { $ref: "#/definitions/ClosedMode" },
+                        },
+                    },
+                    result: null,
+                },
+            },
+        } as ApiSchema);
+        expect(code).toContain(
+            "Equals(AutoTier other) => string.Equals(Value, other.Value, StringComparison.Ordinal);"
+        );
+        expect(code).toContain(
+            "Equals(ClosedMode other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);"
+        );
+        const tierBody = code.match(
+            /public readonly struct AutoTier[\s\S]*?public override string ToString/
+        );
+        expect(tierBody?.[0]).toContain("StringComparer.Ordinal.GetHashCode(Value)");
+        expect(tierBody?.[0]).not.toContain("OrdinalIgnoreCase");
+
+        const events = generateSessionEventsCode(
+            postProcessSchema({
+                definitions: {
+                    AutoTier: tier,
+                    SessionEvent: {
+                        anyOf: [
+                            {
+                                title: "SampleEvent",
+                                type: "object",
+                                properties: {
+                                    type: { const: "sample" },
+                                    data: {
+                                        type: "object",
+                                        properties: {
+                                            autoTier: { $ref: "#/definitions/AutoTier" },
+                                        },
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+            } as JSONSchema7)
+        );
+        expect(events).toContain(
+            "Equals(AutoTier other) => string.Equals(Value, other.Value, StringComparison.Ordinal);"
+        );
+        expect(events).toContain("StringComparer.Ordinal.GetHashCode(Value)");
+    });
+
+    it("retains named extensible tier values and the existing request type", () => {
+        const code = generateRpcCode({
+            definitions: {
+                AutoTier: {
+                    type: "string",
+                    "x-extensible-enum": ["efficiency", "balance", "intelligence", "fast"],
+                },
+            },
+            server: {
+                setAutoTier: {
+                    rpcMethod: "session.model.setAutoTier",
+                    params: {
+                        type: "object",
+                        properties: { autoTier: { $ref: "#/definitions/AutoTier" } },
+                    },
+                    result: { type: "null" },
+                },
+            },
+        } as ApiSchema);
+        expect(code).toContain("AutoTier? AutoTier");
+        expect(code).toContain('public static AutoTier Balance { get; } = new("balance");');
+        expect(code).toContain("public AutoTier(string value)");
+    });
+
+    it("preserves arbitrary JSON handoff settings instead of emitting an empty DTO", () => {
+        const code = generateRpcCode({
+            server: {
+                host: {
+                    createSession: {
+                        rpcMethod: "host.createSession",
+                        params: {
+                            type: "object",
+                            properties: {
+                                config: {
+                                    type: "object",
+                                    properties: {},
+                                    additionalProperties: true,
+                                },
+                            },
+                            required: ["config"],
+                        },
+                        result: { type: "null" },
+                    },
+                },
+            },
+        } as ApiSchema);
+        expect(code).toContain("IDictionary<string, JsonElement> Config");
+        expect(code).not.toContain("class HostCreateSessionParamsConfig");
+    });
+
+    it("maps nullable host authentication options to nullable booleans", () => {
+        const code = generateRpcCode({
+            server: {
+                host: {
+                    start: {
+                        rpcMethod: "host.start",
+                        params: {
+                            type: "object",
+                            properties: { requireConnectionToken: { type: ["boolean", "null"] } },
+                        },
+                        result: { type: "null" },
+                    },
+                },
+            },
+        } as ApiSchema);
+        expect(code).toContain("bool? RequireConnectionToken");
+    });
+
+    it("keeps inline and referenced boolean literals as boolean RPC fields", () => {
+        const code = generateRpcCode({
+            definitions: {
+                Enabled: { type: "boolean", const: true },
+            },
+            server: {
+                sample: {
+                    status: {
+                        rpcMethod: "sample.status",
+                        result: {
+                            type: "object",
+                            properties: {
+                                enabled: { $ref: "#/definitions/Enabled" },
+                                disabled: { type: "boolean", const: false },
+                            },
+                            required: ["enabled", "disabled"],
+                        },
+                    },
+                },
+            },
+        } as ApiSchema);
+        expect(code).toContain("public bool Enabled { get; set; }");
+        expect(code).toContain("public bool Disabled { get; set; }");
+        expect(code).not.toContain("readonly record struct Enabled");
+    });
+
     it.each(["uninstall", "update"])(
         "separates the session wire envelope from the shared plugins %s request",
         (method) => {
@@ -421,7 +850,7 @@ describe("C# RPC codegen", () => {
 
             expect(code).toContain("public sealed partial class SystemMessage");
             expect(code).toContain(
-                "[Experimental(Diagnostics.Experimental)]\n[JsonConverter(typeof(Converter))]\npublic sealed partial class SystemMessage"
+                "[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]\n[JsonConverter(typeof(Converter))]\npublic sealed partial class SystemMessage"
             );
             expect(code).toContain("System message configuration.");
             expect(code).toContain("public SystemMessage? SystemMessage");
@@ -473,4 +902,72 @@ describe("C# RPC codegen", () => {
             );
         }
     );
+});
+
+describe("C# RPC class visibility", () => {
+    const sharedResultSchema = (): ApiSchema => ({
+        definitions: {
+            FolderTrustCheckResult: {
+                type: "object",
+                title: "FolderTrustCheckResult",
+                properties: { trusted: { type: "boolean" } },
+                required: ["trusted"],
+            },
+        },
+        // The server tree is emitted before the session tree, so the internal
+        // method reaches the shared result type first.
+        server: {
+            permissions: {
+                isTrusted: {
+                    rpcMethod: "permissions.folderTrust.isTrusted",
+                    visibility: "internal",
+                    result: { $ref: "#/definitions/FolderTrustCheckResult" },
+                },
+            },
+        },
+        session: {
+            permissions: {
+                isTrusted: {
+                    rpcMethod: "session.permissions.folderTrust.isTrusted",
+                    result: { $ref: "#/definitions/FolderTrustCheckResult" },
+                },
+            },
+        },
+    });
+
+    it("keeps a type shared with an internal method public", () => {
+        const code = generateRpcCode(sharedResultSchema());
+
+        expect(code).toContain("public sealed class FolderTrustCheckResult\n");
+        expect(code).not.toContain("internal sealed class FolderTrustCheckResult\n");
+    });
+
+    it("still emits a request wrapper as internal", () => {
+        const code = generateRpcCode({
+            definitions: {},
+            server: {
+                git: {
+                    workingDirectoryContext: {
+                        rpcMethod: "git.workingDirectoryContext",
+                        params: {
+                            type: "object",
+                            properties: { cwd: { type: "string" } },
+                            required: ["cwd"],
+                        },
+                    },
+                },
+            },
+        });
+
+        expect(code).toContain("internal sealed class GitWorkingDirectoryContextRequest\n");
+    });
+
+    it("honors an explicitly internal schema over public reachability", () => {
+        const schema = sharedResultSchema();
+        (schema.definitions!.FolderTrustCheckResult as Record<string, unknown>).visibility =
+            "internal";
+        const code = generateRpcCode(schema);
+
+        expect(code).toContain("internal sealed class FolderTrustCheckResult\n");
+    });
 });

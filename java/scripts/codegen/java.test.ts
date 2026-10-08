@@ -1,3 +1,7 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *--------------------------------------------------------------------------------------------*/
+
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -6,13 +10,223 @@ import test from "node:test";
 import type { JSONSchema7 } from "json-schema";
 
 import {
+    buildNamespaceTree,
+    collectDirectDiscriminatedUnionTypeNames,
     collectNestedDiscriminatedUnionTypeNames,
+    generateApiMethod,
+    extractEventVariants,
+    generateRpcClass,
     isMainModule,
     renderEventVariantClass,
     renderRpcTypes,
+    renderRpcWrappers,
     schemaTypeToJava,
 } from "./java.js";
 import { RPC_VARIANT_OWNERS } from "./rpc-variant-owners.js";
+
+test("wrapper Javadoc preserves the operation contract ahead of parameter documentation", () => {
+    const tree = buildNamespaceTree({
+        reconcile: {
+            rpcMethod: "session.extensions.reconcile",
+            description: "Host-only reconciliation; method-not-found must not fall back to persistent disables.",
+            params: {
+                type: "object",
+                description: "Identifies the target session.",
+                properties: { sessionId: { type: "string" } },
+                required: ["sessionId"],
+            },
+            result: { type: "object", properties: { extensions: { type: "array", items: { type: "string" } } } },
+        },
+    });
+    const method = tree.methods.get("reconcile");
+    assert.ok(method);
+    const source = generateApiMethod("reconcile", method, true, "sessionId").lines.join("\n");
+    assert.match(source, /Host-only reconciliation; method-not-found must not fall back to persistent disables/);
+    assert.doesNotMatch(source, /Identifies the target session/);
+});
+
+test("host environment options preserve the legacy two-argument constructor", () => {
+    const source = generateRpcClass("HostGitHubEnvironmentOptions", {
+        type: "object",
+        properties: {
+            name: { type: "string" },
+            computeId: { type: "string" },
+            requireConnectionBinding: { type: ["boolean", "null"] },
+        },
+        required: ["name", "computeId"],
+    }).code;
+    assert.match(source, /@JsonProperty\("requireConnectionBinding"\) Boolean requireConnectionBinding/);
+    assert.match(
+        source,
+        /public HostGitHubEnvironmentOptions\(\s*String name,\s*String computeId\s*\) \{\s*this\(name, computeId, null\);/s,
+    );
+});
+
+test("arbitrary handoff maps accept scalar and structured JSON values", () => {
+    const result = schemaTypeToJava(
+        { type: "object", additionalProperties: true },
+        true, "HostCreateSessionParams", "config", new Map(),
+    );
+    assert.equal(result.javaType, "Map<String, Object>");
+    assert.ok(result.imports.has("java.util.Map"));
+});
+
+test("host session summaries retain their experimental schema designation", async () => {
+    const summary: JSONSchema7 & { stability: string } = {
+        type: "object",
+        stability: "experimental",
+        properties: { resource: { type: "string" } },
+        required: ["resource"],
+    };
+    const files = await renderRpcTypes({
+        definitions: { HostSessionSummary: summary },
+        server: {
+            listSessions: {
+                rpcMethod: "host.listSessions",
+                stability: "experimental",
+                params: null,
+                result: {
+                    type: "object",
+                    properties: { sessions: { type: "array", items: { $ref: "#/definitions/HostSessionSummary" } } },
+                },
+            },
+        },
+    }, {});
+    const source = [...files].find(([file]) => file.endsWith("/HostSessionSummary.java"))?.[1];
+    assert.ok(source, "missing HostSessionSummary.java");
+    assert.match(source, /import com\.github\.copilot\.CopilotExperimental;/);
+    assert.match(source, /@apiNote This type is experimental and may change in a future version\./);
+    assert.match(source, /@CopilotExperimental/);
+});
+
+test("preserves whole-event deprecation through a referenced event envelope", () => {
+    const schema: JSONSchema7 = {
+        definitions: {
+            SessionEvent: { anyOf: [{ $ref: "#/definitions/LegacyEvent" }] },
+            LegacyEvent: {
+                type: "object",
+                deprecated: true,
+                properties: {
+                    type: { const: "tool.execution_partial_result" },
+                    data: { $ref: "#/definitions/LegacyData" },
+                },
+            } as JSONSchema7,
+            LegacyData: { type: "object", properties: { partialOutput: { type: "string" } } },
+        },
+    };
+    const variants = extractEventVariants(schema);
+    assert.equal(variants.length, 1);
+    assert.equal(variants[0].deprecated, true);
+    assert.match(renderEventVariantClass(variants[0], "com.github.copilot.generated"), /@Deprecated/);
+});
+
+for (const referencedData of [false, true]) {
+    for (const eventDeprecated of [false, true]) {
+        for (const dataDeprecated of [false, true]) {
+            test(`preserves independent payload deprecation (referenced=${referencedData}, event=${eventDeprecated}, data=${dataDeprecated})`, () => {
+                const dataSchema: JSONSchema7 & { deprecated: boolean } = {
+                    type: "object",
+                    deprecated: dataDeprecated,
+                    properties: { partialOutput: { type: "string" } },
+                };
+                const eventSchema: JSONSchema7 & { deprecated: boolean } = {
+                    type: "object",
+                    deprecated: eventDeprecated,
+                    properties: {
+                        type: { const: "tool.execution_partial_result" },
+                        data: referencedData ? { $ref: "#/definitions/LegacyData" } : dataSchema,
+                    },
+                };
+                const schema: JSONSchema7 = {
+                    definitions: {
+                        SessionEvent: { anyOf: [{ $ref: "#/definitions/LegacyEvent" }] },
+                        LegacyEvent: eventSchema,
+                        LegacyData: dataSchema,
+                    },
+                };
+                const variants = extractEventVariants(schema);
+                assert.equal(variants.length, 1);
+                const source = renderEventVariantClass(variants[0], "com.github.copilot.generated");
+                const eventAnnotation = /@Deprecated\n(?:@[^\n]*\n)*public final class ToolExecutionPartialResultEvent\b/;
+                const dataAnnotation = /    @Deprecated\n(?:    @[^\n]*\n)*    public record ToolExecutionPartialResultEventData\b/;
+                if (eventDeprecated) assert.match(source, eventAnnotation);
+                else assert.doesNotMatch(source, eventAnnotation);
+                if (dataDeprecated) assert.match(source, dataAnnotation);
+                else assert.doesNotMatch(source, dataAnnotation);
+            });
+        }
+    }
+}
+
+test("preserves diagnostics configuration for session create and resume", async () => {
+    const files = await renderRpcTypes({
+        definitions: {
+            DiagnosticsConfiguration: {
+                type: "object",
+                properties: { sources: { $ref: "#/definitions/DiagnosticSourcesConfiguration" } },
+                required: ["sources"],
+            },
+            DiagnosticSourcesConfiguration: {
+                type: "object",
+                properties: { mcp: { type: "string" } },
+            },
+        },
+    }, {});
+    const configuration = [...files].find(([file]) => file.endsWith("/DiagnosticsConfiguration.java"));
+    assert.ok(configuration, "startup diagnostics must have a named generated configuration");
+    assert.match(configuration[1], /DiagnosticSourcesConfiguration sources/);
+    assert.ok([...files.keys()].some((file) => file.endsWith("/DiagnosticSourcesConfiguration.java")));
+});
+
+test("customization reload types are experimental without opening unrelated types", async () => {
+    const files = await renderRpcTypes({
+        definitions: {
+            CustomizationReloadStatus: { type: "string", enum: ["reloaded", "failed"] },
+            CustomizationReloadSubsystem: { type: "string", enum: ["skills", "hooks"] },
+            CustomizationReloadOutcome: {
+                type: "object",
+                description: "Result of one customization reload component.",
+                properties: { status: { $ref: "#/definitions/CustomizationReloadStatus" } },
+            },
+            ClosedStatus: { type: "string", enum: ["ready"] },
+            ExampleResult: {
+                type: "object",
+                properties: {
+                    status: { $ref: "#/definitions/CustomizationReloadStatus" },
+                    subsystem: { $ref: "#/definitions/CustomizationReloadSubsystem" },
+                    outcome: { $ref: "#/definitions/CustomizationReloadOutcome" },
+                    closed: { $ref: "#/definitions/ClosedStatus" },
+                },
+            },
+        },
+        server: {
+            example: {
+                rpcMethod: "example",
+                params: null,
+                result: { $ref: "#/definitions/ExampleResult" },
+            },
+        },
+    }, {});
+    for (const name of ["CustomizationReloadStatus", "CustomizationReloadSubsystem"]) {
+        const source = [...files].find(([file]) => file.endsWith(`/${name}.java`))?.[1];
+        assert.ok(source, `missing ${name}.java`);
+        assert.match(source, /public static final \w+ UNKNOWN = new \w+\("unknown"\);/);
+        assert.match(source, /if \(value != null\) return new \w+\(value\);/);
+        assert.match(source, /@com\.fasterxml\.jackson\.annotation\.JsonValue/);
+        assert.match(source, /import com\.github\.copilot\.CopilotExperimental;/);
+        assert.match(source, /@apiNote This type is experimental and may change in a future version\./);
+        assert.match(source, /@CopilotExperimental/);
+    }
+    const outcome = [...files].find(([file]) => file.endsWith("/CustomizationReloadOutcome.java"))?.[1];
+    assert.ok(outcome, "missing CustomizationReloadOutcome.java");
+    assert.match(outcome, /import com\.github\.copilot\.CopilotExperimental;/);
+    assert.match(outcome, /@apiNote This type is experimental and may change in a future version\./);
+    assert.match(outcome, /@CopilotExperimental/);
+    const closed = [...files].find(([file]) => file.endsWith("/ClosedStatus.java"))?.[1];
+    assert.ok(closed);
+    assert.doesNotMatch(closed, /return UNKNOWN/);
+    assert.doesNotMatch(closed, /@CopilotExperimental/);
+});
 
 test("recognizes an entrypoint reached through a linked directory", (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-java-codegen-entrypoint-"));
@@ -39,6 +253,40 @@ function renderPayload(dataSchema: JSONSchema7): string {
         dataSchema,
     }, "com.github.copilot.generated");
 }
+
+test("experimental event properties retain their marker without marking the stable event", () => {
+    const structuredContent: JSONSchema7 & { stability: string } = {
+        description: "Client-only structured progress metadata.",
+        stability: "experimental",
+    };
+    const source = renderPayload({
+        type: "object",
+        properties: {
+            toolCallId: { type: "string" },
+            progressMessage: { type: "string" },
+            structuredContent,
+        },
+        required: ["toolCallId", "progressMessage"],
+    });
+
+    assert.match(source, /import com\.github\.copilot\.CopilotExperimental;/);
+    assert.match(source, /@CopilotExperimental\s+@JsonProperty\("structuredContent"\) Object structuredContent/);
+    assert.deepEqual(source.match(/@CopilotExperimental/g), ["@CopilotExperimental"]);
+    assert.match(source, /@JsonProperty\("progressMessage"\) String progressMessage,/);
+});
+
+test("stable event properties do not acquire experimental markers", () => {
+    const source = renderPayload({
+        type: "object",
+        properties: {
+            progressMessage: { type: "string", description: "Experimental is ordinary text here." },
+            structuredContent: { description: "Client-only structured progress metadata." },
+        },
+    });
+
+    assert.match(source, /@JsonProperty\("structuredContent"\) Object structuredContent/);
+    assert.doesNotMatch(source, /CopilotExperimental/);
+});
 
 for (const keyword of ["anyOf", "oneOf"] as const) {
     test(`root ${keyword} payload preserves raw JSON and existing data descriptors`, () => {
@@ -83,6 +331,76 @@ test("ordinary and empty root objects retain their existing records", () => {
     const empty = renderPayload({ type: "object", properties: {} });
     assert.match(empty, /public record ExampleNotificationEventData\(\)/);
     assert.doesNotMatch(empty, /JsonNode|DELEGATING|JsonValue/);
+});
+
+test("session event records preserve constructors declared by x-legacy-parameters", () => {
+    const source = renderPayload({
+        type: "object",
+        properties: {
+            before: { type: "string" },
+            added: { type: ["string", "null"] },
+            after: { type: "string" },
+        },
+        "x-legacy-parameters": ["before", "after"],
+    } as JSONSchema7);
+
+    assert.match(
+        source,
+        /public ExampleNotificationEventData\(\s*String before,\s*String after\s*\) \{\s*this\(before, null, after\);/,
+    );
+});
+
+test("session event fields promote directly referenced discriminated response unions", () => {
+    const definitions: Record<string, JSONSchema7> = {
+        TypedResponse: {
+            anyOf: [
+                {
+                    type: "object",
+                    properties: {
+                        responseKind: { const: "answer" },
+                        answer: { type: "string" },
+                    },
+                    required: ["responseKind", "answer"],
+                },
+                {
+                    type: "object",
+                    properties: {
+                        responseKind: { const: "decision" },
+                        approved: { type: "boolean" },
+                    },
+                    required: ["responseKind", "approved"],
+                },
+            ],
+        },
+    };
+    const dataSchema: JSONSchema7 = {
+        type: "object",
+        properties: {
+            response: { $ref: "#/definitions/TypedResponse" },
+        },
+    };
+    const promoted = collectDirectDiscriminatedUnionTypeNames(
+        dataSchema,
+        definitions,
+        new Set(["TypedResponse"]),
+    );
+    const standaloneTypes = new Map<string, JSONSchema7>();
+
+    const result = schemaTypeToJava(
+        dataSchema.properties!.response as JSONSchema7,
+        false,
+        "ExampleEventData",
+        "response",
+        new Map(),
+        {
+            definitions,
+            standaloneTypes,
+            promotedUnionTypes: promoted,
+        },
+    );
+
+    assert.equal(result.javaType, "TypedResponse");
+    assert.equal(standaloneTypes.get("TypedResponse"), definitions.TypedResponse);
 });
 
 test("nested discriminated array items use their named Java type", () => {
@@ -195,6 +513,191 @@ test("nested discriminated array items use their named Java type", () => {
     assert.deepEqual([...promotedUnionTypes], ["ActionChoice", "ActionSource"]);
 });
 
+test("RPC records promote nested discriminated union references to sealed interfaces", async () => {
+    const definitions: Record<string, JSONSchema7> = {
+        InstallationConfirmationRequest: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                review: { $ref: "#/definitions/InstallationReview" },
+            },
+        },
+        InstallationReview: {
+            anyOf: [
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        resource: { type: "string", const: "mcp" },
+                        review: { $ref: "#/definitions/McpInstallationReview" },
+                    },
+                    required: ["resource", "review"],
+                },
+            ],
+        },
+        McpInstallationReview: {
+            anyOf: [
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        action: { type: "string", const: "install" },
+                        selectedChoice: { $ref: "#/definitions/McpPlanTransportChoice" },
+                    },
+                    required: ["action", "selectedChoice"],
+                },
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        action: { type: "string", const: "uninstall" },
+                        installationId: { type: "string" },
+                    },
+                    required: ["action", "installationId"],
+                },
+            ],
+        },
+        McpInstallPlan: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+                transportChoices: {
+                    type: "array",
+                    items: { $ref: "#/definitions/McpPlanTransportChoice" },
+                },
+            },
+        },
+        McpPlanTransportChoice: {
+            anyOf: [
+                { $ref: "#/definitions/McpPlanTransportChoicePackage" },
+                { $ref: "#/definitions/McpPlanTransportChoiceRemote" },
+            ],
+        },
+        McpPlanTransportChoicePackage: {
+            type: "object",
+            title: "McpPlanTransportChoicePackage",
+            additionalProperties: false,
+            properties: {
+                installMethod: { type: "string", const: "package" },
+                packageIdentifier: { type: "string" },
+            },
+            required: ["installMethod", "packageIdentifier"],
+        },
+        McpPlanTransportChoiceRemote: {
+            type: "object",
+            title: "McpPlanTransportChoiceRemote",
+            additionalProperties: false,
+            properties: {
+                installMethod: { type: "string", const: "remote" },
+                endpoint: { type: "string" },
+            },
+            required: ["installMethod", "endpoint"],
+        },
+        McpInstallationManagementResult: {
+            anyOf: [
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        kind: { type: "string", const: "outcome" },
+                        outcome: { $ref: "#/definitions/McpInstallationManagementOutcome" },
+                    },
+                    required: ["kind", "outcome"],
+                },
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        kind: { type: "string", const: "invalid-request" },
+                        message: { type: "string" },
+                    },
+                    required: ["kind", "message"],
+                },
+            ],
+        },
+        McpInstallationManagementOutcome: {
+            anyOf: [
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        kind: { type: "string", const: "operation" },
+                        operation: { $ref: "#/definitions/McpInstallationOperationStatus" },
+                    },
+                    required: ["kind", "operation"],
+                },
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        kind: { type: "string", const: "refused" },
+                        reason: { type: "string" },
+                    },
+                    required: ["kind", "reason"],
+                },
+            ],
+        },
+        McpInstallationOperationStatus: {
+            anyOf: [
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        phase: { type: "string", const: "preparing" },
+                        operationId: { type: "string" },
+                    },
+                    required: ["phase", "operationId"],
+                },
+                {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                        phase: { type: "string", const: "completed" },
+                        operationId: { type: "string" },
+                    },
+                    required: ["phase", "operationId"],
+                },
+            ],
+        },
+    };
+
+    const files = await renderRpcTypes({
+        definitions,
+        clientGlobal: {
+            confirm: {
+                rpcMethod: "confirm",
+                params: { $ref: "#/definitions/InstallationConfirmationRequest" },
+                result: null,
+            },
+            plan: {
+                rpcMethod: "plan",
+                params: { $ref: "#/definitions/McpInstallPlan" },
+                result: null,
+            },
+        },
+        server: {
+            status: {
+                rpcMethod: "status",
+                params: null,
+                result: { $ref: "#/definitions/McpInstallationManagementResult" },
+            },
+        },
+    }, {});
+
+    assert.match(rpcSource(files, "InstallationConfirmationRequest"), /@JsonProperty\("review"\) McpInstallationReview review/);
+    assert.match(rpcSource(files, "McpInstallPlan"), /@JsonProperty\("transportChoices"\) List<McpPlanTransportChoice> transportChoices/);
+    assert.match(rpcSource(files, "McpInstallationManagementResultOutcome"), /private McpInstallationManagementOutcome outcome/);
+    assert.match(rpcSource(files, "McpInstallationManagementOutcomeOperation"), /@JsonProperty\("operation"\) McpInstallationOperationStatus operation/);
+    assert.match(rpcSource(files, "McpInstallationReview"), /public sealed interface McpInstallationReview permits McpInstallationReviewInstall, McpInstallationReviewUninstall/);
+    assert.match(rpcSource(files, "McpInstallationReview"), /JsonTypeInfo\.Id\.NAME, include = JsonTypeInfo\.As\.EXISTING_PROPERTY, property = "action", visible = true/);
+    assert.match(rpcSource(files, "McpInstallationReviewInstall"), /public record McpInstallationReviewInstall\(/);
+    assert.match(rpcSource(files, "McpInstallationReviewInstall"), /action = "install"/);
+    assert.match(rpcSource(files, "McpInstallationReviewInstall"), /import com\.fasterxml\.jackson\.annotation\.JsonTypeInfo;/);
+    assert.match(rpcSource(files, "McpInstallationReviewInstall"), /@JsonTypeInfo\(use = JsonTypeInfo\.Id\.NONE\)/);
+    assert.match(rpcSource(files, "McpPlanTransportChoice"), /property = "installMethod"/);
+    assert.match(rpcSource(files, "McpInstallationOperationStatus"), /property = "phase"/);
+});
+
 function sharedUnionFixture(roots: string[]) {
     const definitions: Record<string, JSONSchema7> = {
         SharedError: {
@@ -222,6 +725,156 @@ function rpcSource(files: Map<string, string>, name: string): string {
     assert.ok(source, `missing ${name}.java`);
     return source;
 }
+
+test("instructions reload reuses getSources result without generating a duplicate Java type", async () => {
+    const fixture = {
+        definitions: {
+            InstructionsGetSourcesResult: {
+                type: "object",
+                properties: { sources: { type: "array", items: { type: "string" } } },
+            },
+            OtherResult: {
+                type: "object",
+                properties: { sources: { type: "array", items: { type: "string" } } },
+            },
+        },
+        session: {
+            instructions: {
+                getSources: {
+                    rpcMethod: "session.instructions.getSources",
+                    params: null,
+                    result: { $ref: "#/definitions/InstructionsGetSourcesResult" },
+                },
+                reload: {
+                    rpcMethod: "session.instructions.reload",
+                    params: null,
+                    result: { $ref: "#/definitions/InstructionsGetSourcesResult" },
+                },
+            },
+        },
+    };
+
+    const files = await renderRpcTypes(fixture, {});
+    assert.match(rpcSource(files, "SessionInstructionsGetSourcesResult"), /List<String> sources/);
+    assert.equal([...files.keys()].some((file) => file.endsWith("/SessionInstructionsReloadResult.java")), false);
+
+    fixture.session.instructions.reload.result.$ref = "#/definitions/OtherResult";
+    await assert.rejects(renderRpcTypes(fixture, {}), /Incompatible Java RPC result alias/);
+});
+
+test("customizations reload uses its shared schema result name in types and wrapper", async () => {
+    const fixture = {
+        definitions: {
+            CustomizationsReloadResult: {
+                type: "object",
+                properties: { warnings: { type: "array", items: { type: "string" } } },
+            },
+            OtherResult: {
+                type: "object",
+                properties: { warnings: { type: "array", items: { type: "string" } } },
+            },
+        },
+        session: {
+            customizations: {
+                reload: {
+                    rpcMethod: "session.customizations.reload",
+                    params: null,
+                    result: { $ref: "#/definitions/CustomizationsReloadResult" },
+                },
+            },
+        },
+    };
+
+    const types = await renderRpcTypes(fixture, {});
+    assert.match(rpcSource(types, "CustomizationsReloadResult"), /List<String> warnings/);
+    assert.equal([...types.keys()].some((file) => file.endsWith("/SessionCustomizationsReloadResult.java")), false);
+    const wrappers = await renderRpcWrappers(fixture);
+    assert.match(rpcSource(wrappers, "SessionCustomizationsApi"), /CompletableFuture<CustomizationsReloadResult> reload\(/);
+
+    fixture.session.customizations.reload.result.$ref = "#/definitions/OtherResult";
+    await assert.rejects(renderRpcTypes(fixture, {}), /Incompatible Java RPC result name/);
+    await assert.rejects(renderRpcWrappers(fixture), /Incompatible Java RPC result name/);
+});
+
+test("static OAuth config preserves the legacy four-argument constructor", () => {
+    const typeName = "McpOauthRequiredStaticClientConfig";
+    const source = generateRpcClass(typeName, {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+            clientId: { type: "string" },
+            clientSecret: { type: ["string", "null"] },
+            publicClient: { type: ["boolean", "null"] },
+            grantType: { type: ["string", "null"] },
+            scope: { type: ["string", "null"] },
+        },
+        required: ["clientId"],
+    }, new Map(), "com.github.copilot.generated").code;
+    assert.match(
+        source,
+        /public McpOauthRequiredStaticClientConfig\(\s*String clientId,\s*String clientSecret,\s*Boolean publicClient,\s*String grantType\s*\) \{\s*this\(clientId, clientSecret, publicClient, grantType, null\);/s
+    );
+});
+
+test("nullable referenced RPC results retain their object DTO and typed wrapper", async () => {
+    const method = {
+        rpcMethod: "session.accounts.getCurrent",
+        description: null,
+        stability: "experimental",
+        params: {
+            type: "object",
+            properties: { sessionId: { type: "string" } },
+            required: ["sessionId"],
+        } as JSONSchema7,
+        result: { $ref: "#/definitions/SessionAccountResult" },
+    };
+    const files = await renderRpcTypes({
+        session: { accounts: { getCurrent: method } },
+        definitions: {
+            SessionAccountResult: {
+                title: "SessionAccountResult",
+                anyOf: [{ $ref: "#/definitions/SessionAccount" }, { type: "null" }],
+            },
+            SessionAccount: {
+                type: "object",
+                title: "SessionAccount",
+                additionalProperties: false,
+                properties: {
+                    accountId: { type: "string" },
+                    identity: { $ref: "#/definitions/Identity" },
+                },
+                required: ["accountId", "identity"],
+                stability: "experimental",
+            } as JSONSchema7,
+            Identity: {
+                type: "object",
+                title: "Identity",
+                properties: { login: { type: "string" } },
+                required: ["login"],
+            },
+        },
+    }, {});
+    assert.match(rpcSource(files, "SessionAccount"), /public record SessionAccount\(/);
+    assert.match(rpcSource(files, "SessionAccount"), /@JsonProperty\("identity"\) Identity identity/);
+    assert.match(rpcSource(files, "Identity"), /@JsonProperty\("login"\) String login/);
+    const wrapper = generateApiMethod("getCurrent", method, true, "this.sessionId").lines.join("\n");
+    assert.match(wrapper, /CompletableFuture<SessionAccount> getCurrent\(\)/);
+    assert.match(wrapper, /caller\.invoke\("session\.accounts\.getCurrent", .*SessionAccount\.class\)/);
+    assert.doesNotMatch(wrapper, /Void/);
+});
+test("session filesystem capabilities preserve the legacy one-argument constructor", () => {
+    const source = generateRpcClass("SessionFsSetProviderCapabilities", {
+        type: "object",
+        properties: {
+            sqlite: { type: "boolean" },
+            binary: { type: "boolean" },
+        },
+    }, new Map(), "com.github.copilot.generated").code;
+    assert.match(
+        source,
+        /public SessionFsSetProviderCapabilities\(\s*Boolean sqlite\s*\) \{\s*this\(sqlite, null\);/s
+    );
+});
 
 for (const roots of [
     ["FirstResult", "HistoricalResult"],
@@ -315,4 +968,259 @@ test("historical ABI registry retains the complete pre-intake ownership set", ()
     for (const name of ["CatalogNegotiationRefusedError", "CatalogInvalidRequestError", "CatalogUnavailableError"]) {
         assert.equal(RPC_VARIANT_OWNERS[name], "CatalogSearchResult");
     }
+});
+
+type LegacyScope = "server" | "session";
+
+/** A request published with `contract`, `source` and `scope`, then extended with optional fields. */
+function legacyRequestFixture(additions: 0 | 1 | 2, scope: LegacyScope = "server", legacy = ["contract", "source", "scope"]) {
+    const properties: Record<string, JSONSchema7> = {
+        ...(scope === "session" ? { sessionId: { type: "string" } } : {}),
+        contract: { type: "string", description: "Caller contract." },
+        source: { type: "string" },
+        scope: { type: "string" },
+    };
+    if (additions >= 1) properties.policySessionId = { type: "string" };
+    if (additions >= 2) properties.traceId = { type: "string" };
+    const request: JSONSchema7 & Record<string, unknown> = {
+        type: "object",
+        properties,
+        required: [...(scope === "session" ? ["sessionId"] : []), "contract", "source"],
+        additionalProperties: false,
+    };
+    if (additions > 0) request["x-legacy-parameters"] = legacy;
+    const rpcMethod = `${scope === "session" ? "session." : ""}sample.plan`;
+    return {
+        [scope]: {
+            sample: {
+                plan: {
+                    rpcMethod,
+                    params: { $ref: "#/definitions/SamplePlanRequest" },
+                    result: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+                },
+            },
+        },
+        definitions: { SamplePlanRequest: request },
+    } as Parameters<typeof renderRpcTypes>[0];
+}
+
+function generatedFile(files: Map<string, string>, className: string): string | undefined {
+    return [...files].find(([file]) => file.endsWith(`/${className}.java`))?.[1];
+}
+
+async function renderLegacy(additions: 0 | 1 | 2, scope: LegacyScope = "server") {
+    const fixture = legacyRequestFixture(additions, scope);
+    const types = await renderRpcTypes(fixture, {});
+    const wrappers = await renderRpcWrappers(fixture);
+    const prefix = scope === "session" ? "Session" : "";
+    return {
+        params: generatedFile(types, `${prefix}SamplePlanParams`)!,
+        request: generatedFile(types, "SamplePlanRequest"),
+        api: generatedFile(wrappers, `${scope === "session" ? "Session" : "Server"}SampleApi`)!,
+    };
+}
+
+function publicConstructor(source: string): string | undefined {
+    return source.match(/public SamplePlanRequest\([^)]*\)/)?.[0];
+}
+
+test("x-legacy-parameters keeps the params record and adds a fluent request with a same-name overload", async () => {
+    const original = await renderLegacy(0);
+    assert.equal(original.request, undefined, "unmarked requests keep their existing generation");
+    assert.doesNotMatch(original.api, /SamplePlanRequest/);
+
+    const once = await renderLegacy(1);
+    assert.equal(once.params, original.params, "the params record keeps exactly its legacy components");
+    assert.ok(once.request);
+    assert.match(once.request, /public final class SamplePlanRequest \{/);
+    assert.equal(publicConstructor(once.request), "public SamplePlanRequest(String contract, String source)");
+    assert.match(once.request, /this\.contract = Objects\.requireNonNull\(contract, "contract"\);/);
+    assert.match(once.request, /public SamplePlanRequest setScope\(String value\)/);
+    assert.match(once.request, /public SamplePlanRequest setPolicySessionId\(String value\)/);
+    assert.match(once.request, /@JsonProperty\("policySessionId"\)\s+private String policySessionId;/);
+    assert.match(once.api, /public CompletableFuture<SamplePlanResult> plan\(SamplePlanParams params\) \{\s+return caller\.invoke\("sample\.plan", params,/);
+    assert.match(once.api, /public CompletableFuture<SamplePlanResult> plan\(SamplePlanRequest request\) \{\s+return caller\.invoke\("sample\.plan", Objects\.requireNonNull\(request, "request"\),/);
+
+    const twice = await renderLegacy(2);
+    assert.equal(twice.params, original.params, "a second optional addition leaves the record unchanged");
+    assert.equal(publicConstructor(twice.request!), publicConstructor(once.request));
+    assert.match(twice.request!, /public SamplePlanRequest setTraceId\(String value\)/);
+    const overloads = (api: string) => api.match(/public CompletableFuture<SamplePlanResult> plan\([^)]*\)/g);
+    assert.deepEqual(overloads(twice.api), overloads(once.api));
+});
+
+test("x-legacy-parameters session requests keep sessionId injected by the wrapper", async () => {
+    const original = await renderLegacy(0, "session");
+    const once = await renderLegacy(1, "session");
+    assert.equal(once.params, original.params);
+    assert.match(once.params, /@JsonProperty\("sessionId"\) String sessionId/);
+    assert.doesNotMatch(once.request!, /sessionId/);
+    assert.match(
+        once.api,
+        /plan\(SamplePlanRequest request\) \{\s+com\.fasterxml\.jackson\.databind\.node\.ObjectNode _p = MAPPER\.valueToTree\(Objects\.requireNonNull\(request, "request"\)\);\s+_p\.put\("sessionId", this\.sessionId\);\s+return caller\.invoke\("session\.sample\.plan", _p,/
+    );
+});
+
+test("trusted human response ingress stays package-private", async () => {
+    const fixture = {
+        session: {
+            ui: {
+                handlePendingUserInput: {
+                    rpcMethod: "session.ui.handlePendingUserInput",
+                    visibility: "public",
+                    params: { type: "object", properties: { sessionId: { type: "string" } } },
+                    result: { type: "object", properties: { success: { type: "boolean" } } },
+                },
+                handleHumanUserInput: {
+                    rpcMethod: "session.ui.handleHumanUserInput",
+                    visibility: "internal",
+                    params: { type: "object", properties: { sessionId: { type: "string" } } },
+                    result: { type: "object", properties: { success: { type: "boolean" } } },
+                },
+                handleHumanExitPlanMode: {
+                    rpcMethod: "session.ui.handleHumanExitPlanMode",
+                    visibility: "internal",
+                    params: { type: "object", properties: { sessionId: { type: "string" } } },
+                    result: { type: "object", properties: { success: { type: "boolean" } } },
+                },
+            },
+        },
+        definitions: {},
+    } as Parameters<typeof renderRpcWrappers>[0];
+
+    const wrappers = await renderRpcWrappers(fixture);
+    const api = generatedFile(wrappers, "SessionUiApi")!;
+    assert.match(api, /public CompletableFuture<SessionUiHandlePendingUserInputResult> handlePendingUserInput\(/);
+    assert.match(api, /\n    CompletableFuture<SessionUiHandleHumanUserInputResult> handleHumanUserInput\(/);
+    assert.match(api, /\n    CompletableFuture<SessionUiHandleHumanExitPlanModeResult> handleHumanExitPlanMode\(/);
+    assert.doesNotMatch(api, /public CompletableFuture<SessionUiHandleHuman(?:UserInput|ExitPlanMode)Result>/);
+});
+
+test("x-legacy-parameters rejects metadata that would not preserve the original API", async () => {
+    await assert.rejects(
+        renderRpcTypes(legacyRequestFixture(1, "server", ["contract", "scope"]), {}),
+        /Invalid x-legacy-parameters for sample\.plan: required property source must be a legacy parameter/
+    );
+    await assert.rejects(
+        renderRpcTypes(legacyRequestFixture(1, "server", ["contract", "source", "missing"]), {}),
+        /unknown property missing/
+    );
+    await assert.rejects(
+        renderRpcTypes(legacyRequestFixture(1, "session", ["sessionId", "contract", "source"]), {}),
+        /implicit property sessionId cannot be a legacy parameter/
+    );
+    const client = legacyRequestFixture(1) as Record<string, unknown>;
+    client.clientSession = client.server;
+    delete client.server;
+    await assert.rejects(renderRpcTypes(client as Parameters<typeof renderRpcTypes>[0], {}), /only server and session requests are supported/);
+});
+
+/** A response record published with `name`, `status` and `error`, then extended with optional fields. */
+function legacyRecordSchema(additions: string[], legacy: string[] | undefined = ["name", "status", "error"]): JSONSchema7 {
+    const properties: Record<string, JSONSchema7> = {
+        name: { type: "string", description: "Server name." },
+        status: { type: "string" },
+    };
+    for (const addition of additions.filter((name) => name === "owned")) properties[addition] = { type: "string" };
+    properties.error = { type: "string" };
+    for (const addition of additions.filter((name) => name !== "owned")) properties[addition] = { type: "string" };
+    const schema: JSONSchema7 & Record<string, unknown> = { type: "object", properties, required: ["name", "status"] };
+    if (additions.length > 0 && legacy) schema["x-legacy-parameters"] = legacy;
+    return schema;
+}
+
+function recordSource(schema: JSONSchema7): string {
+    return generateRpcClass("SampleServer", schema, new Map(), "com.github.copilot.generated.rpc").code;
+}
+
+function legacyConstructors(source: string): string[] {
+    return [...source.matchAll(/public SampleServer\(([^)]*)\) \{\s*this\(([^)]*)\);/g)].map(
+        (match) => `${match[1].replace(/\s+/g, " ").trim()} => ${match[2]}`
+    );
+}
+
+test("x-legacy-parameters response records keep every component and add the previous constructor", () => {
+    const original = recordSource(legacyRecordSchema([]));
+    assert.deepEqual(legacyConstructors(original), [], "unmarked records keep their existing generation");
+
+    const trailing = recordSource(legacyRecordSchema(["traceId"]));
+    assert.match(trailing, /record SampleServer\(\s*\/\*\* Server name\. \*\/\s*@JsonProperty\("name"\) String name,\s*@JsonProperty\("status"\) String status,\s*@JsonProperty\("error"\) String error,\s*@JsonProperty\("traceId"\) String traceId\s*\)/);
+    assert.deepEqual(legacyConstructors(trailing), ["String name, String status, String error => name, status, error, null"]);
+
+    const middle = recordSource(legacyRecordSchema(["owned"]));
+    assert.deepEqual(legacyConstructors(middle), ["String name, String status, String error => name, status, null, error"]);
+
+    const twice = recordSource(legacyRecordSchema(["owned", "traceId"]));
+    assert.deepEqual(legacyConstructors(twice), ["String name, String status, String error => name, status, null, error, null"]);
+});
+
+test("managed settings params keep their previous positional constructor", async () => {
+    const fixture = {
+        server: {
+            managedSettings: {
+                resolve: {
+                    rpcMethod: "managedSettings.resolve",
+                    params: { $ref: "#/definitions/ManagedSettingsResolveRequest" },
+                    result: null,
+                },
+            },
+        },
+        definitions: {
+            ManagedSettingsResolveRequest: {
+                anyOf: [
+                    { not: {} },
+                    {
+                        type: "object",
+                        properties: {
+                            selectionId: { type: "string" },
+                            gitHubToken: { type: "string" },
+                            clientName: { type: "string" },
+                            workingDirectory: { type: "string" },
+                        },
+                        additionalProperties: false,
+                    },
+                ],
+            },
+        },
+    } as Parameters<typeof renderRpcTypes>[0];
+
+    const files = await renderRpcTypes(fixture, {});
+    const params = generatedFile(files, "ManagedSettingsResolveParams")!;
+    assert.match(
+        params,
+        /public ManagedSettingsResolveParams\(\s*String selectionId,\s*String gitHubToken,\s*String clientName\s*\) \{\s*this\(selectionId, gitHubToken, clientName, null\);\s*\}/
+    );
+});
+
+test("x-legacy-parameters response records reject metadata a positional constructor cannot preserve", () => {
+    assert.throws(
+        () => recordSource(legacyRecordSchema(["traceId"], ["status", "name", "error"])),
+        /Invalid x-legacy-parameters for SampleServer: legacy parameters must follow schema property order/
+    );
+    assert.throws(
+        () => recordSource(legacyRecordSchema(["traceId"], ["name", "error"])),
+        /required property status must be a legacy parameter/
+    );
+});
+
+test("x-legacy-parameters response records get the constructor through standalone generation", async () => {
+    const files = await renderRpcTypes({
+        server: {
+            sample: {
+                list: {
+                    rpcMethod: "sample.list",
+                    params: null,
+                    result: {
+                        type: "object",
+                        properties: { servers: { type: "array", items: { $ref: "#/definitions/SampleServer" } } },
+                        required: ["servers"],
+                    },
+                },
+            },
+        },
+        definitions: { SampleServer: legacyRecordSchema(["owned"]) },
+    } as Parameters<typeof renderRpcTypes>[0], {});
+    assert.deepEqual(legacyConstructors(rpcSource(files, "SampleServer")), [
+        "String name, String status, String error => name, status, null, error",
+    ]);
 });

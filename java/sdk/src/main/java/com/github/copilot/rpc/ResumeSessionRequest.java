@@ -12,6 +12,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import com.github.copilot.CopilotExperimental;
+import com.github.copilot.generated.rpc.DiagnosticsConfiguration;
 import com.github.copilot.generated.rpc.SessionLimitsConfig;
 
 /**
@@ -37,6 +38,12 @@ public final class ResumeSessionRequest {
 
     @JsonProperty("model")
     private String model;
+
+    @JsonProperty("continuePendingWork")
+    private Boolean continuePendingWork;
+
+    @JsonProperty("allowTranscriptRecovery")
+    private Boolean allowTranscriptRecovery;
 
     @JsonProperty("reasoningEffort")
     private String reasoningEffort;
@@ -140,6 +147,10 @@ public final class ResumeSessionRequest {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean enableSkills;
 
+    @JsonProperty("hasSkillProvider")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean hasSkillProvider;
+
     @JsonProperty("embeddingCacheStorage")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String embeddingCacheStorage;
@@ -161,6 +172,9 @@ public final class ResumeSessionRequest {
 
     @JsonProperty("mcpOAuthTokenStorage")
     private String mcpOAuthTokenStorage;
+
+    @JsonProperty("diagnostics")
+    private DiagnosticsConfiguration diagnostics;
 
     @JsonProperty("authClientIdMetadataUrl")
     private String authClientIdMetadataUrl;
@@ -251,6 +265,10 @@ public final class ResumeSessionRequest {
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean enableManagedSettings;
 
+    @JsonProperty("enforceManagedModelDefaults")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean enforceManagedModelDefaults;
+
     @JsonProperty("managedSettings")
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private ManagedSettings managedSettings;
@@ -283,6 +301,43 @@ public final class ResumeSessionRequest {
     /** Sets the model name. @param model the model */
     public void setModel(String model) {
         this.model = model;
+    }
+
+    /**
+     * Gets the pending-work continuation choice.
+     *
+     * @return the choice, or {@code null} if omitted
+     */
+    public Boolean getContinuePendingWork() {
+        return continuePendingWork;
+    }
+
+    /**
+     * Sets the pending-work continuation choice.
+     *
+     * @param continuePendingWork
+     *            the choice
+     */
+    public void setContinuePendingWork(boolean continuePendingWork) {
+        this.continuePendingWork = continuePendingWork;
+    }
+
+    /** Restores the runtime's default pending-work continuation behavior. */
+    public void clearContinuePendingWork() {
+        continuePendingWork = null;
+    }
+
+    /** @return whether transcript repair was requested, or null if omitted */
+    public Boolean getAllowTranscriptRecovery() {
+        return allowTranscriptRecovery;
+    }
+
+    /**
+     * @param allowTranscriptRecovery
+     *            whether transcript repair is allowed
+     */
+    public void setAllowTranscriptRecovery(boolean allowTranscriptRecovery) {
+        this.allowTranscriptRecovery = allowTranscriptRecovery;
     }
 
     /** Gets the reasoning effort. @return the reasoning effort level */
@@ -717,6 +772,23 @@ public final class ResumeSessionRequest {
         this.enableSkills = null;
     }
 
+    /** Gets skill-provider availability flag. @return the flag */
+    public Boolean getHasSkillProvider() {
+        return hasSkillProvider;
+    }
+
+    /** Sets skill-provider availability flag. @param hasSkillProvider the flag */
+    public void setHasSkillProvider(boolean hasSkillProvider) {
+        this.hasSkillProvider = hasSkillProvider;
+    }
+
+    /**
+     * Clears the hasSkillProvider setting, reverting to the default behavior.
+     */
+    public void clearHasSkillProvider() {
+        this.hasSkillProvider = null;
+    }
+
     /** Gets embedding cache storage mode. @return the mode */
     public String getEmbeddingCacheStorage() {
         return embeddingCacheStorage;
@@ -823,6 +895,19 @@ public final class ResumeSessionRequest {
     /** Gets MCP OAuth token storage mode. @return the storage mode */
     public String getMcpOAuthTokenStorage() {
         return mcpOAuthTokenStorage;
+    }
+
+    /**
+     * Gets the diagnostics configuration. @return the level, or {@code null} when
+     * unset
+     */
+    public DiagnosticsConfiguration getDiagnostics() {
+        return diagnostics;
+    }
+
+    /** Sets the diagnostics configuration. @param diagnostics the level */
+    public void setDiagnostics(DiagnosticsConfiguration diagnostics) {
+        this.diagnostics = diagnostics;
     }
 
     /**
@@ -1188,6 +1273,21 @@ public final class ResumeSessionRequest {
      */
     public void clearEnableManagedSettings() {
         this.enableManagedSettings = null;
+    }
+
+    /** Gets managed model lock enforcement. @return the flag, or {@code null} */
+    public Boolean getEnforceManagedModelDefaults() {
+        return enforceManagedModelDefaults;
+    }
+
+    /** Sets managed model lock enforcement. @param enforce whether to enforce */
+    public void setEnforceManagedModelDefaults(boolean enforce) {
+        this.enforceManagedModelDefaults = enforce;
+    }
+
+    /** Clears managed model lock enforcement. */
+    public void clearEnforceManagedModelDefaults() {
+        this.enforceManagedModelDefaults = null;
     }
 
     /** @return host-injected managed settings, or {@code null} when unset */

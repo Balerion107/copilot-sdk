@@ -1,10 +1,13 @@
 SHARED_CODEGEN_INPUTS = [
     "nodejs/scripts/releaseArtifacts.ts",
     "nodejs/src/cliVersion.ts",
+    "scripts/codegen/legacy-parameters.ts",
     "scripts/codegen/package-lock.json",
     "scripts/codegen/package.json",
+    "scripts/codegen/extensible-enums.ts",
     "scripts/codegen/utils.ts",
     "scripts/runtime-layout.mjs",
+    "scripts/runtime-release.mjs",
 ]
 
 HAND_WRITTEN_DOTNET_INPUTS = glob(
@@ -221,7 +224,9 @@ genrule(
         "java/scripts/codegen/package-lock.json",
         "java/scripts/codegen/package.json",
         "nodejs/package.json",
+        "scripts/codegen/legacy-parameters.ts",
         "scripts/runtime-layout.mjs",
+        "scripts/runtime-release.mjs",
     ],
     outs = ["projections/java.tar"],
     cmd = """
