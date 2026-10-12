@@ -217,7 +217,9 @@ export type RemediationAction =
   /** Review or widen the sandbox policy. The blocked path or host is named by the accompanying message or by the tool result the action arrived with. */
   | "review_sandbox_policy"
   /** Permit outbound network access in the sandbox policy. */
-  | "allow_sandbox_outbound";
+  | "allow_sandbox_outbound"
+  /** Discard conversation history back through the blocked request before continuing. */
+  | "rewind_conversation";
 /**
  * The session mode the agent is operating in
  */
@@ -2187,7 +2189,7 @@ export interface ErrorData {
    */
   errorCode?: string;
   /**
-   * Category of error (e.g., "authentication", "authorization", "quota", "rate_limit", "context_limit", "query")
+   * Category of error (e.g., "authentication", "authorization", "policy", "quota", "rate_limit", "context_limit", "query")
    */
   errorType: string;
   /**
@@ -2198,6 +2200,14 @@ export interface ErrorData {
    * GitHub request tracing ID (x-github-request-id header) for correlating with server-side logs
    */
   providerCallId?: string;
+  /**
+   * Sanitized provider-defined error parameter preserved from a structured upstream error envelope, when available.
+   */
+  providerErrorParam?: string;
+  /**
+   * Provider-defined error type preserved from a structured upstream error envelope, when available (for example, `invalid_request_error`).
+   */
+  providerErrorType?: string;
   remediation?: RemediationAction;
   /**
    * Copilot service request ID (x-copilot-service-request-id header) for CAPI log correlation
@@ -4389,6 +4399,10 @@ export interface CompactionCompleteCompactionTokensUsed {
    */
   outputTokens?: number;
   provider?: ModelProviderRef;
+  /**
+   * Number of model requests represented by this aggregated compaction usage
+   */
+  requestCount?: number;
 }
 /**
  * Per-request cost and usage data from the CAPI copilot_usage response field
@@ -4537,6 +4551,14 @@ export interface PermissionRecoveryData {
    */
   maxAttempts: number;
   onBlocked: PermissionRecoveryOnBlocked;
+  /**
+   * Subagent identifier that owns this recovery episode when the request was delegated through a parent permission service
+   */
+  ownerAgentId?: string;
+  /**
+   * Root or child execution-session identifier that owns this recovery episode; omitted for legacy snapshots
+   */
+  ownerSessionId?: string;
   reason: PermissionRecoveryReason;
   status: PermissionRecoveryStatus;
 }
@@ -9672,6 +9694,14 @@ export interface PermissionRequestedEvent {
  */
 export interface PermissionRequestedData {
   agentMode?: SessionMode;
+  /**
+   * Delegated agent that owns permission recovery when the owner session multiplexes remote agents. Absent otherwise.
+   */
+  ownerAgentId?: string;
+  /**
+   * Execution session that owns permission recovery for this request. Absent on historical events.
+   */
+  ownerSessionId?: string;
   permissionMode?: PermissionMode;
   permissionRequest: PermissionRequest;
   promptRequest?: PermissionPromptRequest;

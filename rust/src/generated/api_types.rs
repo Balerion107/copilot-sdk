@@ -81,6 +81,14 @@ pub mod rpc_methods {
     pub const ACCOUNT_LOGIN: &str = "account.login";
     /// `account.logout`
     pub const ACCOUNT_LOGOUT: &str = "account.logout";
+    /// `account.describeAuthInfo`
+    pub const ACCOUNT_DESCRIBEAUTHINFO: &str = "account.describeAuthInfo";
+    /// `account.getGistSupport`
+    pub const ACCOUNT_GETGISTSUPPORT: &str = "account.getGistSupport";
+    /// `account.getWebUrl`
+    pub const ACCOUNT_GETWEBURL: &str = "account.getWebUrl";
+    /// `account.getTokenEnvVar`
+    pub const ACCOUNT_GETTOKENENVVAR: &str = "account.getTokenEnvVar";
     /// `secrets.addFilterValues`
     pub const SECRETS_ADDFILTERVALUES: &str = "secrets.addFilterValues";
     /// `mcp.config.list`
@@ -105,6 +113,8 @@ pub mod rpc_methods {
     pub const MCP_REGISTRY_CANCEL: &str = "mcp.registry.cancel";
     /// `mcp.discover`
     pub const MCP_DISCOVER: &str = "mcp.discover";
+    /// `mcp.listBuiltinServerNames`
+    pub const MCP_LISTBUILTINSERVERNAMES: &str = "mcp.listBuiltinServerNames";
     /// `mcp.shouldExcludeGitHubTools`
     pub const MCP_SHOULDEXCLUDEGITHUBTOOLS: &str = "mcp.shouldExcludeGitHubTools";
     /// `mcp.planInstall`
@@ -131,6 +141,16 @@ pub mod rpc_methods {
     pub const EXTENSIONS_ENABLE: &str = "extensions.enable";
     /// `extensions.disable`
     pub const EXTENSIONS_DISABLE: &str = "extensions.disable";
+    /// `instructions.getInitPrompt`
+    pub const INSTRUCTIONS_GETINITPROMPT: &str = "instructions.getInitPrompt";
+    /// `instructions.discover`
+    pub const INSTRUCTIONS_DISCOVER: &str = "instructions.discover";
+    /// `instructions.discoverRepoSources`
+    pub const INSTRUCTIONS_DISCOVERREPOSOURCES: &str = "instructions.discoverRepoSources";
+    /// `instructions.getDiscoveryPaths`
+    pub const INSTRUCTIONS_GETDISCOVERYPATHS: &str = "instructions.getDiscoveryPaths";
+    /// `instructions.clearCache`
+    pub const INSTRUCTIONS_CLEARCACHE: &str = "instructions.clearCache";
     /// `skills.planInstall`
     pub const SKILLS_PLANINSTALL: &str = "skills.planInstall";
     /// `skills.applyInstall`
@@ -204,10 +224,6 @@ pub mod rpc_methods {
     /// `agents.customAgentInitialModelDecision`
     pub const AGENTS_CUSTOMAGENTINITIALMODELDECISION: &str =
         "agents.customAgentInitialModelDecision";
-    /// `instructions.discover`
-    pub const INSTRUCTIONS_DISCOVER: &str = "instructions.discover";
-    /// `instructions.getDiscoveryPaths`
-    pub const INSTRUCTIONS_GETDISCOVERYPATHS: &str = "instructions.getDiscoveryPaths";
     /// `globalState.load`
     pub const GLOBALSTATE_LOAD: &str = "globalState.load";
     /// `globalState.loadForConfigDir`
@@ -218,8 +234,38 @@ pub mod rpc_methods {
     pub const COMMANDS_LIST: &str = "commands.list";
     /// `user.settings.get`
     pub const USER_SETTINGS_GET: &str = "user.settings.get";
+    /// `user.settings.getPaths`
+    pub const USER_SETTINGS_GETPATHS: &str = "user.settings.getPaths";
     /// `user.settings.set`
     pub const USER_SETTINGS_SET: &str = "user.settings.set";
+    /// `user.settings.listGovernanceKeys`
+    pub const USER_SETTINGS_LISTGOVERNANCEKEYS: &str = "user.settings.listGovernanceKeys";
+    /// `user.settings.edit`
+    pub const USER_SETTINGS_EDIT: &str = "user.settings.edit";
+    /// `user.settings.normalize`
+    pub const USER_SETTINGS_NORMALIZE: &str = "user.settings.normalize";
+    /// `user.settings.diagnoseProblems`
+    pub const USER_SETTINGS_DIAGNOSEPROBLEMS: &str = "user.settings.diagnoseProblems";
+    /// `user.settings.applyTopKey`
+    pub const USER_SETTINGS_APPLYTOPKEY: &str = "user.settings.applyTopKey";
+    /// `user.settings.writeAll`
+    pub const USER_SETTINGS_WRITEALL: &str = "user.settings.writeAll";
+    /// `user.settings.update`
+    pub const USER_SETTINGS_UPDATE: &str = "user.settings.update";
+    /// `user.settings.loadForEdit`
+    pub const USER_SETTINGS_LOADFOREDIT: &str = "user.settings.loadForEdit";
+    /// `user.settings.validate`
+    pub const USER_SETTINGS_VALIDATE: &str = "user.settings.validate";
+    /// `featureFlags.listMetadata`
+    pub const FEATUREFLAGS_LISTMETADATA: &str = "featureFlags.listMetadata";
+    /// `featureFlags.resolve`
+    pub const FEATUREFLAGS_RESOLVE: &str = "featureFlags.resolve";
+    /// `repo.settings.readRaw`
+    pub const REPO_SETTINGS_READRAW: &str = "repo.settings.readRaw";
+    /// `repo.settings.writeKey`
+    pub const REPO_SETTINGS_WRITEKEY: &str = "repo.settings.writeKey";
+    /// `repo.settings.writeAll`
+    pub const REPO_SETTINGS_WRITEALL: &str = "repo.settings.writeAll";
     /// `gitHubRepository.atPath`
     pub const GITHUBREPOSITORY_ATPATH: &str = "gitHubRepository.atPath";
     /// `gitHubOwners.nextRequestId`
@@ -467,6 +513,8 @@ pub mod rpc_methods {
     pub const SESSION_MODEL_SETALLOWEDMODELS: &str = "session.model.setAllowedModels";
     /// `session.model.setReasoningEffort`
     pub const SESSION_MODEL_SETREASONINGEFFORT: &str = "session.model.setReasoningEffort";
+    /// `session.model.getReasoningSummaries`
+    pub const SESSION_MODEL_GETREASONINGSUMMARIES: &str = "session.model.getReasoningSummaries";
     /// `session.model.list`
     pub const SESSION_MODEL_LIST: &str = "session.model.list";
     /// `session.mode.get`
@@ -1775,6 +1823,67 @@ pub struct AccountAllUsers {
     pub token: Option<String>,
 }
 
+/// Credential-free authentication identity safe to expose to hosts and user interfaces.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthIdentity {
+    /// Snapshot of the authenticated user's Copilot subscription info, if known
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copilot_user: Option<CopilotUserResponse>,
+    /// Name of the environment variable that supplied the credential, when applicable
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env_var: Option<String>,
+    /// Authentication host
+    pub host: String,
+    /// Authenticated login, when available
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login: Option<String>,
+    /// Opaque SDK GitHub credential registration backing this identity. Routing metadata only; never a credential.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration_id: Option<String>,
+    /// Authentication type
+    pub r#type: AuthInfoType,
+}
+
+/// The authentication identity whose shared wording should be rendered.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountDescribeAuthInfoRequest {
+    /// Identity to describe.
+    pub identity: AuthIdentity,
+}
+
+/// The wording the runtime uses for an authentication identity.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountDescribeAuthInfoResult {
+    /// One-line description of the identity, suitable after a verb such as "Switched to".
+    pub description: String,
+    /// Sign-in banner announcing the authenticated user.
+    pub message: String,
+}
+
 /// Current authentication state
 ///
 /// <div class="warning">
@@ -1792,6 +1901,42 @@ pub struct AccountGetCurrentAuthResult {
     /// Current authentication information, if authenticated
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_info: Option<AuthInfo>,
+}
+
+/// The authentication identity whose gist support should be reported.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountGetGistSupportRequest {
+    /// Identity to evaluate.
+    pub identity: AuthIdentity,
+}
+
+/// Whether the identity can create gists, and why not when it cannot.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountGetGistSupportResult {
+    /// Machine-readable reason category when unsupported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Human-readable explanation to show where the gist action would have been.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// True when the identity can create gists.
+    pub supported: bool,
 }
 
 /// Optional opaque account selection or compatibility GitHub token used to look up quota.
@@ -1856,6 +2001,55 @@ pub struct AccountQuotaSnapshot {
 pub struct AccountGetQuotaResult {
     /// Quota snapshots keyed by type (e.g., chat, completions, premium_interactions)
     pub quota_snapshots: HashMap<String, AccountQuotaSnapshot>,
+}
+
+/// The environment variable supplying a classic personal access token, when one is set.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountGetTokenEnvVarResult {
+    /// Variable name, for example `GH_TOKEN`. Absent when no classic token is present in the environment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// A path to resolve against the GitHub host an identity is signed in to.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountGetWebUrlRequest {
+    /// Identity whose host the path resolves against. Omit to resolve against the public github.com host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<AuthIdentity>,
+    /// Host-relative path, without a leading slash, for example `settings/copilot/features`.
+    pub path: String,
+}
+
+/// An absolute URL on the identity's GitHub host.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountGetWebUrlResult {
+    /// Absolute URL for the requested path.
+    pub url: String,
 }
 
 /// Credentials to validate and store. Omit login to resolve the authenticated user from the token.
@@ -2126,6 +2320,9 @@ pub struct AgentInfo {
     pub disable_model_invocation: Option<bool>,
     /// Human-readable display name
     pub display_name: String,
+    /// Declarative hook actions keyed by event name, executed only while this agent is active.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<HashMap<String, Vec<serde_json::Value>>>,
     /// Stable identifier for selection. For most agents this is the same as `name`; for plugin/builtin agents it may differ. Always populated; defaults to `name` when no distinct id was assigned.
     pub id: String,
     /// MCP server configurations attached to this agent, keyed by server name. Server config shape mirrors the MCP `mcpServers` schema.
@@ -2496,6 +2693,63 @@ pub struct AgentsDiscoverRequest {
     pub project_paths: Option<Vec<String>>,
 }
 
+/// Extensible [`AgentsDiscoverRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`AgentsDiscoverOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentsDiscoverOptions {
+    #[serde(flatten)]
+    legacy: AgentsDiscoverRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_directories: Option<Vec<String>>,
+}
+
+impl AgentsDiscoverOptions {
+    /// Creates options with the required inputs.
+    pub fn new() -> Self {
+        Self {
+            legacy: AgentsDiscoverRequest {
+                project_paths: None,
+                exclude_host_agents: None,
+            },
+            agent_directories: None,
+        }
+    }
+
+    /// Optional list of project directory paths to scan for project-scoped agents. When omitted or empty, only user/plugin/remote-independent agents are returned (no project scan).
+    pub fn project_paths(mut self, value: Vec<String>) -> Self {
+        self.legacy.project_paths = Some(value);
+        self
+    }
+
+    /// When true, omit the host's agents (the user-level agent directory and all plugin agents), leaving only project and remote agents. For multitenant deployments.
+    pub fn exclude_host_agents(mut self, value: bool) -> Self {
+        self.legacy.exclude_host_agents = Some(value);
+        self
+    }
+
+    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without ambient discovery, subject to managed/source disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+    pub fn agent_directories(mut self, value: Vec<String>) -> Self {
+        self.agent_directories = Some(value);
+        self
+    }
+}
+
+impl Default for AgentsDiscoverOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Name of the custom agent to select for subsequent turns.
 ///
 /// <div class="warning">
@@ -2694,6 +2948,63 @@ pub struct AgentsGetDiscoveryPathsRequest {
     /// Optional list of project directory paths. When omitted or empty, only the user-level directory is returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
+}
+
+/// Extensible [`AgentsGetDiscoveryPathsRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`AgentsGetDiscoveryPathsOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentsGetDiscoveryPathsOptions {
+    #[serde(flatten)]
+    legacy: AgentsGetDiscoveryPathsRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_directories: Option<Vec<String>>,
+}
+
+impl AgentsGetDiscoveryPathsOptions {
+    /// Creates options with the required inputs.
+    pub fn new() -> Self {
+        Self {
+            legacy: AgentsGetDiscoveryPathsRequest {
+                project_paths: None,
+                exclude_host_agents: None,
+            },
+            agent_directories: None,
+        }
+    }
+
+    /// Optional list of project directory paths. When omitted or empty, only the user-level directory is returned.
+    pub fn project_paths(mut self, value: Vec<String>) -> Self {
+        self.legacy.project_paths = Some(value);
+        self
+    }
+
+    /// When true, omit the host's user-level agent directory, leaving only project directories. For multitenant deployments (mirrors `discover`'s `excludeHostAgents`).
+    pub fn exclude_host_agents(mut self, value: bool) -> Self {
+        self.legacy.exclude_host_agents = Some(value);
+        self
+    }
+
+    /// Explicit discovery-only agent roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+    pub fn agent_directories(mut self, value: Vec<String>) -> Self {
+        self.agent_directories = Some(value);
+        self
+    }
+}
+
+impl Default for AgentsGetDiscoveryPathsOptions {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Blob attachment with inline base64-encoded data
@@ -3232,35 +3543,6 @@ pub struct AuthEnumerateValueProviders {
     pub items: Vec<ProviderDescriptor>,
     /// Enumerated account-collection variant discriminator.
     pub kind: AuthEnumerateValueProvidersKind,
-}
-
-/// Credential-free authentication identity safe to expose to hosts and user interfaces.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthIdentity {
-    /// Snapshot of the authenticated user's Copilot subscription info, if known
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub copilot_user: Option<CopilotUserResponse>,
-    /// Name of the environment variable that supplied the credential, when applicable
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env_var: Option<String>,
-    /// Authentication host
-    pub host: String,
-    /// Authenticated login, when available
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub login: Option<String>,
-    /// Opaque SDK GitHub credential registration backing this identity. Routing metadata only; never a credential.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub registration_id: Option<String>,
-    /// Authentication type
-    pub r#type: AuthInfoType,
 }
 
 /// Credential-free identity metadata.
@@ -8219,6 +8501,88 @@ pub struct ExternalToolTextResultForLlmContentText {
     pub r#type: ExternalToolTextResultForLlmContentTextType,
 }
 
+/// The declared shape of one feature flag, independent of any caller population.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FeatureFlagMetadata {
+    /// The population the flag is declared for before any environment or user-settings override is applied.
+    #[doc(hidden)]
+    pub(crate) availability: FeatureFlagAvailability,
+    /// Whether the flag participates in the CAPI sanity suite.
+    pub capi_sanity: bool,
+    /// Text shown to a user choosing whether to turn the flag on in experimental mode. Absent when the flag is not user-facing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experimental_description: Option<String>,
+    /// The online-experiment (ExP) flag this maps to, when the flag is assigned by an experiment rather than declared statically.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exp_flag: Option<String>,
+    /// Environment variable that overrides this flag's experiment assignment locally in the experiment service, not in `featureFlags.resolve`. Present exactly when `expFlag` is, and derived from it, so a caller reads a local override without reproducing the naming rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exp_flag_env_var: Option<String>,
+    /// The flag's name, matching the key it is listed under.
+    pub name: String,
+}
+
+/// Every feature flag this runtime declares, with the shape each one was declared with.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FeatureFlagsMetadataResult {
+    /// Declared feature flags keyed by flag name.
+    #[doc(hidden)]
+    pub(crate) flags: HashMap<String, FeatureFlagMetadata>,
+}
+
+/// Caller population and overrides for static feature-flag resolution, independent of experiment assignments and active runtime state.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FeatureFlagsResolveRequest {
+    /// Resolve against this already-computed flag set rather than each flag's declared availability. Keyed by flag name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_flags: Option<HashMap<String, bool>>,
+    /// User settings to apply, including `enabledFeatureFlags`, legacy `feature_flags.enabled`, and supported convenience settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<serde_json::Value>,
+    /// Environment for direct feature-flag overrides and `COPILOT_CLI_ENABLED_FEATURE_FLAGS`. Does not apply `COPILOT_EXP_*` experiment assignments. Defaults to this runtime process's own environment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<HashMap<String, String>>,
+    /// Flags forced to a value after every other layer, keyed by flag name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flag_overrides: Option<HashMap<String, bool>>,
+    /// Whether the caller is in an experimental population.
+    pub is_experimental: bool,
+    /// Whether the caller is GitHub or Microsoft staff.
+    pub is_staff: bool,
+    /// GitHub-staff membership. Omit when it was never recorded: a legacy staff account then counts as both staff populations and keeps every staff feature.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_staff_github: Option<bool>,
+    /// Microsoft-staff membership. Omitted the same way as `isStaffGitHub`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_staff_microsoft: Option<bool>,
+    /// Whether the caller belongs to the team population used by feature availability.
+    pub is_team: bool,
+}
+
 /// Parameters for starting fleet orchestration: an optional user prompt combined with the fleet instructions, plus the send options forwarded to the resulting turn.
 ///
 /// <div class="warning">
@@ -9293,6 +9657,63 @@ pub struct HooksDiscoverRequest {
     /// Optional project directory paths whose trusted repository and project-expanded plugin hooks should be discovered. When omitted or empty, user, managed-policy, and globally enabled installed or explicit plugin hooks are returned without project expansion.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
+}
+
+/// Extensible [`HooksDiscoverRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`HooksDiscoverOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HooksDiscoverOptions {
+    #[serde(flatten)]
+    legacy: HooksDiscoverRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hook_directories: Option<Vec<String>>,
+}
+
+impl HooksDiscoverOptions {
+    /// Creates options with the required inputs.
+    pub fn new() -> Self {
+        Self {
+            legacy: HooksDiscoverRequest {
+                project_paths: None,
+                exclude_host_hooks: None,
+            },
+            hook_directories: None,
+        }
+    }
+
+    /// Optional project directory paths whose trusted repository and project-expanded plugin hooks should be discovered. When omitted or empty, user, managed-policy, and globally enabled installed or explicit plugin hooks are returned without project expansion.
+    pub fn project_paths(mut self, value: Vec<String>) -> Self {
+        self.legacy.project_paths = Some(value);
+        self
+    }
+
+    /// When true, omit host-owned user and plugin hook rows and their diagnostics. Managed-policy hooks and trusted repository hooks remain visible, and host disabledHooks still contribute to each remaining row's effective enabled state. This filters sources rather than simulating a host with no settings.
+    pub fn exclude_host_hooks(mut self, value: bool) -> Self {
+        self.legacy.exclude_host_hooks = Some(value);
+        self
+    }
+
+    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without ambient discovery or repository file-hook enablement, subject to managed/hook disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+    pub fn hook_directories(mut self, value: Vec<String>) -> Self {
+        self.hook_directories = Some(value);
+        self
+    }
+}
+
+impl Default for HooksDiscoverOptions {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Server-discovered hook actions and partial-load diagnostics from user, repository, plugin, and managed-policy sources. Concrete sessions may include additional session-specific hook sources.
@@ -10643,6 +11064,36 @@ pub struct InstructionDiscoveryPathList {
     pub paths: Vec<InstructionDiscoveryPath>,
 }
 
+/// Explicit discovery arguments for one location, supplied by the caller rather than derived from a session.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstructionsDiscoverRepoSourcesRequest {
+    /// Extra directories to scan alongside instruction directories configured in the runtime environment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_dirs: Option<Vec<String>>,
+    /// Copilot configuration directory for user-level sources. An omitted or empty value uses the server's configuration home.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+    /// Working directory whose instruction sources should also be included. Omission adds no separate working-directory scope.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd_path: Option<String>,
+    /// When true, also discover instruction files nested below the location.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_child_instructions: Option<bool>,
+    /// When true, include the sources a command-line host reads. Hosts that are not the CLI omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_cli: Option<bool>,
+    /// Repository location to discover. An empty string selects no repository scope; cwdPath can still supply working-directory sources.
+    pub location: String,
+}
+
 /// Optional project paths to include in instruction discovery.
 ///
 /// <div class="warning">
@@ -10662,6 +11113,63 @@ pub struct InstructionsDiscoverRequest {
     pub project_paths: Option<Vec<String>>,
 }
 
+/// Extensible [`InstructionsDiscoverRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`InstructionsDiscoverOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionsDiscoverOptions {
+    #[serde(flatten)]
+    legacy: InstructionsDiscoverRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instruction_directories: Option<Vec<String>>,
+}
+
+impl InstructionsDiscoverOptions {
+    /// Creates options with the required inputs.
+    pub fn new() -> Self {
+        Self {
+            legacy: InstructionsDiscoverRequest {
+                project_paths: None,
+                exclude_host_instructions: None,
+            },
+            instruction_directories: None,
+        }
+    }
+
+    /// Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).
+    pub fn project_paths(mut self, value: Vec<String>) -> Self {
+        self.legacy.project_paths = Some(value);
+        self
+    }
+
+    /// When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.
+    pub fn exclude_host_instructions(mut self, value: bool) -> Self {
+        self.legacy.exclude_host_instructions = Some(value);
+        self
+    }
+
+    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+    pub fn instruction_directories(mut self, value: Vec<String>) -> Self {
+        self.instruction_directories = Some(value);
+        self
+    }
+}
+
+impl Default for InstructionsDiscoverOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Optional project paths to include when enumerating instruction discovery targets.
 ///
 /// <div class="warning">
@@ -10679,6 +11187,63 @@ pub struct InstructionsGetDiscoveryPathsRequest {
     /// Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
+}
+
+/// Extensible [`InstructionsGetDiscoveryPathsRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`InstructionsGetDiscoveryPathsOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionsGetDiscoveryPathsOptions {
+    #[serde(flatten)]
+    legacy: InstructionsGetDiscoveryPathsRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instruction_directories: Option<Vec<String>>,
+}
+
+impl InstructionsGetDiscoveryPathsOptions {
+    /// Creates options with the required inputs.
+    pub fn new() -> Self {
+        Self {
+            legacy: InstructionsGetDiscoveryPathsRequest {
+                project_paths: None,
+                exclude_host_instructions: None,
+            },
+            instruction_directories: None,
+        }
+    }
+
+    /// Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.
+    pub fn project_paths(mut self, value: Vec<String>) -> Self {
+        self.legacy.project_paths = Some(value);
+        self
+    }
+
+    /// When true, omit the host's user-level instruction targets, leaving only repository targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).
+    pub fn exclude_host_instructions(mut self, value: bool) -> Self {
+        self.legacy.exclude_host_instructions = Some(value);
+        self
+    }
+
+    /// Explicit discovery-only instruction roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+    pub fn instruction_directories(mut self, value: Vec<String>) -> Self {
+        self.instruction_directories = Some(value);
+        self
+    }
+}
+
+impl Default for InstructionsGetDiscoveryPathsOptions {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Loaded instruction source for a session, including path, content, category, location, applicability, and optional description.
@@ -10731,6 +11296,21 @@ pub struct InstructionSource {
 pub struct InstructionsGetSourcesResult {
     /// Instruction sources for the session
     pub sources: Vec<InstructionSource>,
+}
+
+/// The prompt the init command runs.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstructionsInitPromptResult {
+    /// Prompt text authoring repository instructions.
+    pub prompt: String,
 }
 
 /// Parameters for interrupting the main agent turn.
@@ -13008,6 +13588,21 @@ pub struct McpIsServerRunningRequest {
 pub struct McpIsServerRunningResult {
     /// True if the server has an active client and transport.
     pub running: bool,
+}
+
+/// Names of the MCP servers the runtime supplies itself.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct McpListBuiltinServerNamesResult {
+    /// Every built-in server name. A host disabling the built-ins wholesale suppresses exactly this set.
+    pub names: Vec<String>,
 }
 
 /// Server name whose tool list should be returned.
@@ -15986,6 +16581,55 @@ pub(crate) struct ModelClearStartupSeedRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ModelClearStartupSeedResult {
     pub cleared: bool,
+}
+
+/// Host presentation state the reasoning-summaries policy depends on.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelGetReasoningSummariesRequest {
+    /// The host's persisted `showReasoning` user setting, omitted when unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persisted_show_reasoning: Option<bool>,
+    /// Whether the host is currently showing reasoning summaries. Defaults to false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summaries_visible: Option<bool>,
+}
+
+/// Reasoning-summaries presentation policy for the session's current model.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelGetReasoningSummariesResult {
+    /// Whether the supplied `persistedShowReasoning` setting only restates the model default. This reports a redundancy, not a standing instruction to delete the setting: it stays true for as long as the setting and the model default agree, including for a user who later chose that value deliberately. It exists for a one-time migration of a legacy setting written before the model default made it redundant, so a host that acts on it owns the cleanup and must gate it behind its own persisted `done` marker, delete only a setting whose value still matches the one it read, and never repeat the deletion on a later launch. Under an off-by-default reasoning-summaries experiment an explicit `showReasoning: true` opt-in also reads as redundant on a summary-producing model, so an ungated host would keep deleting that opt-in and hide summaries again on every launch.
+    pub clear_redundant_setting: bool,
+    /// Whether the session's reasoning-summaries experiment assignment has settled. False means this read does not wait for a pending assignment and reports the experiment-derived fields conservatively: `showHiddenHint` is false and `visibility` falls back to `persistedShowReasoning`, or is omitted when none was supplied. A host that wants the assigned answer re-reads until this is true.
+    pub experiment_settled: bool,
+    /// Whether the selected model shows reasoning summaries by default.
+    pub model_default_shows_summaries: bool,
+    /// False until the session has a model catalog and a selected model. This read never resolves the catalog itself, and the runtime emits no readiness notification, so repeating this call alone leaves `ready` false indefinitely on a session that has neither listed models nor run a turn. `session.model.list` is the prerequisite and the signal: it resolves and caches the catalog for the session, so a successful return means the next read is ready. The exception is a session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider: `session.model.list` returns an empty list without caching a catalog, so `ready` stays false and this policy is unavailable there. While false, every model-policy field is false and `visibility` is omitted; `experimentSettled` is independent of readiness and still reports the assignment state.
+    pub ready: bool,
+    /// Whether turns on this session produce reasoning summaries, honouring an explicit session reasoning-summary override.
+    pub session_shows_summaries: bool,
+    /// Whether to show the hint that reasoning summaries are hidden. Always false while `experimentSettled` is false.
+    pub show_hidden_hint: bool,
+    /// Whether the selected model emits reasoning headers.
+    pub show_reasoning_headers: bool,
+    /// Default reasoning visibility, and only meaningful once `ready` is true: false when the session produces no summaries, else the persisted setting, else the experiment's default. While `ready` is true it is omitted only when all three are unavailable, that is when the session produces summaries, no `persistedShowReasoning` was supplied, and `experimentSettled` is false. While `ready` is false there is no model policy to report and this field is always omitted, so an absent value alone does not imply a pending experiment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<bool>,
 }
 
 /// List of Copilot models available to the resolved user, including capabilities and billing metadata.
@@ -21095,6 +21739,84 @@ pub struct RemoteSessionRepository {
     pub owner: String,
 }
 
+/// Which repository settings file to read.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RepoSettingsReadRawRequest {
+    /// Absolute path of the repository root.
+    pub repo_root: String,
+    /// Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+    pub scope: String,
+}
+
+/// Parsed repository settings without normalization or layering.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RepoSettingsReadRawResult {
+    /// Stored JSON values after the existing JSONC parser and prototype-safety checks. Empty when the file is missing, blank, or invalid.
+    pub config: serde_json::Value,
+    /// True when the file exists but did not parse, so `config` is empty for that reason rather than because nothing is set.
+    pub invalid: bool,
+}
+
+/// The complete set of repository-overridable settings to store.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RepoSettingsWriteAllRequest {
+    /// Absolute path of the repository root.
+    pub repo_root: String,
+    /// Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+    pub scope: String,
+    /// Object of allowed settings to store. Missing allowlisted keys are removed. Other input keys are ignored, while unknown stored keys are preserved.
+    pub settings: serde_json::Value,
+}
+
+/// One key to write or remove in a repository settings file.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RepoSettingsWriteKeyRequest {
+    /// True to remove the key instead of writing it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete: Option<bool>,
+    /// Canonical top-level key permitted by the repository settings allowlist.
+    pub key: String,
+    /// Absolute path of the repository root.
+    pub repo_root: String,
+    /// Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+    pub scope: String,
+    /// Value to validate and write. Required unless delete is true; a null value is validated, not treated as deletion.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+}
+
 /// Provider-native structured output format. JSON Schema is forwarded without rewriting or validating the schema or the generated output.
 ///
 /// <div class="warning">
@@ -23606,6 +24328,9 @@ pub struct SessionOpenOptions {
     /// Runtime context discriminator for agent filtering.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_context: Option<String>,
+    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_directories: Option<Vec<String>>,
     /// Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_all_mcp_server_instructions: Option<bool>,
@@ -23686,7 +24411,7 @@ pub struct SessionOpenOptions {
     /// Whether shell-script safety heuristics are enabled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_script_safety: Option<bool>,
-    /// Whether skill loading is enabled. When omitted, an SDK skill provider enables skills by default.
+    /// Whether skill loading is enabled. When omitted, explicit SDK skill roots or an SDK skill provider enable skills independently of enableConfigDiscovery.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_skills: Option<bool>,
     /// Whether model responses stream as delta events.
@@ -23728,6 +24453,9 @@ pub struct SessionOpenOptions {
     #[doc(hidden)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) has_skill_provider: Option<bool>,
+    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_directories: Option<Vec<String>>,
     /// Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ignored_skills_locations: Option<Vec<String>>,
@@ -23740,6 +24468,9 @@ pub struct SessionOpenOptions {
     /// Installed plugins visible to the session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_plugins: Option<Vec<InstalledPlugin>>,
+    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction_directories: Option<Vec<String>>,
     /// Stable integration identifier for analytics.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integration_id: Option<String>,
@@ -23857,7 +24588,7 @@ pub struct SessionOpenOptions {
     /// PowerShell process flags applied to built-in and user-requested shell commands.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_process_flags: Option<Vec<String>>,
-    /// Additional directories to search for skills.
+    /// Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_directories: Option<Vec<String>>,
     /// Whether to skip custom instruction sources.
@@ -25479,6 +26210,9 @@ pub struct SessionUpdateOptionsParams {
     /// Runtime context discriminator (e.g., `cli`, `actions`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_context: Option<String>,
+    /// Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_directories: Option<Vec<String>>,
     /// Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_all_mcp_server_instructions: Option<bool>,
@@ -25515,7 +26249,7 @@ pub struct SessionUpdateOptionsParams {
     /// Skill IDs that should be excluded from this session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled_skills: Option<Vec<String>>,
-    /// Whether to enable loading of `.github/hooks/` filesystem hooks. Separate from the SDK callback hook mechanism.
+    /// Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_file_hooks: Option<bool>,
     /// Whether to enable host git operations (context resolution, child repo scanning, git info in system prompt).
@@ -25533,7 +26267,7 @@ pub struct SessionUpdateOptionsParams {
     /// Whether to enable cross-session store writes and reads.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_session_store: Option<bool>,
-    /// Whether skill loading is enabled. Explicit false disables every source, including a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless an SDK skill provider is registered.
+    /// Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_skills: Option<bool>,
     /// Whether to stream model responses.
@@ -25557,6 +26291,9 @@ pub struct SessionUpdateOptionsParams {
     /// Map of feature-flag IDs to their boolean enabled state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feature_flags: Option<HashMap<String, bool>>,
+    /// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hook_directories: Option<Vec<String>>,
     /// Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ignored_skills_locations: Option<Vec<String>>,
@@ -25569,6 +26306,9 @@ pub struct SessionUpdateOptionsParams {
     /// Full set of installed plugins for the session. Replaces the existing list; the runtime invalidates the skills cache only when the list materially changes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub installed_plugins: Option<Vec<SessionInstalledPlugin>>,
+    /// Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instruction_directories: Option<Vec<String>>,
     /// Stable integration identifier used for analytics and rate-limit attribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integration_id: Option<String>,
@@ -25638,7 +26378,7 @@ pub struct SessionUpdateOptionsParams {
     /// PowerShell process flags applied to built-in and user-requested shell commands.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shell_process_flags: Option<Vec<String>>,
-    /// Additional directories to search for skills.
+    /// Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_directories: Option<Vec<String>>,
     /// Whether to skip loading custom instruction sources.
@@ -25680,6 +26420,22 @@ pub struct SessionUpdateOptionsResult {
     pub plugin_hook_count: Option<i64>,
     /// Whether the operation succeeded
     pub success: bool,
+}
+
+/// Outcome of an atomic user or repository settings edit.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SettingsEditResult {
+    /// Changed, unchanged or invalid existing file. Rejected input, validation failures and I/O errors remain RPC errors.
+    #[doc(hidden)]
+    pub(crate) status: SettingsEditStatus,
 }
 
 /// User-requested shell execution cancellation handle.
@@ -26446,7 +27202,7 @@ pub struct SkillsDiscoverRequest {
     /// Optional list of project directory paths to scan for project-scoped skills
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
-    /// Optional list of additional skill directory paths to include
+    /// Explicit discovery-only skill roots, not filesystem grants. Available without ambient discovery, subject to skill/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_directories: Option<Vec<String>>,
 }
@@ -26507,6 +27263,70 @@ pub struct SkillsGetDiscoveryPathsRequest {
     /// Optional list of project directory paths. When omitted or empty, only personal and custom directories are returned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_paths: Option<Vec<String>>,
+}
+
+/// Extensible [`SkillsGetDiscoveryPathsRequest`], including inputs added after it was published.
+///
+/// Required inputs are [`SkillsGetDiscoveryPathsOptions::new`] arguments; optional inputs have fluent setters.
+/// Input-only: it serialises to the flat wire request and is not deserialisable.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsGetDiscoveryPathsOptions {
+    #[serde(flatten)]
+    legacy: SkillsGetDiscoveryPathsRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skill_directories: Option<Vec<String>>,
+}
+
+impl SkillsGetDiscoveryPathsOptions {
+    /// Creates options with the required inputs.
+    pub fn new() -> Self {
+        Self {
+            legacy: SkillsGetDiscoveryPathsRequest {
+                project_paths: None,
+                ignored_skills_locations: None,
+                exclude_host_skills: None,
+            },
+            skill_directories: None,
+        }
+    }
+
+    /// Optional list of project directory paths. When omitted or empty, only personal and custom directories are returned.
+    pub fn project_paths(mut self, value: Vec<String>) -> Self {
+        self.legacy.project_paths = Some(value);
+        self
+    }
+
+    /// Optional skill scan paths to exclude from discovery.
+    pub fn ignored_skills_locations(mut self, value: Vec<String>) -> Self {
+        self.legacy.ignored_skills_locations = Some(value);
+        self
+    }
+
+    /// When true, omit the host's personal and custom skill directories, leaving only project directories. For multitenant deployments.
+    pub fn exclude_host_skills(mut self, value: bool) -> Self {
+        self.legacy.exclude_host_skills = Some(value);
+        self
+    }
+
+    /// Explicit discovery-only skill roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+    pub fn skill_directories(mut self, value: Vec<String>) -> Self {
+        self.skill_directories = Some(value);
+        self
+    }
+}
+
+impl Default for SkillsGetDiscoveryPathsOptions {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Skill invocation record with name, path, content, allowed tools, and turn number.
@@ -28787,6 +29607,131 @@ pub struct UserSettingMetadata {
     pub value: serde_json::Value,
 }
 
+/// A single top-level setting subtree to validate and write.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsApplyTopKeyRequest {
+    /// Canonical path of the setting the caller is editing. Currently informational only.
+    pub canonical_path: Vec<String>,
+    /// Records that the user chose an update channel explicitly, so the one-time staff channel migration stops reapplying. Honored only for the `autoUpdatesChannel` key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complete_staff_update_channel_migration: Option<bool>,
+    /// True to remove the top-level key instead of writing it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete: Option<bool>,
+    /// Top-level setting name to write.
+    pub top_key: String,
+    /// Value to write for the whole top-level key. Omitted when `delete` is true. Explicit null is preserved and validated as null.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+}
+
+/// One problem found while validating a setting value.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsValidationIssue {
+    /// Human-readable description of the problem.
+    pub message: String,
+    /// Where in the settings tree the problem sits, as object keys and array indices. The first element is the top-level key; a whole-value problem is reported as that single key.
+    pub path: Vec<serde_json::Value>,
+}
+
+/// Outcome of validating and writing one top-level setting subtree.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsApplyTopKeyResult {
+    /// Why the write failed, present only when `status` is `write-error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Problems found, present only when `status` is `validation-error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issues: Option<Vec<UserSettingsValidationIssue>>,
+    /// `ok` when the value was written, `validation-error` when it was rejected before any write, `write-error` when validation passed but the write failed.
+    pub status: String,
+}
+
+/// One atomic edit of a canonical setting in settings.json.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UserSettingsEditRequest {
+    /// Nonempty canonical path segments of the setting to edit, starting with its top-level key.
+    pub canonical_path: Vec<String>,
+    /// Configuration directory to edit. Omitted or empty resolves the server's own home, as in `user.settings.loadForConfigDir`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+    /// Set a scalar, add or remove a string list item, or remove the setting. The handler rejects a missing or incompatible value.
+    #[doc(hidden)]
+    pub(crate) operation: SettingsEditOperation,
+    /// Required boolean, string or number for set, required string for add-item and remove-item, and forbidden for remove. The runtime rejects all other JSON values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+}
+
+/// Selects which settings file paths to resolve.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsGetPathsRequest {
+    /// Absolute path of a repository root. Supply it to also resolve that repository's two settings file paths; omit it to resolve only the user path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_root: Option<String>,
+}
+
+/// On-disk locations of the settings files this runtime reads. A path is reported whether or not the file exists.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsGetPathsResult {
+    /// The repository's local, untracked settings file, or null when no repository root was supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_local_settings: Option<String>,
+    /// The repository's checked-in settings file, or null when no repository root was supplied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_settings: Option<String>,
+    /// The user settings file: `settings.json` under the resolved Copilot home. This is the file `user.settings.get`, `user.settings.load`, and `user.settings.set` read and write.
+    pub user_settings: String,
+}
+
 /// Per-key metadata for every known user setting in settings.json, including settings left at their default. Excludes repository- and enterprise-managed overrides.
 ///
 /// <div class="warning">
@@ -28802,6 +29747,175 @@ pub struct UserSettingsGetResult {
     pub settings: HashMap<String, UserSettingMetadata>,
 }
 
+/// Top-level user-setting keys grouped by who may govern them.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsGovernanceKeysResult {
+    /// Top-level keys a repository may override through a Claude-compatible repository config.
+    pub claude_repo: Vec<String>,
+    /// Top-level keys an enterprise policy may fix through managed settings.
+    pub managed: Vec<String>,
+    /// Top-level keys a repository may override through `.github/copilot/settings.json` or `.github/copilot/settings.local.json`.
+    pub repo: Vec<String>,
+}
+
+/// Contents of settings.json as stored, for a caller about to rewrite it.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsLoadForEditResult {
+    /// Parsed contents, present only when `status` is `ok`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<serde_json::Value>,
+    /// `ok` when the file parsed, `missing` when there is no file yet, `invalid` when the file exists but will not parse.
+    pub status: String,
+}
+
+/// Settings object whose key names should be canonicalized.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsNormalizeRequest {
+    /// Free-form settings object, possibly using legacy or snake_case key names.
+    pub settings: serde_json::Value,
+}
+
+/// Settings object with canonical key names.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsNormalizeResult {
+    /// The same settings with every legacy or snake_case key renamed to its canonical spelling.
+    pub settings: serde_json::Value,
+}
+
+/// The settings layer a problem was found in.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsProblemLocation {
+    /// Absolute path of the file backing this layer.
+    pub file_path: String,
+    /// Which layer this is: `user`, `repo`, or `local`.
+    pub kind: String,
+    /// The caller-supplied display label for the layer.
+    pub label: String,
+}
+
+/// One setting that will not take effect, and why.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsProblem {
+    /// Coarse grouping for the problem, for a caller that presents problems in sections.
+    pub category: String,
+    /// Why the setting will not take effect. Never contains the setting's value, which may be a token or another secret.
+    pub explanation: String,
+    /// Stable identifier for this problem within the reported set, so a caller can track a selection across refreshes.
+    pub id: String,
+    /// What is wrong in machine-readable form, for a caller that wants to branch rather than display.
+    pub kind: String,
+    /// The offending key as written in the file, when the problem is attributable to a single key. Absent when the whole file is at fault.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_key: Option<String>,
+    /// The settings layer the problem was found in.
+    pub source: UserSettingsProblemLocation,
+}
+
+/// One already-loaded settings layer to diagnose.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsProblemSource {
+    /// The layer's settings exactly as loaded, unnormalized. Empty when the file is missing or failed to parse.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<HashMap<String, serde_json::Value>>,
+    /// Absolute path of the file backing this layer.
+    pub file_path: String,
+    /// True when the file itself failed to parse, so its keys could not be read at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invalid: Option<bool>,
+    /// Which layer this is: `user`, `repo`, or `local`.
+    pub kind: String,
+    /// Caller-chosen display label for the layer, echoed back on each problem so a caller can group by layer without re-deriving its own naming.
+    pub label: String,
+}
+
+/// The settings layers to diagnose.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsProblemsRequest {
+    /// Layers to diagnose, in the precedence order the caller applies them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sources: Option<Vec<UserSettingsProblemSource>>,
+}
+
+/// The settings that will not take effect across the given layers.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsProblemsResult {
+    /// Each setting that will not take effect, and why. Empty when every layer is healthy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problems: Option<Vec<UserSettingsProblem>>,
+}
+
 /// Partial user settings to write to settings.json. Each top-level key is written individually, replacing the existing value; a key whose value is null is removed.
 ///
 /// <div class="warning">
@@ -28814,6 +29928,98 @@ pub struct UserSettingsGetResult {
 #[serde(rename_all = "camelCase")]
 pub struct UserSettingsSetRequest {
     /// Partial user settings to write, as a free-form object keyed by setting name
+    pub settings: serde_json::Value,
+}
+
+/// Names the user setting to merge into, and the partial object to merge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UserSettingsUpdateRequest {
+    /// Copilot configuration directory to write the settings document in, taking precedence over the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to use the directory the server resolved for itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_dir: Option<String>,
+    /// Top-level user-setting key to merge into, such as `extensions`.
+    pub key: String,
+    /// Single-component name for the settings document at `<configDir>/settings/<subDir>.json`; path separators, `.` and `..` are rejected. Omit it, or pass an empty string, to use the main settings document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sub_dir: Option<String>,
+    /// Value to store for `key`. When both the stored value and this value are objects, their fields are shallow-merged and fields this object does not name are preserved. Otherwise this value replaces the stored value.
+    pub value: serde_json::Value,
+}
+
+/// The stored value of the user setting after the merge.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UserSettingsUpdateResult {
+    /// The key's stored value after the write: the merged object when both the stored value and the supplied value are objects, otherwise the supplied value.
+    pub value: serde_json::Value,
+}
+
+/// A single top-level setting subtree to validate.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsValidateRequest {
+    /// True to validate a removal of this key. The current settings file is not read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delete: Option<bool>,
+    /// Top-level setting name to validate.
+    pub top_key: String,
+    /// Value to validate. Omitted when `delete` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+}
+
+/// Outcome of validating one top-level setting subtree.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsValidateResult {
+    /// Problems found, empty when `ok` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issues: Option<Vec<UserSettingsValidationIssue>>,
+    /// True when the subtree is valid.
+    pub ok: bool,
+}
+
+/// The whole content to store in the user settings file.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsWriteAllRequest {
+    /// The settings object to store. It replaces the file's entire content, so a key absent here is removed.
     pub settings: serde_json::Value,
 }
 
@@ -30778,6 +31984,66 @@ pub struct ExtensionsDiscoverResult {
     pub mode: DiscoveredExtensionMode,
 }
 
+/// The prompt the init command runs.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InstructionsGetInitPromptResult {
+    /// Prompt text authoring repository instructions.
+    pub prompt: String,
+}
+
+/// Instruction sources discovered across user, repository, and plugin sources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionsDiscoverResult {
+    /// All discovered instruction sources
+    pub sources: Vec<InstructionSource>,
+}
+
+/// Instruction sources discovered across user, repository, and plugin sources.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionsDiscoverRepoSourcesResult {
+    /// All discovered instruction sources
+    pub sources: Vec<InstructionSource>,
+}
+
+/// Canonical files and directories where custom instructions can be created so the runtime will recognize them.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionsGetDiscoveryPathsResult {
+    /// Canonical instruction create/discovery files and directories, in priority order
+    pub paths: Vec<InstructionDiscoveryPath>,
+}
+
 /// Skills discovered across global and project sources.
 ///
 /// <div class="warning">
@@ -30996,36 +32262,6 @@ pub struct AgentsGetDiscoveryPathsResult {
     pub paths: Vec<AgentDiscoveryPath>,
 }
 
-/// Instruction sources discovered across user, repository, and plugin sources.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstructionsDiscoverResult {
-    /// All discovered instruction sources
-    pub sources: Vec<InstructionSource>,
-}
-
-/// Canonical files and directories where custom instructions can be created so the runtime will recognize them.
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstructionsGetDiscoveryPathsResult {
-    /// Canonical instruction create/discovery files and directories, in priority order
-    pub paths: Vec<InstructionDiscoveryPath>,
-}
-
 /// The host's machine-wide state. Every field is optional because a fresh install has recorded nothing yet, so a reader must treat an absent field as `not yet`, never as a negative answer. Stored credentials are deliberately absent from this shape.
 ///
 /// <div class="warning">
@@ -31111,6 +32347,73 @@ pub(crate) struct GlobalStateLoadForConfigDirResult {
 pub struct CommandsListResult {
     /// Commands available in this session
     pub commands: Vec<SlashCommandInfo>,
+}
+
+/// Top-level user-setting keys grouped by who may govern them.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsListGovernanceKeysResult {
+    /// Top-level keys a repository may override through a Claude-compatible repository config.
+    pub claude_repo: Vec<String>,
+    /// Top-level keys an enterprise policy may fix through managed settings.
+    pub managed: Vec<String>,
+    /// Top-level keys a repository may override through `.github/copilot/settings.json` or `.github/copilot/settings.local.json`.
+    pub repo: Vec<String>,
+}
+
+/// Outcome of an atomic user or repository settings edit.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UserSettingsEditResult {
+    /// Changed, unchanged or invalid existing file. Rejected input, validation failures and I/O errors remain RPC errors.
+    #[doc(hidden)]
+    pub(crate) status: SettingsEditStatus,
+}
+
+/// The settings that will not take effect across the given layers.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsDiagnoseProblemsResult {
+    /// Each setting that will not take effect, and why. Empty when every layer is healthy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problems: Option<Vec<UserSettingsProblem>>,
+}
+
+/// Every feature flag this runtime declares, with the shape each one was declared with.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FeatureFlagsListMetadataResult {
+    /// Declared feature flags keyed by flag name.
+    #[doc(hidden)]
+    pub(crate) flags: HashMap<String, FeatureFlagMetadata>,
 }
 
 /// A freshly registered request id. Registering it before the listing starts is what lets a cancel that races the request still find the owner listing slot. The id serves one listing only. Long-abandoned unused ids can be released by later allocations.
@@ -32779,6 +34082,36 @@ pub struct SessionModelSetAllowedModelsResult {
 pub struct SessionModelSetReasoningEffortResult {
     /// Reasoning effort level recorded on the session after the update
     pub reasoning_effort: String,
+}
+
+/// Reasoning-summaries presentation policy for the session's current model.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionModelGetReasoningSummariesResult {
+    /// Whether the supplied `persistedShowReasoning` setting only restates the model default. This reports a redundancy, not a standing instruction to delete the setting: it stays true for as long as the setting and the model default agree, including for a user who later chose that value deliberately. It exists for a one-time migration of a legacy setting written before the model default made it redundant, so a host that acts on it owns the cleanup and must gate it behind its own persisted `done` marker, delete only a setting whose value still matches the one it read, and never repeat the deletion on a later launch. Under an off-by-default reasoning-summaries experiment an explicit `showReasoning: true` opt-in also reads as redundant on a summary-producing model, so an ungated host would keep deleting that opt-in and hide summaries again on every launch.
+    pub clear_redundant_setting: bool,
+    /// Whether the session's reasoning-summaries experiment assignment has settled. False means this read does not wait for a pending assignment and reports the experiment-derived fields conservatively: `showHiddenHint` is false and `visibility` falls back to `persistedShowReasoning`, or is omitted when none was supplied. A host that wants the assigned answer re-reads until this is true.
+    pub experiment_settled: bool,
+    /// Whether the selected model shows reasoning summaries by default.
+    pub model_default_shows_summaries: bool,
+    /// False until the session has a model catalog and a selected model. This read never resolves the catalog itself, and the runtime emits no readiness notification, so repeating this call alone leaves `ready` false indefinitely on a session that has neither listed models nor run a turn. `session.model.list` is the prerequisite and the signal: it resolves and caches the catalog for the session, so a successful return means the next read is ready. The exception is a session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider: `session.model.list` returns an empty list without caching a catalog, so `ready` stays false and this policy is unavailable there. While false, every model-policy field is false and `visibility` is omitted; `experimentSettled` is independent of readiness and still reports the assignment state.
+    pub ready: bool,
+    /// Whether turns on this session produce reasoning summaries, honouring an explicit session reasoning-summary override.
+    pub session_shows_summaries: bool,
+    /// Whether to show the hint that reasoning summaries are hidden. Always false while `experimentSettled` is false.
+    pub show_hidden_hint: bool,
+    /// Whether the selected model emits reasoning headers.
+    pub show_reasoning_headers: bool,
+    /// Default reasoning visibility, and only meaningful once `ready` is true: false when the session produces no summaries, else the persisted setting, else the experiment's default. While `ready` is true it is omitted only when all three are unavailable, that is when the session produces summaries, no `persistedShowReasoning` was supplied, and `experimentSettled` is false. While `ready` is false there is no model policy to report and this field is always omitted, so an absent value alone does not imply a pending experiment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<bool>,
 }
 
 /// The list of models available to this session.
@@ -38312,6 +39645,16 @@ pub type UIElicitationResponseContent = HashMap<String, serde_json::Value>;
 /// </div>
 pub type AccountGetAllUsersResult = Vec<AccountAllUsers>;
 
+/// The resolved feature flags, keyed by flag name.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+pub type FeatureFlagsResolveResult = HashMap<String, bool>;
+
 /// The number of running background agents (task-registry agents) that were cancelled.
 ///
 /// <div class="warning">
@@ -38525,6 +39868,49 @@ pub enum AuthInfo {
     Account(AccountAuthInfo),
     GhCli(GhCliAuthInfo),
     ApiKey(ApiKeyAuthInfo),
+}
+
+/// Authentication type
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuthInfoType {
+    /// Authentication provided by a GitHub App HMAC credential.
+    #[serde(rename = "hmac")]
+    Hmac,
+    /// Authentication resolved from environment-provided credentials.
+    #[serde(rename = "env")]
+    Env,
+    /// Authentication from an interactive user sign-in.
+    #[serde(rename = "user")]
+    User,
+    /// Authentication from a selected provider-owned account, without a GitHub credential.
+    #[serde(rename = "account")]
+    Account,
+    /// Authentication delegated to the GitHub CLI.
+    #[serde(rename = "gh-cli")]
+    GhCli,
+    /// Authentication from an API key credential.
+    #[serde(rename = "api-key")]
+    ApiKey,
+    /// Authentication from a GitHub token.
+    #[serde(rename = "token")]
+    Token,
+    /// Authentication from an SDK GitHub token callback.
+    #[serde(rename = "token-provider")]
+    TokenProvider,
+    /// Authentication from a Copilot API token.
+    #[serde(rename = "copilot-api-token")]
+    CopilotApiToken,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
 }
 
 /// The provider kind stamped on a signed-in account.
@@ -39208,49 +40594,6 @@ pub enum AuthEnumerateValueProvidersKind {
 pub enum AuthEnumerateValue {
     Accounts(AuthEnumerateValueAccounts),
     Providers(AuthEnumerateValueProviders),
-}
-
-/// Authentication type
-///
-/// <div class="warning">
-///
-/// **Experimental.** This type is part of an experimental wire-protocol surface
-/// and may change or be removed in future SDK or CLI releases.
-///
-/// </div>
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AuthInfoType {
-    /// Authentication provided by a GitHub App HMAC credential.
-    #[serde(rename = "hmac")]
-    Hmac,
-    /// Authentication resolved from environment-provided credentials.
-    #[serde(rename = "env")]
-    Env,
-    /// Authentication from an interactive user sign-in.
-    #[serde(rename = "user")]
-    User,
-    /// Authentication from a selected provider-owned account, without a GitHub credential.
-    #[serde(rename = "account")]
-    Account,
-    /// Authentication delegated to the GitHub CLI.
-    #[serde(rename = "gh-cli")]
-    GhCli,
-    /// Authentication from an API key credential.
-    #[serde(rename = "api-key")]
-    ApiKey,
-    /// Authentication from a GitHub token.
-    #[serde(rename = "token")]
-    Token,
-    /// Authentication from an SDK GitHub token callback.
-    #[serde(rename = "token-provider")]
-    TokenProvider,
-    /// Authentication from a Copilot API token.
-    #[serde(rename = "copilot-api-token")]
-    CopilotApiToken,
-    /// Unknown variant for forward compatibility.
-    #[default]
-    #[serde(other)]
-    Unknown,
 }
 
 /// Login flow step variant discriminator.
@@ -41987,6 +43330,49 @@ pub enum ExternalToolTextResultForLlmContentTextType {
     #[serde(rename = "text")]
     #[default]
     Text,
+}
+
+/// The population a feature flag is declared for, before overrides.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FeatureFlagAvailability {
+    /// Enabled for everyone, before any override.
+    #[serde(rename = "on")]
+    On,
+    /// Enabled only for accounts on the owning team.
+    #[serde(rename = "team")]
+    Team,
+    /// Enabled only for staff accounts that have also opted into experimental features.
+    #[serde(rename = "staff-and-experimental")]
+    StaffAndExperimental,
+    /// Enabled for staff accounts and for accounts that opted into experimental features.
+    #[serde(rename = "staff-or-experimental")]
+    StaffOrExperimental,
+    /// Enabled for any staff account, GitHub or Microsoft.
+    #[serde(rename = "staff")]
+    Staff,
+    /// Enabled for GitHub staff accounts only.
+    #[serde(rename = "staff-github")]
+    StaffGitHub,
+    /// Enabled for Microsoft staff accounts only.
+    #[serde(rename = "staff-microsoft")]
+    StaffMicrosoft,
+    /// Enabled only for accounts that opted into experimental features.
+    #[serde(rename = "experimental")]
+    Experimental,
+    /// Disabled for everyone, before any override.
+    #[serde(rename = "off")]
+    Off,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
 }
 
 /// Why the runtime is requesting a GitHub credential.
@@ -46743,6 +48129,59 @@ pub enum SessionVisibilityStatus {
     /// The session is restricted to its creator and collaborators.
     #[serde(rename = "unshared")]
     Unshared,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// One atomic settings mutation.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SettingsEditOperation {
+    /// Set one scalar value.
+    #[serde(rename = "set")]
+    Set,
+    /// Add one string to a list, unless present.
+    #[serde(rename = "add-item")]
+    AddItem,
+    /// Remove one string from a list, unless absent.
+    #[serde(rename = "remove-item")]
+    RemoveItem,
+    /// Remove the setting without supplying a value.
+    #[serde(rename = "remove")]
+    Remove,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Whether one atomic settings edit changed a file.
+///
+/// <div class="warning">
+///
+/// **Experimental.** This type is part of an experimental wire-protocol surface
+/// and may change or be removed in future SDK or CLI releases.
+///
+/// </div>
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SettingsEditStatus {
+    /// The edit changed the setting and was stored.
+    #[serde(rename = "changed")]
+    Changed,
+    /// The setting already had the requested state.
+    #[serde(rename = "unchanged")]
+    Unchanged,
+    /// The existing settings file could not be edited safely; nothing was written.
+    #[serde(rename = "invalid")]
+    Invalid,
     /// Unknown variant for forward compatibility.
     #[default]
     #[serde(other)]

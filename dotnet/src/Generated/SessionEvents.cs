@@ -3014,7 +3014,7 @@ public sealed partial class SessionErrorData
     [JsonPropertyName("errorCode")]
     public string? ErrorCode { get; set; }
 
-    /// <summary>Category of error (e.g., "authentication", "authorization", "quota", "rate_limit", "context_limit", "query").</summary>
+    /// <summary>Category of error (e.g., "authentication", "authorization", "policy", "quota", "rate_limit", "context_limit", "query").</summary>
     [JsonPropertyName("errorType")]
     public required string ErrorType { get; set; }
 
@@ -3026,6 +3026,16 @@ public sealed partial class SessionErrorData
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("providerCallId")]
     public string? ProviderCallId { get; set; }
+
+    /// <summary>Sanitized provider-defined error parameter preserved from a structured upstream error envelope, when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("providerErrorParam")]
+    public string? ProviderErrorParam { get; set; }
+
+    /// <summary>Provider-defined error type preserved from a structured upstream error envelope, when available (for example, `invalid_request_error`).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("providerErrorType")]
+    public string? ProviderErrorType { get; set; }
 
     /// <summary>What the user must do to recover, when the runtime knows of an action. The `message` never names a client affordance, so a client that offers one — a slash command, a settings pane, a link — renders it from this value.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -4295,6 +4305,16 @@ public sealed partial class SessionPermissionRecoveryData
     /// <summary>Policy selected from the current client's response capability; mode or client changes may update it during recovery.</summary>
     [JsonPropertyName("onBlocked")]
     public required PermissionRecoveryOnBlocked OnBlocked { get; set; }
+
+    /// <summary>Subagent identifier that owns this recovery episode when the request was delegated through a parent permission service.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("ownerAgentId")]
+    public string? OwnerAgentId { get; set; }
+
+    /// <summary>Root or child execution-session identifier that owns this recovery episode; omitted for legacy snapshots.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("ownerSessionId")]
+    public string? OwnerSessionId { get; set; }
 
     /// <summary>Controlled reason for the latest episode transition.</summary>
     [JsonPropertyName("reason")]
@@ -6626,6 +6646,16 @@ public sealed partial class PermissionRequestedData
     [JsonPropertyName("agentMode")]
     public SessionMode? AgentMode { get; set; }
 
+    /// <summary>Delegated agent that owns permission recovery when the owner session multiplexes remote agents. Absent otherwise.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("ownerAgentId")]
+    public string? OwnerAgentId { get; set; }
+
+    /// <summary>Execution session that owns permission recovery for this request. Absent on historical events.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("ownerSessionId")]
+    public string? OwnerSessionId { get; set; }
+
     /// <summary>Permission mode captured when evaluation began. Absent on historical events.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("permissionMode")]
@@ -8805,6 +8835,11 @@ public sealed partial class CompactionCompleteCompactionTokensUsed
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("provider")]
     public ModelProviderRef? Provider { get; set; }
+
+    /// <summary>Number of model requests represented by this aggregated compaction usage.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("requestCount")]
+    public long? RequestCount { get; set; }
 }
 
 /// <summary>Original request-level and effective conversation reasoning effort for a provider history boundary; the historical type name is retained for compatibility.</summary>
@@ -8880,6 +8915,16 @@ public sealed partial class PermissionRecoveryData
     /// <summary>Policy selected from the current client's response capability; mode or client changes may update it during recovery.</summary>
     [JsonPropertyName("onBlocked")]
     public required PermissionRecoveryOnBlocked OnBlocked { get; set; }
+
+    /// <summary>Subagent identifier that owns this recovery episode when the request was delegated through a parent permission service.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("ownerAgentId")]
+    public string? OwnerAgentId { get; set; }
+
+    /// <summary>Root or child execution-session identifier that owns this recovery episode; omitted for legacy snapshots.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("ownerSessionId")]
+    public string? OwnerSessionId { get; set; }
 
     /// <summary>Controlled reason for the latest episode transition.</summary>
     [JsonPropertyName("reason")]
@@ -14442,6 +14487,9 @@ public readonly struct RemediationAction : IEquatable<RemediationAction>
 
     /// <summary>Permit outbound network access in the sandbox policy.</summary>
     public static RemediationAction AllowSandboxOutbound { get; } = new("allow_sandbox_outbound");
+
+    /// <summary>Discard conversation history back through the blocked request before continuing.</summary>
+    public static RemediationAction RewindConversation { get; } = new("rewind_conversation");
 
     /// <summary>Returns a value indicating whether two <see cref="RemediationAction"/> instances are equivalent.</summary>
     public static bool operator ==(RemediationAction left, RemediationAction right) => left.Equals(right);

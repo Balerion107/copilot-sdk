@@ -35,6 +35,32 @@ export type AuthInfo =
   | GhCliAuthInfo
   | ApiKeyAuthInfo;
 /**
+ * Authentication type
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AuthInfoType".
+ */
+/** @experimental */
+export type AuthInfoType =
+  /** Authentication provided by a GitHub App HMAC credential. */
+  | "hmac"
+  /** Authentication resolved from environment-provided credentials. */
+  | "env"
+  /** Authentication from an interactive user sign-in. */
+  | "user"
+  /** Authentication from a selected provider-owned account, without a GitHub credential. */
+  | "account"
+  /** Authentication delegated to the GitHub CLI. */
+  | "gh-cli"
+  /** Authentication from an API key credential. */
+  | "api-key"
+  /** Authentication from a GitHub token. */
+  | "token"
+  /** Authentication from an SDK GitHub token callback. */
+  | "token-provider"
+  /** Authentication from a Copilot API token. */
+  | "copilot-api-token";
+/**
  * The provider kind stamped on a signed-in account.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -403,32 +429,6 @@ export type LoginProviderKind =
   | "proxima"
   /** Microsoft Entra sign-in that derives a GitHub (EMU) credential. */
   | "entra";
-/**
- * Authentication type
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "AuthInfoType".
- */
-/** @experimental */
-export type AuthInfoType =
-  /** Authentication provided by a GitHub App HMAC credential. */
-  | "hmac"
-  /** Authentication resolved from environment-provided credentials. */
-  | "env"
-  /** Authentication from an interactive user sign-in. */
-  | "user"
-  /** Authentication from a selected provider-owned account, without a GitHub credential. */
-  | "account"
-  /** Authentication delegated to the GitHub CLI. */
-  | "gh-cli"
-  /** Authentication from an API key credential. */
-  | "api-key"
-  /** Authentication from a GitHub token. */
-  | "token"
-  /** Authentication from an SDK GitHub token callback. */
-  | "token-provider"
-  /** Authentication from a Copilot API token. */
-  | "copilot-api-token";
 /**
  * One step in an interactive login flow. The consumer acts on the step and calls advance to proceed. Browser-open is encoded as two distinct steps by design: `open-url` is CONSUMER-driven (the provider surfaces the authorize URL and the consumer opens it — github.com/GHEC web), while `needs-interaction` is PROVIDER-driven (the provider opens the browser or broker UI itself and does not surface a URL — Entra).
  *
@@ -2030,6 +2030,33 @@ export type ExternalToolTextResultForLlmContentResourceLinkIconTheme =
 export type ExternalToolTextResultForLlmContentResourceDetails =
   | EmbeddedTextResourceContents
   | EmbeddedBlobResourceContents;
+/**
+ * The population a feature flag is declared for, before overrides.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FeatureFlagAvailability".
+ */
+/** @experimental */
+/** @internal */
+export type FeatureFlagAvailability =
+  /** Enabled for everyone, before any override. */
+  | "on"
+  /** Enabled only for accounts on the owning team. */
+  | "team"
+  /** Enabled only for staff accounts that have also opted into experimental features. */
+  | "staff-and-experimental"
+  /** Enabled for staff accounts and for accounts that opted into experimental features. */
+  | "staff-or-experimental"
+  /** Enabled for any staff account, GitHub or Microsoft. */
+  | "staff"
+  /** Enabled for GitHub staff accounts only. */
+  | "staff-github"
+  /** Enabled for Microsoft staff accounts only. */
+  | "staff-microsoft"
+  /** Enabled only for accounts that opted into experimental features. */
+  | "experimental"
+  /** Disabled for everyone, before any override. */
+  | "off";
 /**
  * Content filtering mode to apply to all tools, or a map of tool name to content filtering mode.
  *
@@ -5206,6 +5233,38 @@ export type SessionVisibilityStatus =
   /** The session is restricted to its creator and collaborators. */
   | "unshared";
 /**
+ * One atomic settings mutation.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SettingsEditOperation".
+ */
+/** @experimental */
+/** @internal */
+export type SettingsEditOperation =
+  /** Set one scalar value. */
+  | "set"
+  /** Add one string to a list, unless present. */
+  | "add-item"
+  /** Remove one string from a list, unless absent. */
+  | "remove-item"
+  /** Remove the setting without supplying a value. */
+  | "remove";
+/**
+ * Whether one atomic settings edit changed a file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SettingsEditStatus".
+ */
+/** @experimental */
+/** @internal */
+export type SettingsEditStatus =
+  /** The edit changed the setting and was stored. */
+  | "changed"
+  /** The setting already had the requested state. */
+  | "unchanged"
+  /** The existing settings file could not be edited safely; nothing was written. */
+  | "invalid";
+/**
  * Signal to send (default: SIGTERM)
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -6945,6 +7004,62 @@ export interface ApiKeyAuthInfo {
   copilotUser?: CopilotUserResponse;
 }
 /**
+ * The authentication identity whose shared wording should be rendered.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountDescribeAuthInfoRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface AccountDescribeAuthInfoRequest {
+  identity: AuthIdentity;
+}
+/**
+ * Credential-free authentication identity safe to expose to hosts and user interfaces.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AuthIdentity".
+ */
+/** @experimental */
+export interface AuthIdentity {
+  type: AuthInfoType;
+  /**
+   * Authentication host
+   */
+  host: string;
+  /**
+   * Authenticated login, when available
+   */
+  login?: string;
+  /**
+   * Name of the environment variable that supplied the credential, when applicable
+   */
+  envVar?: string;
+  /**
+   * Opaque SDK GitHub credential registration backing this identity. Routing metadata only; never a credential.
+   */
+  registrationId?: string;
+  copilotUser?: CopilotUserResponse;
+}
+/**
+ * The wording the runtime uses for an authentication identity.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountDescribeAuthInfoResult".
+ */
+/** @experimental */
+/** @internal */
+export interface AccountDescribeAuthInfoResult {
+  /**
+   * Sign-in banner announcing the authenticated user.
+   */
+  message: string;
+  /**
+   * One-line description of the identity, suitable after a verb such as "Switched to".
+   */
+  description: string;
+}
+/**
  * Current authentication state
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -6957,6 +7072,39 @@ export interface AccountGetCurrentAuthResult {
    * Authentication errors from the last auth attempt, if any
    */
   authErrors?: string[];
+}
+/**
+ * The authentication identity whose gist support should be reported.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountGetGistSupportRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface AccountGetGistSupportRequest {
+  identity: AuthIdentity;
+}
+/**
+ * Whether the identity can create gists, and why not when it cannot.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountGetGistSupportResult".
+ */
+/** @experimental */
+/** @internal */
+export interface AccountGetGistSupportResult {
+  /**
+   * True when the identity can create gists.
+   */
+  supported: boolean;
+  /**
+   * Machine-readable reason category when unsupported.
+   */
+  kind?: string;
+  /**
+   * Human-readable explanation to show where the gist action would have been.
+   */
+  reason?: string;
 }
 
 /** @experimental */
@@ -7025,6 +7173,49 @@ export interface AccountQuotaSnapshot {
    * Date when the quota resets (ISO 8601 string)
    */
   resetDate?: string;
+}
+/**
+ * The environment variable supplying a classic personal access token, when one is set.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountGetTokenEnvVarResult".
+ */
+/** @experimental */
+/** @internal */
+export interface AccountGetTokenEnvVarResult {
+  /**
+   * Variable name, for example `GH_TOKEN`. Absent when no classic token is present in the environment.
+   */
+  name?: string;
+}
+/**
+ * A path to resolve against the GitHub host an identity is signed in to.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountGetWebUrlRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface AccountGetWebUrlRequest {
+  /**
+   * Host-relative path, without a leading slash, for example `settings/copilot/features`.
+   */
+  path: string;
+  identity?: AuthIdentity;
+}
+/**
+ * An absolute URL on the identity's GitHub host.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "AccountGetWebUrlResult".
+ */
+/** @experimental */
+/** @internal */
+export interface AccountGetWebUrlResult {
+  /**
+   * Absolute URL for the requested path.
+   */
+  url: string;
 }
 /**
  * Credentials to validate and store. Omit login to resolve the authenticated user from the token.
@@ -7255,6 +7446,12 @@ export interface AgentInfo {
    * Authored base prompt for the agent. Runtime prompt assembly may add dynamic context at invocation time. Omitted from `session.agent.list` unless `includePrompt` is true.
    */
   prompt?: string;
+  /**
+   * Declarative hook actions keyed by event name, executed only while this agent is active.
+   */
+  hooks?: {
+    [k: string]: JsonValue[] | undefined;
+  };
 }
 /**
  * Agents available to the session.
@@ -7535,6 +7732,10 @@ export interface AgentsCustomAgentInitialModelDecisionResult {
 /** @experimental */
 export interface AgentsDiscoverRequest {
   /**
+   * Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without ambient discovery, subject to managed/source disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+   */
+  agentDirectories?: string[];
+  /**
    * Optional list of project directory paths to scan for project-scoped agents. When omitted or empty, only user/plugin/remote-independent agents are returned (no project scan).
    */
   projectPaths?: string[];
@@ -7728,6 +7929,10 @@ export interface AgentsGetBuiltinsResult {
 /** @experimental */
 export interface AgentsGetDiscoveryPathsRequest {
   /**
+   * Explicit discovery-only agent roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+   */
+  agentDirectories?: string[];
+  /**
    * Optional list of project directory paths. When omitted or empty, only the user-level directory is returned.
    */
   projectPaths?: string[];
@@ -7753,33 +7958,6 @@ export interface ProviderDescriptor {
    * Whether this provider is currently available to sign in with.
    */
   available: boolean;
-}
-/**
- * Credential-free authentication identity safe to expose to hosts and user interfaces.
- *
- * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
- * via the `definition` "AuthIdentity".
- */
-/** @experimental */
-export interface AuthIdentity {
-  type: AuthInfoType;
-  /**
-   * Authentication host
-   */
-  host: string;
-  /**
-   * Authenticated login, when available
-   */
-  login?: string;
-  /**
-   * Name of the environment variable that supplied the credential, when applicable
-   */
-  envVar?: string;
-  /**
-   * Opaque SDK GitHub credential registration backing this identity. Routing metadata only; never a credential.
-   */
-  registrationId?: string;
-  copilotUser?: CopilotUserResponse;
 }
 /**
  * Credential-free identity metadata.
@@ -12022,6 +12200,105 @@ export interface ExternalToolTextResultForLlmContentResource {
   resource: ExternalToolTextResultForLlmContentResourceDetails;
 }
 /**
+ * The declared shape of one feature flag, independent of any caller population.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FeatureFlagMetadata".
+ */
+/** @experimental */
+/** @internal */
+export interface FeatureFlagMetadata {
+  /**
+   * The flag's name, matching the key it is listed under.
+   */
+  name: string;
+  availability: FeatureFlagAvailability;
+  /**
+   * Whether the flag participates in the CAPI sanity suite.
+   */
+  capiSanity: boolean;
+  /**
+   * Text shown to a user choosing whether to turn the flag on in experimental mode. Absent when the flag is not user-facing.
+   */
+  experimentalDescription?: string;
+  /**
+   * The online-experiment (ExP) flag this maps to, when the flag is assigned by an experiment rather than declared statically.
+   */
+  expFlag?: string;
+  /**
+   * Environment variable that overrides this flag's experiment assignment locally in the experiment service, not in `featureFlags.resolve`. Present exactly when `expFlag` is, and derived from it, so a caller reads a local override without reproducing the naming rule.
+   */
+  expFlagEnvVar?: string;
+}
+/**
+ * Every feature flag this runtime declares, with the shape each one was declared with.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FeatureFlagsMetadataResult".
+ */
+/** @experimental */
+/** @internal */
+export interface FeatureFlagsMetadataResult {
+  /**
+   * Declared feature flags keyed by flag name.
+   */
+  flags: {
+    [k: string]: FeatureFlagMetadata;
+  };
+}
+/**
+ * Caller population and overrides for static feature-flag resolution, independent of experiment assignments and active runtime state.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FeatureFlagsResolveRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface FeatureFlagsResolveRequest {
+  /**
+   * Whether the caller is GitHub or Microsoft staff.
+   */
+  isStaff: boolean;
+  /**
+   * Whether the caller is in an experimental population.
+   */
+  isExperimental: boolean;
+  /**
+   * Whether the caller belongs to the team population used by feature availability.
+   */
+  isTeam: boolean;
+  /**
+   * GitHub-staff membership. Omit when it was never recorded: a legacy staff account then counts as both staff populations and keeps every staff feature.
+   */
+  isStaffGithub?: boolean;
+  /**
+   * Microsoft-staff membership. Omitted the same way as `isStaffGitHub`.
+   */
+  isStaffMicrosoft?: boolean;
+  /**
+   * Resolve against this already-computed flag set rather than each flag's declared availability. Keyed by flag name.
+   */
+  baseFlags?: {
+    [k: string]: boolean | undefined;
+  };
+  /**
+   * Environment for direct feature-flag overrides and `COPILOT_CLI_ENABLED_FEATURE_FLAGS`. Does not apply `COPILOT_EXP_*` experiment assignments. Defaults to this runtime process's own environment.
+   */
+  environment?: {
+    [k: string]: string | undefined;
+  };
+  /**
+   * User settings to apply, including `enabledFeatureFlags`, legacy `feature_flags.enabled`, and supported convenience settings.
+   */
+  config?: JsonValue;
+  /**
+   * Flags forced to a value after every other layer, keyed by flag name.
+   */
+  flagOverrides?: {
+    [k: string]: boolean | undefined;
+  };
+}
+/**
  * Parameters for starting fleet orchestration: an optional user prompt combined with the fleet instructions, plus the send options forwarded to the resulting turn.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -13142,6 +13419,10 @@ export interface HookInvokeResponse {
 /** @experimental */
 export interface HooksDiscoverRequest {
   /**
+   * Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without ambient discovery or repository file-hook enablement, subject to managed/hook disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+   */
+  hookDirectories?: string[];
+  /**
    * Optional project directory paths whose trusted repository and project-expanded plugin hooks should be discovered. When omitted or empty, user, managed-policy, and globally enabled installed or explicit plugin hooks are returned without project expansion.
    */
   projectPaths?: string[];
@@ -14226,6 +14507,40 @@ export interface InstructionDiscoveryPathList {
   paths: InstructionDiscoveryPath[];
 }
 /**
+ * Explicit discovery arguments for one location, supplied by the caller rather than derived from a session.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "InstructionsDiscoverRepoSourcesRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface InstructionsDiscoverRepoSourcesRequest {
+  /**
+   * Repository location to discover. An empty string selects no repository scope; cwdPath can still supply working-directory sources.
+   */
+  location: string;
+  /**
+   * When true, include the sources a command-line host reads. Hosts that are not the CLI omit it.
+   */
+  isCli?: boolean;
+  /**
+   * Working directory whose instruction sources should also be included. Omission adds no separate working-directory scope.
+   */
+  cwdPath?: string;
+  /**
+   * Copilot configuration directory for user-level sources. An omitted or empty value uses the server's configuration home.
+   */
+  configDir?: string;
+  /**
+   * Extra directories to scan alongside instruction directories configured in the runtime environment.
+   */
+  additionalDirs?: string[];
+  /**
+   * When true, also discover instruction files nested below the location.
+   */
+  enableChildInstructions?: boolean;
+}
+/**
  * Optional project paths to include in instruction discovery.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -14233,6 +14548,10 @@ export interface InstructionDiscoveryPathList {
  */
 /** @experimental */
 export interface InstructionsDiscoverRequest {
+  /**
+   * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+   */
+  instructionDirectories?: string[];
   /**
    * Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).
    */
@@ -14250,6 +14569,10 @@ export interface InstructionsDiscoverRequest {
  */
 /** @experimental */
 export interface InstructionsGetDiscoveryPathsRequest {
+  /**
+   * Explicit discovery-only instruction roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+   */
+  instructionDirectories?: string[];
   /**
    * Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.
    */
@@ -14314,6 +14637,20 @@ export interface InstructionSource {
    * The project path this source was discovered from. Only set by sessionless discovery for repository, working-directory, and project-scoped plugin sources, where it disambiguates sources across multiple workspace roots. The session-scoped getSources leaves it unset.
    */
   projectPath?: string;
+}
+/**
+ * The prompt the init command runs.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "InstructionsInitPromptResult".
+ */
+/** @experimental */
+/** @internal */
+export interface InstructionsInitPromptResult {
+  /**
+   * Prompt text authoring repository instructions.
+   */
+  prompt: string;
 }
 /**
  * Parameters for interrupting the main agent turn.
@@ -16368,6 +16705,20 @@ export interface McpIsServerRunningResult {
    * True if the server has an active client and transport.
    */
   running: boolean;
+}
+/**
+ * Names of the MCP servers the runtime supplies itself.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "McpListBuiltinServerNamesResult".
+ */
+/** @experimental */
+/** @internal */
+export interface McpListBuiltinServerNamesResult {
+  /**
+   * Every built-in server name. A host disabling the built-ins wholesale suppresses exactly this set.
+   */
+  names: string[];
 }
 /**
  * Server name whose tool list should be returned.
@@ -18499,6 +18850,64 @@ export interface ModelClearStartupSeedRequest {
 /** @internal */
 export interface ModelClearStartupSeedResult {
   cleared: boolean;
+}
+/**
+ * Host presentation state the reasoning-summaries policy depends on.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModelGetReasoningSummariesRequest".
+ */
+/** @experimental */
+export interface ModelGetReasoningSummariesRequest {
+  /**
+   * The host's persisted `showReasoning` user setting, omitted when unset.
+   */
+  persistedShowReasoning?: boolean;
+  /**
+   * Whether the host is currently showing reasoning summaries. Defaults to false.
+   */
+  summariesVisible?: boolean;
+}
+/**
+ * Reasoning-summaries presentation policy for the session's current model.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "ModelGetReasoningSummariesResult".
+ */
+/** @experimental */
+export interface ModelGetReasoningSummariesResult {
+  /**
+   * False until the session has a model catalog and a selected model. This read never resolves the catalog itself, and the runtime emits no readiness notification, so repeating this call alone leaves `ready` false indefinitely on a session that has neither listed models nor run a turn. `session.model.list` is the prerequisite and the signal: it resolves and caches the catalog for the session, so a successful return means the next read is ready. The exception is a session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider: `session.model.list` returns an empty list without caching a catalog, so `ready` stays false and this policy is unavailable there. While false, every model-policy field is false and `visibility` is omitted; `experimentSettled` is independent of readiness and still reports the assignment state.
+   */
+  ready: boolean;
+  /**
+   * Whether the session's reasoning-summaries experiment assignment has settled. False means this read does not wait for a pending assignment and reports the experiment-derived fields conservatively: `showHiddenHint` is false and `visibility` falls back to `persistedShowReasoning`, or is omitted when none was supplied. A host that wants the assigned answer re-reads until this is true.
+   */
+  experimentSettled: boolean;
+  /**
+   * Whether turns on this session produce reasoning summaries, honouring an explicit session reasoning-summary override.
+   */
+  sessionShowsSummaries: boolean;
+  /**
+   * Whether the selected model shows reasoning summaries by default.
+   */
+  modelDefaultShowsSummaries: boolean;
+  /**
+   * Whether the selected model emits reasoning headers.
+   */
+  showReasoningHeaders: boolean;
+  /**
+   * Default reasoning visibility, and only meaningful once `ready` is true: false when the session produces no summaries, else the persisted setting, else the experiment's default. While `ready` is true it is omitted only when all three are unavailable, that is when the session produces summaries, no `persistedShowReasoning` was supplied, and `experimentSettled` is false. While `ready` is false there is no model policy to report and this field is always omitted, so an absent value alone does not imply a pending experiment.
+   */
+  visibility?: boolean;
+  /**
+   * Whether to show the hint that reasoning summaries are hidden. Always false while `experimentSettled` is false.
+   */
+  showHiddenHint: boolean;
+  /**
+   * Whether the supplied `persistedShowReasoning` setting only restates the model default. This reports a redundancy, not a standing instruction to delete the setting: it stays true for as long as the setting and the model default agree, including for a user who later chose that value deliberately. It exists for a one-time migration of a legacy setting written before the model default made it redundant, so a host that acts on it owns the cleanup and must gate it behind its own persisted `done` marker, delete only a setting whose value still matches the one it read, and never repeat the deletion on a later launch. Under an off-by-default reasoning-summaries experiment an explicit `showReasoning: true` opt-in also reads as redundant on a summary-producing model, so an ungated host would keep deleting that opt-in and hide summaries again on every launch.
+   */
+  clearRedundantSetting: boolean;
 }
 /**
  * List of Copilot models available to the resolved user, including capabilities and billing metadata.
@@ -23101,6 +23510,94 @@ export interface RemoteSessionRepository {
   branch?: string;
 }
 /**
+ * Which repository settings file to read.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RepoSettingsReadRawRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface RepoSettingsReadRawRequest {
+  /**
+   * Absolute path of the repository root.
+   */
+  repoRoot: string;
+  /**
+   * Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+   */
+  scope: string;
+}
+/**
+ * Parsed repository settings without normalization or layering.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RepoSettingsReadRawResult".
+ */
+/** @experimental */
+/** @internal */
+export interface RepoSettingsReadRawResult {
+  /**
+   * Stored JSON values after the existing JSONC parser and prototype-safety checks. Empty when the file is missing, blank, or invalid.
+   */
+  config: JsonValue;
+  /**
+   * True when the file exists but did not parse, so `config` is empty for that reason rather than because nothing is set.
+   */
+  invalid: boolean;
+}
+/**
+ * The complete set of repository-overridable settings to store.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RepoSettingsWriteAllRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface RepoSettingsWriteAllRequest {
+  /**
+   * Absolute path of the repository root.
+   */
+  repoRoot: string;
+  /**
+   * Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+   */
+  scope: string;
+  /**
+   * Object of allowed settings to store. Missing allowlisted keys are removed. Other input keys are ignored, while unknown stored keys are preserved.
+   */
+  settings: JsonValue;
+}
+/**
+ * One key to write or remove in a repository settings file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "RepoSettingsWriteKeyRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface RepoSettingsWriteKeyRequest {
+  /**
+   * Absolute path of the repository root.
+   */
+  repoRoot: string;
+  /**
+   * Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+   */
+  scope: string;
+  /**
+   * Canonical top-level key permitted by the repository settings allowlist.
+   */
+  key: string;
+  /**
+   * Value to validate and write. Required unless delete is true; a null value is validated, not treated as deletion.
+   */
+  value?: JsonValue;
+  /**
+   * True to remove the key instead of writing it.
+   */
+  delete?: boolean;
+}
+/**
  * Resolved sandbox configuration.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -25319,15 +25816,27 @@ export interface SessionOpenOptions {
    */
   allowAllMcpServerInstructions?: boolean;
   /**
-   * Additional directories to search for skills.
+   * Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
    */
   skillDirectories?: string[];
+  /**
+   * Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  agentDirectories?: string[];
+  /**
+   * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  instructionDirectories?: string[];
+  /**
+   * Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  hookDirectories?: string[];
   /**
    * Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
    */
   ignoredSkillsLocations?: string[];
   /**
-   * Whether skill loading is enabled. When omitted, an SDK skill provider enables skills by default.
+   * Whether skill loading is enabled. When omitted, explicit SDK skill roots or an SDK skill provider enable skills independently of enableConfigDiscovery.
    */
   enableSkills?: boolean;
   /**
@@ -27133,9 +27642,21 @@ export interface SessionUpdateOptionsParams {
    */
   allowAllMcpServerInstructions?: boolean;
   /**
-   * Additional directories to search for skills.
+   * Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
    */
   skillDirectories?: string[];
+  /**
+   * Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  agentDirectories?: string[];
+  /**
+   * Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  instructionDirectories?: string[];
+  /**
+   * Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.
+   */
+  hookDirectories?: string[];
   /**
    * Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.
    */
@@ -27243,7 +27764,7 @@ export interface SessionUpdateOptionsParams {
    */
   organizationCustomInstructions?: string;
   /**
-   * Whether to enable loading of `.github/hooks/` filesystem hooks. Separate from the SDK callback hook mechanism.
+   * Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.
    */
   enableFileHooks?: boolean;
   /**
@@ -27255,7 +27776,7 @@ export interface SessionUpdateOptionsParams {
    */
   enableSessionStore?: boolean;
   /**
-   * Whether skill loading is enabled. Explicit false disables every source, including a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless an SDK skill provider is registered.
+   * Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.
    */
   enableSkills?: boolean;
   contextTier?: OptionsUpdateContextTier;
@@ -27280,6 +27801,17 @@ export interface SessionUpdateOptionsResult {
    * Number of hooks loaded from installed plugins, returned when installedPlugins is updated
    */
   pluginHookCount?: number;
+}
+/**
+ * Outcome of an atomic user or repository settings edit.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "SettingsEditResult".
+ */
+/** @experimental */
+/** @internal */
+export interface SettingsEditResult {
+  status: SettingsEditStatus;
 }
 /**
  * User-requested shell execution cancellation handle.
@@ -27758,7 +28290,7 @@ export interface SkillsDiscoverRequest {
    */
   projectPaths?: string[];
   /**
-   * Optional list of additional skill directory paths to include
+   * Explicit discovery-only skill roots, not filesystem grants. Available without ambient discovery, subject to skill/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
    */
   skillDirectories?: string[];
   /**
@@ -27813,6 +28345,10 @@ export interface SkillSetEnabledRequest {
  */
 /** @experimental */
 export interface SkillsGetDiscoveryPathsRequest {
+  /**
+   * Explicit discovery-only skill roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.
+   */
+  skillDirectories?: string[];
   /**
    * Optional list of project directory paths. When omitted or empty, only personal and custom directories are returned.
    */
@@ -29901,6 +30437,132 @@ export interface UserSettingMetadata {
   isDefault: boolean;
 }
 /**
+ * A single top-level setting subtree to validate and write.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsApplyTopKeyRequest".
+ */
+/** @experimental */
+export interface UserSettingsApplyTopKeyRequest {
+  /**
+   * Canonical path of the setting the caller is editing. Currently informational only.
+   */
+  canonicalPath: string[];
+  /**
+   * Top-level setting name to write.
+   */
+  topKey: string;
+  /**
+   * Value to write for the whole top-level key. Omitted when `delete` is true. Explicit null is preserved and validated as null.
+   */
+  value?: JsonValue | null;
+  /**
+   * True to remove the top-level key instead of writing it.
+   */
+  delete?: boolean;
+  /**
+   * Records that the user chose an update channel explicitly, so the one-time staff channel migration stops reapplying. Honored only for the `autoUpdatesChannel` key.
+   */
+  completeStaffUpdateChannelMigration?: boolean;
+}
+/**
+ * Outcome of validating and writing one top-level setting subtree.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsApplyTopKeyResult".
+ */
+/** @experimental */
+export interface UserSettingsApplyTopKeyResult {
+  /**
+   * `ok` when the value was written, `validation-error` when it was rejected before any write, `write-error` when validation passed but the write failed.
+   */
+  status: string;
+  /**
+   * Problems found, present only when `status` is `validation-error`.
+   */
+  issues?: UserSettingsValidationIssue[];
+  /**
+   * Why the write failed, present only when `status` is `write-error`.
+   */
+  error?: string | null;
+}
+/**
+ * One problem found while validating a setting value.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsValidationIssue".
+ */
+/** @experimental */
+export interface UserSettingsValidationIssue {
+  /**
+   * Where in the settings tree the problem sits, as object keys and array indices. The first element is the top-level key; a whole-value problem is reported as that single key.
+   */
+  path: JsonValue[];
+  /**
+   * Human-readable description of the problem.
+   */
+  message: string;
+}
+/**
+ * One atomic edit of a canonical setting in settings.json.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsEditRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsEditRequest {
+  /**
+   * Configuration directory to edit. Omitted or empty resolves the server's own home, as in `user.settings.loadForConfigDir`.
+   */
+  configDir?: string;
+  /**
+   * Nonempty canonical path segments of the setting to edit, starting with its top-level key.
+   *
+   * @minItems 1
+   */
+  canonicalPath: [string, ...string[]];
+  operation: SettingsEditOperation;
+  /**
+   * Required boolean, string or number for set, required string for add-item and remove-item, and forbidden for remove. The runtime rejects all other JSON values.
+   */
+  value?: JsonValue;
+}
+/**
+ * Selects which settings file paths to resolve.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsGetPathsRequest".
+ */
+/** @experimental */
+export interface UserSettingsGetPathsRequest {
+  /**
+   * Absolute path of a repository root. Supply it to also resolve that repository's two settings file paths; omit it to resolve only the user path.
+   */
+  repoRoot?: string;
+}
+/**
+ * On-disk locations of the settings files this runtime reads. A path is reported whether or not the file exists.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsGetPathsResult".
+ */
+/** @experimental */
+export interface UserSettingsGetPathsResult {
+  /**
+   * The user settings file: `settings.json` under the resolved Copilot home. This is the file `user.settings.get`, `user.settings.load`, and `user.settings.set` read and write.
+   */
+  userSettings: string;
+  /**
+   * The repository's checked-in settings file, or null when no repository root was supplied.
+   */
+  repoSettings?: string | null;
+  /**
+   * The repository's local, untracked settings file, or null when no repository root was supplied.
+   */
+  repoLocalSettings?: string | null;
+}
+/**
  * Per-key metadata for every known user setting in settings.json, including settings left at their default. Excludes repository- and enterprise-managed overrides.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -29916,6 +30578,178 @@ export interface UserSettingsGetResult {
   };
 }
 /**
+ * Top-level user-setting keys grouped by who may govern them.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsGovernanceKeysResult".
+ */
+/** @experimental */
+export interface UserSettingsGovernanceKeysResult {
+  /**
+   * Top-level keys a repository may override through `.github/copilot/settings.json` or `.github/copilot/settings.local.json`.
+   */
+  repo: string[];
+  /**
+   * Top-level keys a repository may override through a Claude-compatible repository config.
+   */
+  claudeRepo: string[];
+  /**
+   * Top-level keys an enterprise policy may fix through managed settings.
+   */
+  managed: string[];
+}
+/**
+ * Contents of settings.json as stored, for a caller about to rewrite it.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsLoadForEditResult".
+ */
+/** @experimental */
+export interface UserSettingsLoadForEditResult {
+  /**
+   * `ok` when the file parsed, `missing` when there is no file yet, `invalid` when the file exists but will not parse.
+   */
+  status: string;
+  /**
+   * Parsed contents, present only when `status` is `ok`.
+   */
+  settings?: JsonValue;
+}
+/**
+ * Settings object whose key names should be canonicalized.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsNormalizeRequest".
+ */
+/** @experimental */
+export interface UserSettingsNormalizeRequest {
+  /**
+   * Free-form settings object, possibly using legacy or snake_case key names.
+   */
+  settings: JsonValue;
+}
+/**
+ * Settings object with canonical key names.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsNormalizeResult".
+ */
+/** @experimental */
+export interface UserSettingsNormalizeResult {
+  /**
+   * The same settings with every legacy or snake_case key renamed to its canonical spelling.
+   */
+  settings: JsonValue;
+}
+/**
+ * One setting that will not take effect, and why.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsProblem".
+ */
+/** @experimental */
+export interface UserSettingsProblem {
+  /**
+   * Stable identifier for this problem within the reported set, so a caller can track a selection across refreshes.
+   */
+  id: string;
+  /**
+   * What is wrong in machine-readable form, for a caller that wants to branch rather than display.
+   */
+  kind: string;
+  /**
+   * Coarse grouping for the problem, for a caller that presents problems in sections.
+   */
+  category: string;
+  source: UserSettingsProblemLocation;
+  /**
+   * The offending key as written in the file, when the problem is attributable to a single key. Absent when the whole file is at fault.
+   */
+  rawKey?: string;
+  /**
+   * Why the setting will not take effect. Never contains the setting's value, which may be a token or another secret.
+   */
+  explanation: string;
+}
+/**
+ * The settings layer a problem was found in.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsProblemLocation".
+ */
+/** @experimental */
+export interface UserSettingsProblemLocation {
+  /**
+   * Which layer this is: `user`, `repo`, or `local`.
+   */
+  kind: string;
+  /**
+   * The caller-supplied display label for the layer.
+   */
+  label: string;
+  /**
+   * Absolute path of the file backing this layer.
+   */
+  filePath: string;
+}
+/**
+ * One already-loaded settings layer to diagnose.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsProblemSource".
+ */
+/** @experimental */
+export interface UserSettingsProblemSource {
+  /**
+   * Which layer this is: `user`, `repo`, or `local`.
+   */
+  kind: string;
+  /**
+   * Caller-chosen display label for the layer, echoed back on each problem so a caller can group by layer without re-deriving its own naming.
+   */
+  label: string;
+  /**
+   * Absolute path of the file backing this layer.
+   */
+  filePath: string;
+  /**
+   * The layer's settings exactly as loaded, unnormalized. Empty when the file is missing or failed to parse.
+   */
+  config?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
+   * True when the file itself failed to parse, so its keys could not be read at all.
+   */
+  invalid?: boolean;
+}
+/**
+ * The settings layers to diagnose.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsProblemsRequest".
+ */
+/** @experimental */
+export interface UserSettingsProblemsRequest {
+  /**
+   * Layers to diagnose, in the precedence order the caller applies them.
+   */
+  sources?: UserSettingsProblemSource[];
+}
+/**
+ * The settings that will not take effect across the given layers.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsProblemsResult".
+ */
+/** @experimental */
+export interface UserSettingsProblemsResult {
+  /**
+   * Each setting that will not take effect, and why. Empty when every layer is healthy.
+   */
+  problems?: UserSettingsProblem[];
+}
+/**
  * Partial user settings to write to settings.json. Each top-level key is written individually, replacing the existing value; a key whose value is null is removed.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -29925,6 +30759,97 @@ export interface UserSettingsGetResult {
 export interface UserSettingsSetRequest {
   /**
    * Partial user settings to write, as a free-form object keyed by setting name
+   */
+  settings: JsonValue;
+}
+/**
+ * Names the user setting to merge into, and the partial object to merge.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsUpdateRequest".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsUpdateRequest {
+  /**
+   * Top-level user-setting key to merge into, such as `extensions`.
+   */
+  key: string;
+  /**
+   * Value to store for `key`. When both the stored value and this value are objects, their fields are shallow-merged and fields this object does not name are preserved. Otherwise this value replaces the stored value.
+   */
+  value: JsonValue;
+  /**
+   * Copilot configuration directory to write the settings document in, taking precedence over the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to use the directory the server resolved for itself.
+   */
+  configDir?: string;
+  /**
+   * Single-component name for the settings document at `<configDir>/settings/<subDir>.json`; path separators, `.` and `..` are rejected. Omit it, or pass an empty string, to use the main settings document.
+   */
+  subDir?: string;
+}
+/**
+ * The stored value of the user setting after the merge.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsUpdateResult".
+ */
+/** @experimental */
+/** @internal */
+export interface UserSettingsUpdateResult {
+  /**
+   * The key's stored value after the write: the merged object when both the stored value and the supplied value are objects, otherwise the supplied value.
+   */
+  value: JsonValue;
+}
+/**
+ * A single top-level setting subtree to validate.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsValidateRequest".
+ */
+/** @experimental */
+export interface UserSettingsValidateRequest {
+  /**
+   * Top-level setting name to validate.
+   */
+  topKey: string;
+  /**
+   * Value to validate. Omitted when `delete` is true.
+   */
+  value?: JsonValue;
+  /**
+   * True to validate a removal of this key. The current settings file is not read.
+   */
+  delete?: boolean;
+}
+/**
+ * Outcome of validating one top-level setting subtree.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsValidateResult".
+ */
+/** @experimental */
+export interface UserSettingsValidateResult {
+  /**
+   * True when the subtree is valid.
+   */
+  ok: boolean;
+  /**
+   * Problems found, empty when `ok` is true.
+   */
+  issues?: UserSettingsValidationIssue[];
+}
+/**
+ * The whole content to store in the user settings file.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "UserSettingsWriteAllRequest".
+ */
+/** @experimental */
+export interface UserSettingsWriteAllRequest {
+  /**
+   * The settings object to store. It replaces the file's entire content, so a key absent here is removed.
    */
   settings: JsonValue;
 }
@@ -31681,6 +32606,19 @@ export interface HostGetConfigurationResult {
 /** @experimental */
 export interface HostReadyResult {}
 /**
+ * The resolved feature flags, keyed by flag name.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "FeatureFlagsResolveResult".
+ */
+/** @experimental */
+export interface FeatureFlagsResolveResult {
+  /**
+   * Whether the flag is enabled for this population.
+   */
+  [k: string]: boolean | undefined;
+}
+/**
  * Ordered managed permission verdicts and the supplied policy's fail-closed posture.
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -32644,6 +33582,27 @@ export function createServerRpc(connection: MessageConnection) {
                 connection.sendRequest("extensions.disable", params),
         },
         /** @experimental */
+        instructions: {
+            /**
+             * Discovers instruction sources across user, repository, and plugin sources.
+             *
+             * @param params Optional project paths to include in instruction discovery.
+             *
+             * @returns Instruction sources discovered across user, repository, and plugin sources.
+             */
+            discover: async (params: InstructionsDiscoverRequest): Promise<ServerInstructionSourceList> =>
+                connection.sendRequest("instructions.discover", params),
+            /**
+             * Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.
+             *
+             * @param params Optional project paths to include when enumerating instruction discovery targets.
+             *
+             * @returns Canonical files and directories where custom instructions can be created so the runtime will recognize them.
+             */
+            getDiscoveryPaths: async (params: InstructionsGetDiscoveryPathsRequest): Promise<InstructionDiscoveryPathList> =>
+                connection.sendRequest("instructions.getDiscoveryPaths", params),
+        },
+        /** @experimental */
         skills: {
             /**
              * Plans installation of a verified Agent Finder Skill candidate without writing files. The returned review is safe to present to a user and installing always leaves the Skill disabled until separately enabled.
@@ -32925,27 +33884,6 @@ export function createServerRpc(connection: MessageConnection) {
              */
             getDiscoveryPaths: async (params: AgentsGetDiscoveryPathsRequest): Promise<AgentDiscoveryPathList> =>
                 connection.sendRequest("agents.getDiscoveryPaths", params),
-        },
-        /** @experimental */
-        instructions: {
-            /**
-             * Discovers instruction sources across user, repository, and plugin sources.
-             *
-             * @param params Optional project paths to include in instruction discovery.
-             *
-             * @returns Instruction sources discovered across user, repository, and plugin sources.
-             */
-            discover: async (params: InstructionsDiscoverRequest): Promise<ServerInstructionSourceList> =>
-                connection.sendRequest("instructions.discover", params),
-            /**
-             * Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.
-             *
-             * @param params Optional project paths to include when enumerating instruction discovery targets.
-             *
-             * @returns Canonical files and directories where custom instructions can be created so the runtime will recognize them.
-             */
-            getDiscoveryPaths: async (params: InstructionsGetDiscoveryPathsRequest): Promise<InstructionDiscoveryPathList> =>
-                connection.sendRequest("instructions.getDiscoveryPaths", params),
         },
         /** @experimental */
         commands: {
@@ -33423,6 +34361,43 @@ export function createInternalServerRpc(connection: MessageConnection) {
         connect: async (params: ConnectRequest): Promise<ConnectResult> =>
             connection.sendRequest("connect", params),
         /** @experimental */
+        account: {
+            /**
+             * Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.
+             *
+             * @param params The authentication identity whose shared wording should be rendered.
+             *
+             * @returns The wording the runtime uses for an authentication identity.
+             */
+            describeAuthInfo: async (params: AccountDescribeAuthInfoRequest): Promise<AccountDescribeAuthInfoResult> =>
+                connection.sendRequest("account.describeAuthInfo", params),
+            /**
+             * Reports whether the supplied identity can create gists. Gists are unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed Users on github.com, so a host that offers gist actions should hide or disable them when this reports no support.
+             *
+             * @param params The authentication identity whose gist support should be reported.
+             *
+             * @returns Whether the identity can create gists, and why not when it cannot.
+             */
+            getGistSupport: async (params: AccountGetGistSupportRequest): Promise<AccountGetGistSupportResult> =>
+                connection.sendRequest("account.getGistSupport", params),
+            /**
+             * Resolves a path on the identity's GitHub host into an absolute URL, so a host can link to settings or documentation on the enterprise instance the user is signed in to rather than to github.com. Falls back to the public host when no identity is supplied.
+             *
+             * @param params A path to resolve against the GitHub host an identity is signed in to.
+             *
+             * @returns An absolute URL on the identity's GitHub host.
+             */
+            getWebUrl: async (params: AccountGetWebUrlRequest): Promise<AccountGetWebUrlResult> =>
+                connection.sendRequest("account.getWebUrl", params),
+            /**
+             * Names the environment variable supplying a classic personal access token, if one is set. A classic token cannot be upgraded in place, so a host that finds one should tell the user which variable to unset rather than starting an interactive sign-in that the variable would override.
+             *
+             * @returns The environment variable supplying a classic personal access token, when one is set.
+             */
+            getTokenEnvVar: async (): Promise<AccountGetTokenEnvVarResult> =>
+                connection.sendRequest("account.getTokenEnvVar", {}),
+        },
+        /** @experimental */
         mcp: {
             /** @experimental */
             registry: {
@@ -33453,6 +34428,13 @@ export function createInternalServerRpc(connection: MessageConnection) {
                     connection.sendRequest("mcp.registry.cancel", params),
             },
             /**
+             * Lists the MCP servers the runtime supplies itself, so a host that disables the built-ins wholesale suppresses exactly the set the runtime would otherwise add. The names are fixed for a build and depend on no configuration, session or account.
+             *
+             * @returns Names of the MCP servers the runtime supplies itself.
+             */
+            listBuiltinServerNames: async (): Promise<McpListBuiltinServerNamesResult> =>
+                connection.sendRequest("mcp.listBuiltinServerNames", {}),
+            /**
              * Reports whether the gh-replaceable GitHub MCP tools may be clipped for a session, which a host feeds back as the `excludeGhReplaceableTools` build option. The tools are redundant only when the session can reach a shell *and* the host has the `gh` that would replace them, so both halves are decided here. The shell half runs the platform shell tool through the runtime's own tool-filter matcher, so entry forms like `builtin:bash` and `builtin:*` behave exactly as they do when a session builds its tool catalog. The host half probes for `gh`, and is skipped entirely when the filters already rule the shell out. Host presence alone is not enough: a session restricted to, say, `view` would otherwise lose the built-in issue-read fallback while having no shell to replace it with. The answer describes the host the runtime runs on, so it is never forwarded to a remote engine.
              *
              * @param params The session tool filters that decide whether the session still has a shell to run `gh` with.
@@ -33461,6 +34443,30 @@ export function createInternalServerRpc(connection: MessageConnection) {
              */
             shouldExcludeGitHubTools: async (params: McpShouldExcludeGitHubToolsRequest): Promise<McpShouldExcludeGitHubToolsResult> =>
                 connection.sendRequest("mcp.shouldExcludeGitHubTools", params),
+        },
+        /** @experimental */
+        instructions: {
+            /**
+             * Returns the prompt the `init` command runs to author repository instructions. A host offering its own initialize action sends this text so the instructions it produces match the ones the CLI produces. The text is fixed for a build and depends on no configuration, session or repository.
+             *
+             * @returns The prompt the init command runs.
+             */
+            getInitPrompt: async (): Promise<InstructionsInitPromptResult> =>
+                connection.sendRequest("instructions.getInitPrompt", {}),
+            /**
+             * Discovers the instruction sources for one caller-named location and returns them in the order the runtime applies them. `discover` answers for a set of project paths and derives the rest of its scope itself; this one instead takes every argument from the caller — the extra directories to scan and whether to descend into nested instruction files — and honors them as given. It also includes instruction directories from trusted repository settings, matching native repository discovery. Use it when the caller knows its own scope and no session exists to derive that scope from, such as a host reporting how many instruction files a directory contributes before any session starts. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.
+             *
+             * @param params Explicit discovery arguments for one location, supplied by the caller rather than derived from a session.
+             *
+             * @returns Instruction sources discovered across user, repository, and plugin sources.
+             */
+            discoverRepoSources: async (params: InstructionsDiscoverRepoSourcesRequest): Promise<ServerInstructionSourceList> =>
+                connection.sendRequest("instructions.discoverRepoSources", params),
+            /**
+             * Drops the runtime's in-memory cache of discovered custom instructions so the next discovery reads them from disk again. A host calls this after it changes instruction files, or after it trusts a folder whose instructions an earlier discovery skipped, so that a session started afterwards sees the current files instead of a cached earlier answer. The call performs no I/O of its own and removes nothing from disk; it only invalidates, so the cost lands on the next discovery.         Returns once the cache is clear, which is what lets a caller order a session start after it. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.
+             */
+            clearCache: async (): Promise<void> =>
+                connection.sendRequest("instructions.clearCache", {}),
         },
         /** @experimental */
         agents: {
@@ -33533,6 +34539,144 @@ export function createInternalServerRpc(connection: MessageConnection) {
              */
             writeKey: async (params: GlobalStateWriteKeyRequest): Promise<void> =>
                 connection.sendRequest("globalState.writeKey", params),
+        },
+        /** @experimental */
+        user: {
+            /** @experimental */
+            settings: {
+                /**
+                 * Resolves the on-disk locations of the settings files this runtime reads, so a consumer can show or open them. The user path is the same file `user.settings.get`, `user.settings.load`, and `user.settings.set` operate on. Supply `repoRoot` to also resolve that repository's checked-in and local settings paths. A path is reported whether or not the file exists.
+                 *
+                 * @param params Selects which settings file paths to resolve.
+                 *
+                 * @returns On-disk locations of the settings files this runtime reads. A path is reported whether or not the file exists.
+                 */
+                getPaths: async (params: UserSettingsGetPathsRequest): Promise<UserSettingsGetPathsResult> =>
+                    connection.sendRequest("user.settings.getPaths", params),
+                /**
+                 * Lists the top-level user-setting keys by who is allowed to govern them: `repo` keys a repository may override through `.github/copilot/settings.json`, `claudeRepo` keys a repository may override through a Claude-compatible config, and `managed` keys an enterprise policy may fix. The lists are static for a given runtime build and fail closed: a key absent from a list cannot be governed that way.
+                 *
+                 * @returns Top-level user-setting keys grouped by who may govern them.
+                 */
+                listGovernanceKeys: async (): Promise<UserSettingsGovernanceKeysResult> =>
+                    connection.sendRequest("user.settings.listGovernanceKeys", {}),
+                /**
+                 * Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call.
+                 *
+                 * @param params One atomic edit of a canonical setting in settings.json.
+                 *
+                 * @returns Outcome of an atomic user or repository settings edit.
+                 */
+                edit: async (params: UserSettingsEditRequest): Promise<SettingsEditResult> =>
+                    connection.sendRequest("user.settings.edit", params),
+                /**
+                 * Rewrites legacy and snake_case setting names in a settings object to their canonical spelling. A caller editing settings.json must normalize before writing: a legacy key left in place survives the write, is re-normalized on the next load, and silently shadows the canonical value the write just stored.
+                 *
+                 * @param params Settings object whose key names should be canonicalized.
+                 *
+                 * @returns Settings object with canonical key names.
+                 */
+                normalize: async (params: UserSettingsNormalizeRequest): Promise<UserSettingsNormalizeResult> =>
+                    connection.sendRequest("user.settings.normalize", params),
+                /**
+                 * Diagnoses a set of already-loaded settings layers, reporting each key that will not take effect and why. Settings load tolerantly so that one bad key does not stop a session from starting; this method surfaces what was dropped so a caller can report it instead of silently ignoring the user's intent. Takes the layers as given rather than reading them, so a caller can diagnose exactly the content it is showing, including unsaved edits. Never echoes a setting's value, because a value may be a token or another secret. Marked internal because it exists to carry a CLI call site off the native addon, not to serve a consumer-facing need; it becomes public once an SDK consumer needs to inspect settings health itself.
+                 *
+                 * @param params The settings layers to diagnose.
+                 *
+                 * @returns The settings that will not take effect across the given layers.
+                 */
+                diagnoseProblems: async (params: UserSettingsProblemsRequest): Promise<UserSettingsProblemsResult> =>
+                    connection.sendRequest("user.settings.diagnoseProblems", params),
+                /**
+                 * Validates one top-level setting subtree and writes just that key to settings.json as a single step. Doing both here closes the race a caller cannot close itself: between a separate preflight read and the write, the file may change. Rewriting only the touched key keeps legacy siblings out of settings.json. Answers a status rather than failing, so a validation problem and a write problem stay distinguishable.
+                 *
+                 * @param params A single top-level setting subtree to validate and write.
+                 *
+                 * @returns Outcome of validating and writing one top-level setting subtree.
+                 */
+                applyTopKey: async (params: UserSettingsApplyTopKeyRequest): Promise<UserSettingsApplyTopKeyResult> =>
+                    connection.sendRequest("user.settings.applyTopKey", params),
+                /**
+                 * Replaces the user settings file's entire content in one write. A key absent from `settings` is removed, which is what distinguishes this from `user.settings.set`: that one merges, so it can never clear a key the caller has dropped. For a caller saving the result of a raw edit, a merge would silently resurrect every key the user deleted. Records the same one-time mutation marks a per-key write records, so a setting the user has now chosen explicitly stops being migrated for them.
+                 *
+                 * @param params The whole content to store in the user settings file.
+                 */
+                writeAll: async (params: UserSettingsWriteAllRequest): Promise<void> =>
+                    connection.sendRequest("user.settings.writeAll", params),
+                /**
+                 * Merges a partial object into one top-level user setting, re-reading the stored value inside this runtime process's settings.json write lock so that concurrent writers in this process to different sub-fields of the same key do not clobber each other. Unlike `user.settings.set`, which replaces a key's whole value with what the caller last read, this keeps sub-fields the caller did not name when both the stored value and supplied value are objects; otherwise the supplied value replaces the stored value. Use it whenever two independent surfaces own different sub-fields of one setting. Returns the key's stored value after the write, in `value`.
+                 *
+                 * @param params Names the user setting to merge into, and the partial object to merge.
+                 *
+                 * @returns The stored value of the user setting after the merge.
+                 */
+                update: async (params: UserSettingsUpdateRequest): Promise<UserSettingsUpdateResult> =>
+                    connection.sendRequest("user.settings.update", params),
+                /**
+                 * Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read.
+                 *
+                 * @returns Contents of settings.json as stored, for a caller about to rewrite it.
+                 */
+                loadForEdit: async (): Promise<UserSettingsLoadForEditResult> =>
+                    connection.sendRequest("user.settings.loadForEdit", {}),
+                /**
+                 * Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it.
+                 *
+                 * @param params A single top-level setting subtree to validate.
+                 *
+                 * @returns Outcome of validating one top-level setting subtree.
+                 */
+                validate: async (params: UserSettingsValidateRequest): Promise<UserSettingsValidateResult> =>
+                    connection.sendRequest("user.settings.validate", params),
+            },
+        },
+        /** @experimental */
+        featureFlags: {
+            /**
+             * Lists every feature flag this runtime declares, with the population each one is declared for, its experimental description, and the online-experiment flag it maps to. This is the static catalog: it describes how each flag is defined, not whether it is on for anyone. Use `featureFlags.resolve` for static values with caller overrides, not active runtime values or experiment assignments.
+             *
+             * @returns Every feature flag this runtime declares, with the shape each one was declared with.
+             */
+            listMetadata: async (): Promise<FeatureFlagsMetadataResult> =>
+                connection.sendRequest("featureFlags.listMetadata", {}),
+            /**
+             * Computes static feature flags from the supplied population and overrides without changing runtime state or verifying audience membership. Starts from declared availability, then applies direct feature-flag environment values, user settings, and explicit `flagOverrides`. It does not apply `COPILOT_EXP_*` experiment assignments, authenticated startup gates, or active runtime state. Settings include `enabledFeatureFlags`, the legacy `feature_flags.enabled` list, and supported convenience settings. Supply `baseFlags` to use an existing flag set instead of declared availability. Omit `isStaffGitHub` or `isStaffMicrosoft` when membership was never recorded: a legacy staff account then counts as both populations.
+             *
+             * @param params Caller population and overrides for static feature-flag resolution, independent of experiment assignments and active runtime state.
+             *
+             * @returns The resolved feature flags, keyed by flag name.
+             */
+            resolve: async (params: FeatureFlagsResolveRequest): Promise<FeatureFlagsResolveResult> =>
+                connection.sendRequest("featureFlags.resolve", params),
+        },
+        /** @experimental */
+        repo: {
+            /** @experimental */
+            settings: {
+                /**
+                 * Reads one repository settings file without settings normalization or layering. The existing JSONC parser accepts comments and trailing commas and applies its prototype-safety rules. Missing or blank files return an empty valid config. Invalid files return an empty config with invalid=true; other read failures reject.
+                 *
+                 * @param params Which repository settings file to read.
+                 *
+                 * @returns Parsed repository settings without normalization or layering.
+                 */
+                readRaw: async (params: RepoSettingsReadRawRequest): Promise<RepoSettingsReadRawResult> =>
+                    connection.sendRequest("repo.settings.readRaw", params),
+                /**
+                 * Writes or removes one allowed top-level repository setting through the existing validator and file lock. Preserves unrelated stored keys. Invalid keys, values, existing documents, and I/O errors reject without replacing the file. Deletion requires delete=true; otherwise value must be present.
+                 *
+                 * @param params One key to write or remove in a repository settings file.
+                 */
+                writeKey: async (params: RepoSettingsWriteKeyRequest): Promise<void> =>
+                    connection.sendRequest("repo.settings.writeKey", params),
+                /**
+                 * Replaces the repository-overridable settings in one locked write. Allowed keys present in settings are validated and written; allowed keys absent from settings are removed. Other input keys are ignored, and unknown keys already stored in the file remain unchanged. Invalid values or an invalid existing file reject without a partial write.
+                 *
+                 * @param params The complete set of repository-overridable settings to store.
+                 */
+                writeAll: async (params: RepoSettingsWriteAllRequest): Promise<void> =>
+                    connection.sendRequest("repo.settings.writeAll", params),
+            },
         },
         /** @experimental */
         gitHubRepository: {
@@ -34145,6 +35289,15 @@ export function createSessionRpc(connection: MessageConnection, sessionId: strin
              */
             setReasoningEffort: async (params: ModelSetReasoningEffortRequest): Promise<ModelSetReasoningEffortResult> =>
                 connection.sendRequest("session.model.setReasoningEffort", { ...params, sessionId }),
+            /**
+             * Computes whether the session's current model shows reasoning summaries and how a host should present them: the default Ctrl+T visibility, reasoning headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is redundant. The runtime folds in the session's model catalog, selection and reasoning-summaries experiment assignment; the host supplies only its own persisted setting and current visibility. This method reads the session's resolved model catalog rather than resolving it, so call `session.model.list` first on a session that has not listed models or run a turn; until then the result is `ready: false`. A session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider, never caches one and stays `ready: false`.
+             *
+             * @param params Host presentation state the reasoning-summaries policy depends on.
+             *
+             * @returns Reasoning-summaries presentation policy for the session's current model.
+             */
+            getReasoningSummaries: async (params: ModelGetReasoningSummariesRequest): Promise<ModelGetReasoningSummariesResult> =>
+                connection.sendRequest("session.model.getReasoningSummaries", { ...params, sessionId }),
             /**
              * Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.
              *

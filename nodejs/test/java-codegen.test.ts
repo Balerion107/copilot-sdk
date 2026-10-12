@@ -1,6 +1,11 @@
+import type { JSONSchema7 } from "json-schema";
 import { describe, expect, it } from "vitest";
 
-import { renderRpcTypes, renderRpcWrappers } from "../../java/scripts/codegen/java.ts";
+import {
+    generateRpcClass,
+    renderRpcTypes,
+    renderRpcWrappers,
+} from "../../java/scripts/codegen/java.ts";
 
 function rpcSource(files: Map<string, string>, name: string): string {
     const source = files.get(
@@ -9,6 +14,89 @@ function rpcSource(files: Map<string, string>, name: string): string {
     expect(source).toBeDefined();
     return source!;
 }
+
+it("preserves boolean-map RPC results without widening them to JsonNode", async () => {
+    const files = await renderRpcWrappers({
+        server: {
+            sample: {
+                flags: {
+                    rpcMethod: "sample.flags",
+                    params: null,
+                    result: { type: "object", additionalProperties: { type: "boolean" } },
+                },
+                document: {
+                    rpcMethod: "sample.document",
+                    params: null,
+                    result: { type: "object", additionalProperties: true },
+                },
+            },
+        },
+    });
+    const source = rpcSource(files, "ServerSampleApi");
+    expect(source).toContain("import java.util.Map;");
+    expect(source).toContain("CompletableFuture<Map<String, Boolean>> flags()");
+    expect(source).toContain("constructMapType(Map.class, String.class, Boolean.class)");
+    expect(source).toContain("CompletableFuture<JsonNode> document()");
+});
+
+describe("Java required opaque JSON parameters", () => {
+    it.each([
+        ["user", "applyTopKey"],
+        ["repo", "writeKey"],
+    ])("preserves optional value presence in %s.settings.%s", async (namespace, action) => {
+        const rpcMethod = `${namespace}.settings.${action}`;
+        const files = await renderRpcWrappers({
+            server: {
+                [namespace]: {
+                    settings: {
+                        [action]: {
+                            rpcMethod,
+                            params: {
+                                type: "object",
+                                properties: {
+                                    value: { "x-opaque-json": true } as JSONSchema7,
+                                    delete: { type: "boolean" },
+                                },
+                            },
+                            result: null,
+                        },
+                    },
+                },
+            },
+        });
+        const source = rpcSource(
+            files,
+            `Server${namespace === "user" ? "User" : "Repo"}SettingsApi`
+        );
+        expect(source).toContain(`return caller.invoke("${rpcMethod}", params, Void.class);`);
+        expect(source).not.toContain('putNull("value")');
+    });
+
+    it("preserves a required JSON null without emitting absent optional fields", () => {
+        const opaque = { "x-opaque-json": true } as JSONSchema7;
+        const { code } = generateRpcClass(
+            "SettingsUpdateParams",
+            {
+                type: "object",
+                required: ["value"],
+                properties: {
+                    value: opaque,
+                    optionalValue: opaque,
+                },
+            },
+            new Map(),
+            "com.github.copilot.generated.rpc",
+            "internal",
+            true
+        );
+        expect(code).toContain(
+            '@JsonInclude(JsonInclude.Include.ALWAYS)\n    @JsonProperty("value") Object value'
+        );
+        expect(code).not.toContain(
+            '@JsonInclude(JsonInclude.Include.ALWAYS)\n    @JsonProperty("optionalValue")'
+        );
+    });
+});
 
 describe("java RPC codegen visibility", () => {
     const schema = {

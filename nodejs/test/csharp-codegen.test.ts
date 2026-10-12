@@ -31,6 +31,21 @@ function legacySignatureFixture(scope: "server" | "session", legacy: unknown) {
     return { schema, params, methods };
 }
 
+describe("C# required opaque JSON parameters", () => {
+    it.each(["server", "session"] as const)("preserves JSON null in %s requests", (scope) => {
+        const { schema, params } = legacySignatureFixture(scope, undefined);
+        params.required!.push("config");
+        const code = generateRpcCode(schema);
+
+        expect(code).toContain("RunAsync(string name, object? config,");
+        expect(code).toContain(
+            'Config = CopilotClient.ToJsonElementForWire(config) ?? JsonElement.Parse("null")'
+        );
+        expect(code).not.toContain("ArgumentNullException.ThrowIfNull(config);");
+        expect(code).toContain("ArgumentNullException.ThrowIfNull(name);");
+    });
+});
+
 describe("C# additive request entry compatibility", () => {
     it.each(["server", "session"] as const)(
         "preserves the exact legacy %s signature and adds a same-name request overload",

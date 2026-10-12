@@ -45,6 +45,8 @@ public final class ServerRpc {
     public final ServerMcpApi mcp;
     /** API methods for the {@code extensions} namespace. */
     public final ServerExtensionsApi extensions;
+    /** API methods for the {@code instructions} namespace. */
+    public final ServerInstructionsApi instructions;
     /** API methods for the {@code skills} namespace. */
     public final ServerSkillsApi skills;
     /** API methods for the {@code catalog} namespace. */
@@ -53,14 +55,16 @@ public final class ServerRpc {
     public final ServerPluginsApi plugins;
     /** API methods for the {@code agents} namespace. */
     public final ServerAgentsApi agents;
-    /** API methods for the {@code instructions} namespace. */
-    public final ServerInstructionsApi instructions;
     /** API methods for the {@code globalState} namespace. */
     final ServerGlobalStateApi globalState;
     /** API methods for the {@code commands} namespace. */
     public final ServerCommandsApi commands;
     /** API methods for the {@code user} namespace. */
     public final ServerUserApi user;
+    /** API methods for the {@code featureFlags} namespace. */
+    final ServerFeatureFlagsApi featureFlags;
+    /** API methods for the {@code repo} namespace. */
+    final ServerRepoApi repo;
     /** API methods for the {@code gitHubRepository} namespace. */
     final ServerGitHubRepositoryApi gitHubRepository;
     /** API methods for the {@code gitHubOwners} namespace. */
@@ -99,14 +103,16 @@ public final class ServerRpc {
         this.secrets = new ServerSecretsApi(caller);
         this.mcp = new ServerMcpApi(caller);
         this.extensions = new ServerExtensionsApi(caller);
+        this.instructions = new ServerInstructionsApi(caller);
         this.skills = new ServerSkillsApi(caller);
         this.catalog = new ServerCatalogApi(caller);
         this.plugins = new ServerPluginsApi(caller);
         this.agents = new ServerAgentsApi(caller);
-        this.instructions = new ServerInstructionsApi(caller);
         this.globalState = new ServerGlobalStateApi(caller);
         this.commands = new ServerCommandsApi(caller);
         this.user = new ServerUserApi(caller);
+        this.featureFlags = new ServerFeatureFlagsApi(caller);
+        this.repo = new ServerRepoApi(caller);
         this.gitHubRepository = new ServerGitHubRepositoryApi(caller);
         this.gitHubOwners = new ServerGitHubOwnersApi(caller);
         this.git = new ServerGitApi(caller);
