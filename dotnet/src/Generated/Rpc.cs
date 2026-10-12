@@ -597,11 +597,15 @@ public sealed class HooksDiscoverResult
 
 /// <summary>Optional project paths and host-exclusion behavior for server-scoped hook discovery.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed class HooksDiscoverRequest
+public sealed class HooksDiscoverRequest
 {
     /// <summary>When true, omit host-owned user and plugin hook rows and their diagnostics. Managed-policy hooks and trusted repository hooks remain visible, and host disabledHooks still contribute to each remaining row's effective enabled state. This filters sources rather than simulating a host with no settings.</summary>
     [JsonPropertyName("excludeHostHooks")]
     public bool? ExcludeHostHooks { get; set; }
+
+    /// <summary>Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without ambient discovery or repository file-hook enablement, subject to managed/hook disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.</summary>
+    [JsonPropertyName("hookDirectories")]
+    public IList<string>? HookDirectories { get; set; }
 
     /// <summary>Optional project directory paths whose trusted repository and project-expanded plugin hooks should be discovered. When omitted or empty, user, managed-policy, and globally enabled installed or explicit plugin hooks are returned without project expansion.</summary>
     [JsonPropertyName("projectPaths")]
@@ -2004,6 +2008,116 @@ internal sealed class AccountLogoutRequest
     public string? SelectionId { get; set; }
 }
 
+/// <summary>The wording the runtime uses for an authentication identity.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountDescribeAuthInfoResult
+{
+    /// <summary>One-line description of the identity, suitable after a verb such as "Switched to".</summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Sign-in banner announcing the authenticated user.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>Credential-free authentication identity safe to expose to hosts and user interfaces.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class AuthIdentity
+{
+    /// <summary>Snapshot of the authenticated user's Copilot subscription info, if known.</summary>
+    [JsonPropertyName("copilotUser")]
+    public CopilotUserResponse? CopilotUser { get; set; }
+
+    /// <summary>Name of the environment variable that supplied the credential, when applicable.</summary>
+    [JsonPropertyName("envVar")]
+    public string? EnvVar { get; set; }
+
+    /// <summary>Authentication host.</summary>
+    [JsonPropertyName("host")]
+    public string Host { get; set; } = string.Empty;
+
+    /// <summary>Authenticated login, when available.</summary>
+    [JsonPropertyName("login")]
+    public string? Login { get; set; }
+
+    /// <summary>Opaque SDK GitHub credential registration backing this identity. Routing metadata only; never a credential.</summary>
+    [JsonPropertyName("registrationId")]
+    public string? RegistrationId { get; set; }
+
+    /// <summary>Authentication type.</summary>
+    [JsonPropertyName("type")]
+    public AuthInfoType Type { get; set; }
+}
+
+/// <summary>The authentication identity whose shared wording should be rendered.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountDescribeAuthInfoRequest
+{
+    /// <summary>Identity to describe.</summary>
+    [JsonPropertyName("identity")]
+    public AuthIdentity Identity { get => field ??= new(); set; }
+}
+
+/// <summary>Whether the identity can create gists, and why not when it cannot.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountGetGistSupportResult
+{
+    /// <summary>Machine-readable reason category when unsupported.</summary>
+    [JsonPropertyName("kind")]
+    public string? Kind { get; set; }
+
+    /// <summary>Human-readable explanation to show where the gist action would have been.</summary>
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    /// <summary>True when the identity can create gists.</summary>
+    [JsonPropertyName("supported")]
+    public bool Supported { get; set; }
+}
+
+/// <summary>The authentication identity whose gist support should be reported.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountGetGistSupportRequest
+{
+    /// <summary>Identity to evaluate.</summary>
+    [JsonPropertyName("identity")]
+    public AuthIdentity Identity { get => field ??= new(); set; }
+}
+
+/// <summary>An absolute URL on the identity's GitHub host.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountGetWebUrlResult
+{
+    /// <summary>Absolute URL for the requested path.</summary>
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = string.Empty;
+}
+
+/// <summary>A path to resolve against the GitHub host an identity is signed in to.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountGetWebUrlRequest
+{
+    /// <summary>Identity whose host the path resolves against. Omit to resolve against the public github.com host.</summary>
+    [JsonPropertyName("identity")]
+    public AuthIdentity? Identity { get; set; }
+
+    /// <summary>Host-relative path, without a leading slash, for example `settings/copilot/features`.</summary>
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Safe for generated string properties: JSON Schema minLength/maxLength map to string length validation, not reflection over trimmed Count members")]
+    [MinLength(1)]
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+}
+
+/// <summary>The environment variable supplying a classic personal access token, when one is set.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class AccountGetTokenEnvVarResult
+{
+    /// <summary>Variable name, for example `GH_TOKEN`. Absent when no classic token is present in the environment.</summary>
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+}
+
 /// <summary>Confirmation that the secret values were registered.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
 public sealed class SecretsAddFilterValuesResult
@@ -2147,6 +2261,15 @@ internal sealed class McpDiscoverRequest
     /// <summary>Working directory used as context for discovery (e.g., plugin resolution).</summary>
     [JsonPropertyName("workingDirectory")]
     public string? WorkingDirectory { get; set; }
+}
+
+/// <summary>Names of the MCP servers the runtime supplies itself.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class McpListBuiltinServerNamesResult
+{
+    /// <summary>Every built-in server name. A host disabling the built-ins wholesale suppresses exactly this set.</summary>
+    [JsonPropertyName("names")]
+    public IList<string> Names { get => field ??= []; set; }
 }
 
 /// <summary>Whether the gh-replaceable GitHub MCP tools may be clipped for the session described by the request.</summary>
@@ -4300,6 +4423,166 @@ internal sealed class DiscoveredExtensionsDisableRequest
     public IList<string> Ids { get => field ??= []; set; }
 }
 
+/// <summary>The prompt the init command runs.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class InstructionsInitPromptResult
+{
+    /// <summary>Prompt text authoring repository instructions.</summary>
+    [JsonPropertyName("prompt")]
+    public string Prompt { get; set; } = string.Empty;
+}
+
+/// <summary>Loaded instruction source for a session, including path, content, category, location, applicability, and optional description.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class InstructionSource
+{
+    /// <summary>Glob pattern(s) from frontmatter — when set, this instruction applies only to matching files.</summary>
+    [JsonPropertyName("applyTo")]
+    public IList<string>? ApplyTo { get; set; }
+
+    /// <summary>Raw content of the instruction file.</summary>
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+
+    /// <summary>When true, this source starts disabled and must be toggled on by the user.</summary>
+    [JsonPropertyName("defaultDisabled")]
+    public bool? DefaultDisabled { get; set; }
+
+    /// <summary>Short description (body after frontmatter) for use in instruction tables.</summary>
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    /// <summary>Unique identifier for this source (used for toggling).</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>Human-readable label.</summary>
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Where this source lives — used for UI grouping.</summary>
+    [JsonPropertyName("location")]
+    public InstructionSourceLocation Location { get; set; }
+
+    /// <summary>The project path this source was discovered from. Only set by sessionless discovery for repository, working-directory, and project-scoped plugin sources, where it disambiguates sources across multiple workspace roots. The session-scoped getSources leaves it unset.</summary>
+    [JsonPropertyName("projectPath")]
+    public string? ProjectPath { get; set; }
+
+    /// <summary>File path relative to repo or absolute for home.</summary>
+    [JsonPropertyName("sourcePath")]
+    public string SourcePath { get; set; } = string.Empty;
+
+    /// <summary>Category of instruction source — used for merge logic.</summary>
+    [JsonPropertyName("type")]
+    public InstructionSourceType Type { get; set; }
+}
+
+/// <summary>Instruction sources discovered across user, repository, and plugin sources.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class ServerInstructionSourceList
+{
+    /// <summary>All discovered instruction sources.</summary>
+    [JsonPropertyName("sources")]
+    public IList<InstructionSource> Sources { get => field ??= []; set; }
+}
+
+/// <summary>Optional project paths to include in instruction discovery.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class InstructionsDiscoverRequest
+{
+    /// <summary>When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.</summary>
+    [JsonPropertyName("excludeHostInstructions")]
+    public bool? ExcludeHostInstructions { get; set; }
+
+    /// <summary>Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without ambient discovery, subject to instruction/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.</summary>
+    [JsonPropertyName("instructionDirectories")]
+    public IList<string>? InstructionDirectories { get; set; }
+
+    /// <summary>Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).</summary>
+    [JsonPropertyName("projectPaths")]
+    public IList<string>? ProjectPaths { get; set; }
+}
+
+/// <summary>Explicit discovery arguments for one location, supplied by the caller rather than derived from a session.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class InstructionsDiscoverRepoSourcesRequest
+{
+    /// <summary>Extra directories to scan alongside instruction directories configured in the runtime environment.</summary>
+    [JsonPropertyName("additionalDirs")]
+    public IList<string>? AdditionalDirs { get; set; }
+
+    /// <summary>Copilot configuration directory for user-level sources. An omitted or empty value uses the server's configuration home.</summary>
+    [JsonPropertyName("configDir")]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>Working directory whose instruction sources should also be included. Omission adds no separate working-directory scope.</summary>
+    [JsonPropertyName("cwdPath")]
+    public string? CwdPath { get; set; }
+
+    /// <summary>When true, also discover instruction files nested below the location.</summary>
+    [JsonPropertyName("enableChildInstructions")]
+    public bool? EnableChildInstructions { get; set; }
+
+    /// <summary>When true, include the sources a command-line host reads. Hosts that are not the CLI omit it.</summary>
+    [JsonPropertyName("isCli")]
+    public bool? IsCli { get; set; }
+
+    /// <summary>Repository location to discover. An empty string selects no repository scope; cwdPath can still supply working-directory sources.</summary>
+    [JsonPropertyName("location")]
+    public string Location { get; set; } = string.Empty;
+}
+
+/// <summary>Canonical file or directory where custom instructions can be discovered or created, with location, kind, preference, and project path.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class InstructionDiscoveryPath
+{
+    /// <summary>Whether the target is a single file or a directory of instruction files.</summary>
+    [JsonPropertyName("kind")]
+    public InstructionDiscoveryPathKind Kind { get; set; }
+
+    /// <summary>Which tier this target belongs to.</summary>
+    [JsonPropertyName("location")]
+    public InstructionDiscoveryPathLocation Location { get; set; }
+
+    /// <summary>Absolute path of the file or directory (may not exist on disk yet).</summary>
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>Whether this is the canonical target to create new instructions in its tier. At most one entry per tier is preferred.</summary>
+    [JsonPropertyName("preferredForCreation")]
+    public bool PreferredForCreation { get; set; }
+
+    /// <summary>The input project path this target was derived from (only for repository targets).</summary>
+    [JsonPropertyName("projectPath")]
+    public string? ProjectPath { get; set; }
+}
+
+/// <summary>Canonical files and directories where custom instructions can be created so the runtime will recognize them.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class InstructionDiscoveryPathList
+{
+    /// <summary>Canonical instruction create/discovery files and directories, in priority order.</summary>
+    [JsonPropertyName("paths")]
+    public IList<InstructionDiscoveryPath> Paths { get => field ??= []; set; }
+}
+
+/// <summary>Optional project paths to include when enumerating instruction discovery targets.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class InstructionsGetDiscoveryPathsRequest
+{
+    /// <summary>When true, omit the host's user-level instruction targets, leaving only repository targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).</summary>
+    [JsonPropertyName("excludeHostInstructions")]
+    public bool? ExcludeHostInstructions { get; set; }
+
+    /// <summary>Explicit discovery-only instruction roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.</summary>
+    [JsonPropertyName("instructionDirectories")]
+    public IList<string>? InstructionDirectories { get; set; }
+
+    /// <summary>Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.</summary>
+    [JsonPropertyName("projectPaths")]
+    public IList<string>? ProjectPaths { get; set; }
+}
+
 /// <summary>Skill installation management result with the honoured contract, or a typed refusal.</summary>
 /// <remarks>Polymorphic base type discriminated by <c>kind</c>.</remarks>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
@@ -5309,7 +5592,7 @@ internal sealed class SkillsDiscoverRequest
     [JsonPropertyName("projectPaths")]
     public IList<string>? ProjectPaths { get; set; }
 
-    /// <summary>Optional list of additional skill directory paths to include.</summary>
+    /// <summary>Explicit discovery-only skill roots, not filesystem grants. Available without ambient discovery, subject to skill/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.</summary>
     [JsonPropertyName("skillDirectories")]
     public IList<string>? SkillDirectories { get; set; }
 }
@@ -5346,7 +5629,7 @@ public sealed class SkillDiscoveryPathList
 
 /// <summary>Optional project paths to enumerate.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed class SkillsGetDiscoveryPathsRequest
+public sealed class SkillsGetDiscoveryPathsRequest
 {
     /// <summary>When true, omit the host's personal and custom skill directories, leaving only project directories. For multitenant deployments.</summary>
     [JsonPropertyName("excludeHostSkills")]
@@ -5359,6 +5642,10 @@ internal sealed class SkillsGetDiscoveryPathsRequest
     /// <summary>Optional list of project directory paths. When omitted or empty, only personal and custom directories are returned.</summary>
     [JsonPropertyName("projectPaths")]
     public IList<string>? ProjectPaths { get; set; }
+
+    /// <summary>Explicit discovery-only skill roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.</summary>
+    [JsonPropertyName("skillDirectories")]
+    public IList<string>? SkillDirectories { get; set; }
 }
 
 /// <summary>Inventory request under an explicitly selected existing session.</summary>
@@ -6793,6 +7080,10 @@ public sealed class AgentInfo
     [JsonPropertyName("displayName")]
     public string DisplayName { get; set; } = string.Empty;
 
+    /// <summary>Declarative hook actions keyed by event name, executed only while this agent is active.</summary>
+    [JsonPropertyName("hooks")]
+    public IDictionary<string, IList<JsonElement>>? Hooks { get; set; }
+
     /// <summary>Stable identifier for selection. For most agents this is the same as `name`; for plugin/builtin agents it may differ. Always populated; defaults to `name` when no distinct id was assigned.</summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
@@ -6858,8 +7149,12 @@ public sealed class ServerAgentList
 
 /// <summary>Optional project paths to include in agent discovery.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed class AgentsDiscoverRequest
+public sealed class AgentsDiscoverRequest
 {
+    /// <summary>Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without ambient discovery, subject to managed/source disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.</summary>
+    [JsonPropertyName("agentDirectories")]
+    public IList<string>? AgentDirectories { get; set; }
+
     /// <summary>When true, omit the host's agents (the user-level agent directory and all plugin agents), leaving only project and remote agents. For multitenant deployments.</summary>
     [JsonPropertyName("excludeHostAgents")]
     public bool? ExcludeHostAgents { get; set; }
@@ -6901,8 +7196,12 @@ public sealed class AgentDiscoveryPathList
 
 /// <summary>Optional project paths to include when enumerating agent discovery directories.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed class AgentsGetDiscoveryPathsRequest
+public sealed class AgentsGetDiscoveryPathsRequest
 {
+    /// <summary>Explicit discovery-only agent roots to enumerate, including configured missing directories. Relative paths resolve against the request's effective working directory when supplied. These are not filesystem grants or preferred creation targets. Null and omission are equivalent.</summary>
+    [JsonPropertyName("agentDirectories")]
+    public IList<string>? AgentDirectories { get; set; }
+
     /// <summary>When true, omit the host's user-level agent directory, leaving only project directories. For multitenant deployments (mirrors `discover`'s `excludeHostAgents`).</summary>
     [JsonPropertyName("excludeHostAgents")]
     public bool? ExcludeHostAgents { get; set; }
@@ -7032,120 +7331,6 @@ internal sealed class AgentsCustomAgentInitialModelDecisionParams
     /// <summary>The models available to this session, serialized in the shape the model list carries.</summary>
     [JsonPropertyName("availableModelsJson")]
     public string AvailableModelsJson { get; set; } = string.Empty;
-}
-
-/// <summary>Loaded instruction source for a session, including path, content, category, location, applicability, and optional description.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-public sealed class InstructionSource
-{
-    /// <summary>Glob pattern(s) from frontmatter — when set, this instruction applies only to matching files.</summary>
-    [JsonPropertyName("applyTo")]
-    public IList<string>? ApplyTo { get; set; }
-
-    /// <summary>Raw content of the instruction file.</summary>
-    [JsonPropertyName("content")]
-    public string Content { get; set; } = string.Empty;
-
-    /// <summary>When true, this source starts disabled and must be toggled on by the user.</summary>
-    [JsonPropertyName("defaultDisabled")]
-    public bool? DefaultDisabled { get; set; }
-
-    /// <summary>Short description (body after frontmatter) for use in instruction tables.</summary>
-    [JsonPropertyName("description")]
-    public string? Description { get; set; }
-
-    /// <summary>Unique identifier for this source (used for toggling).</summary>
-    [JsonPropertyName("id")]
-    public string Id { get; set; } = string.Empty;
-
-    /// <summary>Human-readable label.</summary>
-    [JsonPropertyName("label")]
-    public string Label { get; set; } = string.Empty;
-
-    /// <summary>Where this source lives — used for UI grouping.</summary>
-    [JsonPropertyName("location")]
-    public InstructionSourceLocation Location { get; set; }
-
-    /// <summary>The project path this source was discovered from. Only set by sessionless discovery for repository, working-directory, and project-scoped plugin sources, where it disambiguates sources across multiple workspace roots. The session-scoped getSources leaves it unset.</summary>
-    [JsonPropertyName("projectPath")]
-    public string? ProjectPath { get; set; }
-
-    /// <summary>File path relative to repo or absolute for home.</summary>
-    [JsonPropertyName("sourcePath")]
-    public string SourcePath { get; set; } = string.Empty;
-
-    /// <summary>Category of instruction source — used for merge logic.</summary>
-    [JsonPropertyName("type")]
-    public InstructionSourceType Type { get; set; }
-}
-
-/// <summary>Instruction sources discovered across user, repository, and plugin sources.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-public sealed class ServerInstructionSourceList
-{
-    /// <summary>All discovered instruction sources.</summary>
-    [JsonPropertyName("sources")]
-    public IList<InstructionSource> Sources { get => field ??= []; set; }
-}
-
-/// <summary>Optional project paths to include in instruction discovery.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed class InstructionsDiscoverRequest
-{
-    /// <summary>When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.</summary>
-    [JsonPropertyName("excludeHostInstructions")]
-    public bool? ExcludeHostInstructions { get; set; }
-
-    /// <summary>Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).</summary>
-    [JsonPropertyName("projectPaths")]
-    public IList<string>? ProjectPaths { get; set; }
-}
-
-/// <summary>Canonical file or directory where custom instructions can be discovered or created, with location, kind, preference, and project path.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-public sealed class InstructionDiscoveryPath
-{
-    /// <summary>Whether the target is a single file or a directory of instruction files.</summary>
-    [JsonPropertyName("kind")]
-    public InstructionDiscoveryPathKind Kind { get; set; }
-
-    /// <summary>Which tier this target belongs to.</summary>
-    [JsonPropertyName("location")]
-    public InstructionDiscoveryPathLocation Location { get; set; }
-
-    /// <summary>Absolute path of the file or directory (may not exist on disk yet).</summary>
-    [JsonPropertyName("path")]
-    public string Path { get; set; } = string.Empty;
-
-    /// <summary>Whether this is the canonical target to create new instructions in its tier. At most one entry per tier is preferred.</summary>
-    [JsonPropertyName("preferredForCreation")]
-    public bool PreferredForCreation { get; set; }
-
-    /// <summary>The input project path this target was derived from (only for repository targets).</summary>
-    [JsonPropertyName("projectPath")]
-    public string? ProjectPath { get; set; }
-}
-
-/// <summary>Canonical files and directories where custom instructions can be created so the runtime will recognize them.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-public sealed class InstructionDiscoveryPathList
-{
-    /// <summary>Canonical instruction create/discovery files and directories, in priority order.</summary>
-    [JsonPropertyName("paths")]
-    public IList<InstructionDiscoveryPath> Paths { get => field ??= []; set; }
-}
-
-/// <summary>Optional project paths to include when enumerating instruction discovery targets.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-internal sealed class InstructionsGetDiscoveryPathsRequest
-{
-    /// <summary>When true, omit the host's user-level instruction targets, leaving only repository targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).</summary>
-    [JsonPropertyName("excludeHostInstructions")]
-    public bool? ExcludeHostInstructions { get; set; }
-
-    /// <summary>Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.</summary>
-    [JsonPropertyName("projectPaths")]
-    public IList<string>? ProjectPaths { get; set; }
 }
 
 /// <summary>Installed plugin record from global state, with marketplace, version, install time, enabled state, cache path, and source.</summary>
@@ -7427,11 +7612,475 @@ public sealed class UserSettingsGetResult
     public IDictionary<string, UserSettingMetadata> Settings { get => field ??= new Dictionary<string, UserSettingMetadata>(); set; }
 }
 
+/// <summary>On-disk locations of the settings files this runtime reads. A path is reported whether or not the file exists.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsGetPathsResult
+{
+    /// <summary>The repository's local, untracked settings file, or null when no repository root was supplied.</summary>
+    [JsonPropertyName("repoLocalSettings")]
+    public string? RepoLocalSettings { get; set; }
+
+    /// <summary>The repository's checked-in settings file, or null when no repository root was supplied.</summary>
+    [JsonPropertyName("repoSettings")]
+    public string? RepoSettings { get; set; }
+
+    /// <summary>The user settings file: `settings.json` under the resolved Copilot home. This is the file `user.settings.get`, `user.settings.load`, and `user.settings.set` read and write.</summary>
+    [JsonPropertyName("userSettings")]
+    public string UserSettings { get; set; } = string.Empty;
+}
+
+/// <summary>Selects which settings file paths to resolve.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsGetPathsRequest
+{
+    /// <summary>Absolute path of a repository root. Supply it to also resolve that repository's two settings file paths; omit it to resolve only the user path.</summary>
+    [JsonPropertyName("repoRoot")]
+    public string? RepoRoot { get; set; }
+}
+
 /// <summary>Partial user settings to write to settings.json. Each top-level key is written individually, replacing the existing value; a key whose value is null is removed.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
 internal sealed class UserSettingsSetRequest
 {
     /// <summary>Partial user settings to write, as a free-form object keyed by setting name.</summary>
+    [JsonPropertyName("settings")]
+    public JsonElement Settings { get; set; }
+}
+
+/// <summary>Top-level user-setting keys grouped by who may govern them.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsGovernanceKeysResult
+{
+    /// <summary>Top-level keys a repository may override through a Claude-compatible repository config.</summary>
+    [JsonPropertyName("claudeRepo")]
+    public IList<string> ClaudeRepo { get => field ??= []; set; }
+
+    /// <summary>Top-level keys an enterprise policy may fix through managed settings.</summary>
+    [JsonPropertyName("managed")]
+    public IList<string> Managed { get => field ??= []; set; }
+
+    /// <summary>Top-level keys a repository may override through `.github/copilot/settings.json` or `.github/copilot/settings.local.json`.</summary>
+    [JsonPropertyName("repo")]
+    public IList<string> Repo { get => field ??= []; set; }
+}
+
+/// <summary>Outcome of an atomic user or repository settings edit.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class SettingsEditResult
+{
+    /// <summary>Changed, unchanged or invalid existing file. Rejected input, validation failures and I/O errors remain RPC errors.</summary>
+    [JsonPropertyName("status")]
+    public SettingsEditStatus Status { get; set; }
+}
+
+/// <summary>One atomic edit of a canonical setting in settings.json.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsEditRequest
+{
+    /// <summary>Nonempty canonical path segments of the setting to edit, starting with its top-level key.</summary>
+    [JsonPropertyName("canonicalPath")]
+    public IList<string> CanonicalPath { get => field ??= []; set; }
+
+    /// <summary>Configuration directory to edit. Omitted or empty resolves the server's own home, as in `user.settings.loadForConfigDir`.</summary>
+    [JsonPropertyName("configDir")]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>Set a scalar, add or remove a string list item, or remove the setting. The handler rejects a missing or incompatible value.</summary>
+    [JsonPropertyName("operation")]
+    public SettingsEditOperation Operation { get; set; }
+
+    /// <summary>Required boolean, string or number for set, required string for add-item and remove-item, and forbidden for remove. The runtime rejects all other JSON values.</summary>
+    [JsonPropertyName("value")]
+    public JsonElement? Value { get; set; }
+}
+
+/// <summary>Settings object with canonical key names.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsNormalizeResult
+{
+    /// <summary>The same settings with every legacy or snake_case key renamed to its canonical spelling.</summary>
+    [JsonPropertyName("settings")]
+    public JsonElement Settings { get; set; }
+}
+
+/// <summary>Settings object whose key names should be canonicalized.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsNormalizeRequest
+{
+    /// <summary>Free-form settings object, possibly using legacy or snake_case key names.</summary>
+    [JsonPropertyName("settings")]
+    public JsonElement Settings { get; set; }
+}
+
+/// <summary>The settings layer a problem was found in.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class UserSettingsProblemLocation
+{
+    /// <summary>Absolute path of the file backing this layer.</summary>
+    [JsonPropertyName("filePath")]
+    public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>Which layer this is: `user`, `repo`, or `local`.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>The caller-supplied display label for the layer.</summary>
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+}
+
+/// <summary>One setting that will not take effect, and why.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class UserSettingsProblem
+{
+    /// <summary>Coarse grouping for the problem, for a caller that presents problems in sections.</summary>
+    [JsonPropertyName("category")]
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>Why the setting will not take effect. Never contains the setting's value, which may be a token or another secret.</summary>
+    [JsonPropertyName("explanation")]
+    public string Explanation { get; set; } = string.Empty;
+
+    /// <summary>Stable identifier for this problem within the reported set, so a caller can track a selection across refreshes.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>What is wrong in machine-readable form, for a caller that wants to branch rather than display.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>The offending key as written in the file, when the problem is attributable to a single key. Absent when the whole file is at fault.</summary>
+    [JsonPropertyName("rawKey")]
+    public string? RawKey { get; set; }
+
+    /// <summary>The settings layer the problem was found in.</summary>
+    [JsonPropertyName("source")]
+    public UserSettingsProblemLocation Source { get => field ??= new(); set; }
+}
+
+/// <summary>The settings that will not take effect across the given layers.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsProblemsResult
+{
+    /// <summary>Each setting that will not take effect, and why. Empty when every layer is healthy.</summary>
+    [JsonPropertyName("problems")]
+    public IList<UserSettingsProblem>? Problems { get; set; }
+}
+
+/// <summary>One already-loaded settings layer to diagnose.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class UserSettingsProblemSource
+{
+    /// <summary>The layer's settings exactly as loaded, unnormalized. Empty when the file is missing or failed to parse.</summary>
+    [JsonPropertyName("config")]
+    public IDictionary<string, JsonElement>? Config { get; set; }
+
+    /// <summary>Absolute path of the file backing this layer.</summary>
+    [JsonPropertyName("filePath")]
+    public string FilePath { get; set; } = string.Empty;
+
+    /// <summary>True when the file itself failed to parse, so its keys could not be read at all.</summary>
+    [JsonPropertyName("invalid")]
+    public bool? Invalid { get; set; }
+
+    /// <summary>Which layer this is: `user`, `repo`, or `local`.</summary>
+    [JsonPropertyName("kind")]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Caller-chosen display label for the layer, echoed back on each problem so a caller can group by layer without re-deriving its own naming.</summary>
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+}
+
+/// <summary>The settings layers to diagnose.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsProblemsRequest
+{
+    /// <summary>Layers to diagnose, in the precedence order the caller applies them.</summary>
+    [JsonPropertyName("sources")]
+    public IList<UserSettingsProblemSource>? Sources { get; set; }
+}
+
+/// <summary>One problem found while validating a setting value.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class UserSettingsValidationIssue
+{
+    /// <summary>Human-readable description of the problem.</summary>
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Where in the settings tree the problem sits, as object keys and array indices. The first element is the top-level key; a whole-value problem is reported as that single key.</summary>
+    [JsonPropertyName("path")]
+    public IList<JsonElement> Path { get => field ??= []; set; }
+}
+
+/// <summary>Outcome of validating and writing one top-level setting subtree.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsApplyTopKeyResult
+{
+    /// <summary>Why the write failed, present only when `status` is `write-error`.</summary>
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    /// <summary>Problems found, present only when `status` is `validation-error`.</summary>
+    [JsonPropertyName("issues")]
+    public IList<UserSettingsValidationIssue>? Issues { get; set; }
+
+    /// <summary>`ok` when the value was written, `validation-error` when it was rejected before any write, `write-error` when validation passed but the write failed.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+}
+
+/// <summary>A single top-level setting subtree to validate and write.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsApplyTopKeyRequest
+{
+    /// <summary>Canonical path of the setting the caller is editing. Currently informational only.</summary>
+    [JsonPropertyName("canonicalPath")]
+    public IList<string> CanonicalPath { get => field ??= []; set; }
+
+    /// <summary>Records that the user chose an update channel explicitly, so the one-time staff channel migration stops reapplying. Honored only for the `autoUpdatesChannel` key.</summary>
+    [JsonPropertyName("completeStaffUpdateChannelMigration")]
+    public bool? CompleteStaffUpdateChannelMigration { get; set; }
+
+    /// <summary>True to remove the top-level key instead of writing it.</summary>
+    [JsonPropertyName("delete")]
+    public bool? Delete { get; set; }
+
+    /// <summary>Top-level setting name to write.</summary>
+    [JsonPropertyName("topKey")]
+    public string TopKey { get; set; } = string.Empty;
+
+    /// <summary>Value to write for the whole top-level key. Omitted when `delete` is true. Explicit null is preserved and validated as null.</summary>
+    [JsonPropertyName("value")]
+    public JsonElement? Value { get; set; }
+}
+
+/// <summary>The whole content to store in the user settings file.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsWriteAllRequest
+{
+    /// <summary>The settings object to store. It replaces the file's entire content, so a key absent here is removed.</summary>
+    [JsonPropertyName("settings")]
+    public JsonElement Settings { get; set; }
+}
+
+/// <summary>The stored value of the user setting after the merge.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsUpdateResult
+{
+    /// <summary>The key's stored value after the write: the merged object when both the stored value and the supplied value are objects, otherwise the supplied value.</summary>
+    [JsonPropertyName("value")]
+    public JsonElement Value { get; set; }
+}
+
+/// <summary>Names the user setting to merge into, and the partial object to merge.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsUpdateRequest
+{
+    /// <summary>Copilot configuration directory to write the settings document in, taking precedence over the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to use the directory the server resolved for itself.</summary>
+    [JsonPropertyName("configDir")]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>Top-level user-setting key to merge into, such as `extensions`.</summary>
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>Single-component name for the settings document at `&lt;configDir&gt;/settings/&lt;subDir&gt;.json`; path separators, `.` and `..` are rejected. Omit it, or pass an empty string, to use the main settings document.</summary>
+    [JsonPropertyName("subDir")]
+    public string? SubDir { get; set; }
+
+    /// <summary>Value to store for `key`. When both the stored value and this value are objects, their fields are shallow-merged and fields this object does not name are preserved. Otherwise this value replaces the stored value.</summary>
+    [JsonPropertyName("value")]
+    public JsonElement Value { get; set; }
+}
+
+/// <summary>Contents of settings.json as stored, for a caller about to rewrite it.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsLoadForEditResult
+{
+    /// <summary>Parsed contents, present only when `status` is `ok`.</summary>
+    [JsonPropertyName("settings")]
+    public JsonElement? Settings { get; set; }
+
+    /// <summary>`ok` when the file parsed, `missing` when there is no file yet, `invalid` when the file exists but will not parse.</summary>
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+}
+
+/// <summary>Outcome of validating one top-level setting subtree.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsValidateResult
+{
+    /// <summary>Problems found, empty when `ok` is true.</summary>
+    [JsonPropertyName("issues")]
+    public IList<UserSettingsValidationIssue>? Issues { get; set; }
+
+    /// <summary>True when the subtree is valid.</summary>
+    [JsonPropertyName("ok")]
+    public bool Ok { get; set; }
+}
+
+/// <summary>A single top-level setting subtree to validate.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class UserSettingsValidateRequest
+{
+    /// <summary>True to validate a removal of this key. The current settings file is not read.</summary>
+    [JsonPropertyName("delete")]
+    public bool? Delete { get; set; }
+
+    /// <summary>Top-level setting name to validate.</summary>
+    [JsonPropertyName("topKey")]
+    public string TopKey { get; set; } = string.Empty;
+
+    /// <summary>Value to validate. Omitted when `delete` is true.</summary>
+    [JsonPropertyName("value")]
+    public JsonElement? Value { get; set; }
+}
+
+/// <summary>The declared shape of one feature flag, independent of any caller population.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class FeatureFlagMetadata
+{
+    /// <summary>The population the flag is declared for before any environment or user-settings override is applied.</summary>
+    [JsonPropertyName("availability")]
+    public FeatureFlagAvailability Availability { get; set; }
+
+    /// <summary>Whether the flag participates in the CAPI sanity suite.</summary>
+    [JsonPropertyName("capiSanity")]
+    public bool CapiSanity { get; set; }
+
+    /// <summary>Text shown to a user choosing whether to turn the flag on in experimental mode. Absent when the flag is not user-facing.</summary>
+    [JsonPropertyName("experimentalDescription")]
+    public string? ExperimentalDescription { get; set; }
+
+    /// <summary>The online-experiment (ExP) flag this maps to, when the flag is assigned by an experiment rather than declared statically.</summary>
+    [JsonPropertyName("expFlag")]
+    public string? ExpFlag { get; set; }
+
+    /// <summary>Environment variable that overrides this flag's experiment assignment locally in the experiment service, not in `featureFlags.resolve`. Present exactly when `expFlag` is, and derived from it, so a caller reads a local override without reproducing the naming rule.</summary>
+    [JsonPropertyName("expFlagEnvVar")]
+    public string? ExpFlagEnvVar { get; set; }
+
+    /// <summary>The flag's name, matching the key it is listed under.</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>Every feature flag this runtime declares, with the shape each one was declared with.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class FeatureFlagsMetadataResult
+{
+    /// <summary>Declared feature flags keyed by flag name.</summary>
+    [JsonPropertyName("flags")]
+    public IDictionary<string, FeatureFlagMetadata> Flags { get => field ??= new Dictionary<string, FeatureFlagMetadata>(); set; }
+}
+
+/// <summary>Caller population and overrides for static feature-flag resolution, independent of experiment assignments and active runtime state.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class FeatureFlagsResolveRequest
+{
+    /// <summary>Resolve against this already-computed flag set rather than each flag's declared availability. Keyed by flag name.</summary>
+    [JsonPropertyName("baseFlags")]
+    public IDictionary<string, bool>? BaseFlags { get; set; }
+
+    /// <summary>User settings to apply, including `enabledFeatureFlags`, legacy `feature_flags.enabled`, and supported convenience settings.</summary>
+    [JsonPropertyName("config")]
+    public JsonElement? Config { get; set; }
+
+    /// <summary>Environment for direct feature-flag overrides and `COPILOT_CLI_ENABLED_FEATURE_FLAGS`. Does not apply `COPILOT_EXP_*` experiment assignments. Defaults to this runtime process's own environment.</summary>
+    [JsonPropertyName("environment")]
+    public IDictionary<string, string>? Environment { get; set; }
+
+    /// <summary>Flags forced to a value after every other layer, keyed by flag name.</summary>
+    [JsonPropertyName("flagOverrides")]
+    public IDictionary<string, bool>? FlagOverrides { get; set; }
+
+    /// <summary>Whether the caller is in an experimental population.</summary>
+    [JsonPropertyName("isExperimental")]
+    public bool IsExperimental { get; set; }
+
+    /// <summary>Whether the caller is GitHub or Microsoft staff.</summary>
+    [JsonPropertyName("isStaff")]
+    public bool IsStaff { get; set; }
+
+    /// <summary>GitHub-staff membership. Omit when it was never recorded: a legacy staff account then counts as both staff populations and keeps every staff feature.</summary>
+    [JsonPropertyName("isStaffGithub")]
+    public bool? IsStaffGitHub { get; set; }
+
+    /// <summary>Microsoft-staff membership. Omitted the same way as `isStaffGitHub`.</summary>
+    [JsonPropertyName("isStaffMicrosoft")]
+    public bool? IsStaffMicrosoft { get; set; }
+
+    /// <summary>Whether the caller belongs to the team population used by feature availability.</summary>
+    [JsonPropertyName("isTeam")]
+    public bool IsTeam { get; set; }
+}
+
+/// <summary>Parsed repository settings without normalization or layering.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class RepoSettingsReadRawResult
+{
+    /// <summary>Stored JSON values after the existing JSONC parser and prototype-safety checks. Empty when the file is missing, blank, or invalid.</summary>
+    [JsonPropertyName("config")]
+    public JsonElement Config { get; set; }
+
+    /// <summary>True when the file exists but did not parse, so `config` is empty for that reason rather than because nothing is set.</summary>
+    [JsonPropertyName("invalid")]
+    public bool Invalid { get; set; }
+}
+
+/// <summary>Which repository settings file to read.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class RepoSettingsReadRawRequest
+{
+    /// <summary>Absolute path of the repository root.</summary>
+    [JsonPropertyName("repoRoot")]
+    public string RepoRoot { get; set; } = string.Empty;
+
+    /// <summary>Use repo for shared settings or local for settings.local.json. Other scopes are rejected.</summary>
+    [JsonPropertyName("scope")]
+    public string Scope { get; set; } = string.Empty;
+}
+
+/// <summary>One key to write or remove in a repository settings file.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class RepoSettingsWriteKeyRequest
+{
+    /// <summary>True to remove the key instead of writing it.</summary>
+    [JsonPropertyName("delete")]
+    public bool? Delete { get; set; }
+
+    /// <summary>Canonical top-level key permitted by the repository settings allowlist.</summary>
+    [JsonPropertyName("key")]
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>Absolute path of the repository root.</summary>
+    [JsonPropertyName("repoRoot")]
+    public string RepoRoot { get; set; } = string.Empty;
+
+    /// <summary>Use repo for shared settings or local for settings.local.json. Other scopes are rejected.</summary>
+    [JsonPropertyName("scope")]
+    public string Scope { get; set; } = string.Empty;
+
+    /// <summary>Value to validate and write. Required unless delete is true; a null value is validated, not treated as deletion.</summary>
+    [JsonPropertyName("value")]
+    public JsonElement? Value { get; set; }
+}
+
+/// <summary>The complete set of repository-overridable settings to store.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class RepoSettingsWriteAllRequest
+{
+    /// <summary>Absolute path of the repository root.</summary>
+    [JsonPropertyName("repoRoot")]
+    public string RepoRoot { get; set; } = string.Empty;
+
+    /// <summary>Use repo for shared settings or local for settings.local.json. Other scopes are rejected.</summary>
+    [JsonPropertyName("scope")]
+    public string Scope { get; set; } = string.Empty;
+
+    /// <summary>Object of allowed settings to store. Missing allowlisted keys are removed. Other input keys are ignored, while unknown stored keys are preserved.</summary>
     [JsonPropertyName("settings")]
     public JsonElement Settings { get; set; }
 }
@@ -11500,35 +12149,6 @@ internal sealed class SessionSetCredentialsParams
     public string SessionId { get; set; } = string.Empty;
 }
 
-/// <summary>Credential-free authentication identity safe to expose to hosts and user interfaces.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-public sealed class AuthIdentity
-{
-    /// <summary>Snapshot of the authenticated user's Copilot subscription info, if known.</summary>
-    [JsonPropertyName("copilotUser")]
-    public CopilotUserResponse? CopilotUser { get; set; }
-
-    /// <summary>Name of the environment variable that supplied the credential, when applicable.</summary>
-    [JsonPropertyName("envVar")]
-    public string? EnvVar { get; set; }
-
-    /// <summary>Authentication host.</summary>
-    [JsonPropertyName("host")]
-    public string Host { get; set; } = string.Empty;
-
-    /// <summary>Authenticated login, when available.</summary>
-    [JsonPropertyName("login")]
-    public string? Login { get; set; }
-
-    /// <summary>Opaque SDK GitHub credential registration backing this identity. Routing metadata only; never a credential.</summary>
-    [JsonPropertyName("registrationId")]
-    public string? RegistrationId { get; set; }
-
-    /// <summary>Authentication type.</summary>
-    [JsonPropertyName("type")]
-    public AuthInfoType Type { get; set; }
-}
-
 /// <summary>Identifies the target session.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
 internal sealed class SessionGitHubAuthGetCurrentAuthInfoRequest
@@ -14208,6 +14828,60 @@ internal sealed class ModelSetReasoningEffortRequest
     /// <summary>Target session identifier.</summary>
     [JsonPropertyName("sessionId")]
     public string SessionId { get; set; } = string.Empty;
+}
+
+/// <summary>Reasoning-summaries presentation policy for the session's current model.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class ModelGetReasoningSummariesResult
+{
+    /// <summary>Whether the supplied `persistedShowReasoning` setting only restates the model default. This reports a redundancy, not a standing instruction to delete the setting: it stays true for as long as the setting and the model default agree, including for a user who later chose that value deliberately. It exists for a one-time migration of a legacy setting written before the model default made it redundant, so a host that acts on it owns the cleanup and must gate it behind its own persisted `done` marker, delete only a setting whose value still matches the one it read, and never repeat the deletion on a later launch. Under an off-by-default reasoning-summaries experiment an explicit `showReasoning: true` opt-in also reads as redundant on a summary-producing model, so an ungated host would keep deleting that opt-in and hide summaries again on every launch.</summary>
+    [JsonPropertyName("clearRedundantSetting")]
+    public bool ClearRedundantSetting { get; set; }
+
+    /// <summary>Whether the session's reasoning-summaries experiment assignment has settled. False means this read does not wait for a pending assignment and reports the experiment-derived fields conservatively: `showHiddenHint` is false and `visibility` falls back to `persistedShowReasoning`, or is omitted when none was supplied. A host that wants the assigned answer re-reads until this is true.</summary>
+    [JsonPropertyName("experimentSettled")]
+    public bool ExperimentSettled { get; set; }
+
+    /// <summary>Whether the selected model shows reasoning summaries by default.</summary>
+    [JsonPropertyName("modelDefaultShowsSummaries")]
+    public bool ModelDefaultShowsSummaries { get; set; }
+
+    /// <summary>False until the session has a model catalog and a selected model. This read never resolves the catalog itself, and the runtime emits no readiness notification, so repeating this call alone leaves `ready` false indefinitely on a session that has neither listed models nor run a turn. `session.model.list` is the prerequisite and the signal: it resolves and caches the catalog for the session, so a successful return means the next read is ready. The exception is a session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider: `session.model.list` returns an empty list without caching a catalog, so `ready` stays false and this policy is unavailable there. While false, every model-policy field is false and `visibility` is omitted; `experimentSettled` is independent of readiness and still reports the assignment state.</summary>
+    [JsonPropertyName("ready")]
+    public bool Ready { get; set; }
+
+    /// <summary>Whether turns on this session produce reasoning summaries, honouring an explicit session reasoning-summary override.</summary>
+    [JsonPropertyName("sessionShowsSummaries")]
+    public bool SessionShowsSummaries { get; set; }
+
+    /// <summary>Whether to show the hint that reasoning summaries are hidden. Always false while `experimentSettled` is false.</summary>
+    [JsonPropertyName("showHiddenHint")]
+    public bool ShowHiddenHint { get; set; }
+
+    /// <summary>Whether the selected model emits reasoning headers.</summary>
+    [JsonPropertyName("showReasoningHeaders")]
+    public bool ShowReasoningHeaders { get; set; }
+
+    /// <summary>Default reasoning visibility, and only meaningful once `ready` is true: false when the session produces no summaries, else the persisted setting, else the experiment's default. While `ready` is true it is omitted only when all three are unavailable, that is when the session produces summaries, no `persistedShowReasoning` was supplied, and `experimentSettled` is false. While `ready` is false there is no model policy to report and this field is always omitted, so an absent value alone does not imply a pending experiment.</summary>
+    [JsonPropertyName("visibility")]
+    public bool? Visibility { get; set; }
+}
+
+/// <summary>Host presentation state the reasoning-summaries policy depends on.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+internal sealed class ModelGetReasoningSummariesRequest
+{
+    /// <summary>The host's persisted `showReasoning` user setting, omitted when unset.</summary>
+    [JsonPropertyName("persistedShowReasoning")]
+    public bool? PersistedShowReasoning { get; set; }
+
+    /// <summary>Target session identifier.</summary>
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>Whether the host is currently showing reasoning summaries. Defaults to false.</summary>
+    [JsonPropertyName("summariesVisible")]
+    public bool? SummariesVisible { get; set; }
 }
 
 /// <summary>Availability of a server-advertised routing preference.</summary>
@@ -20118,6 +20792,10 @@ internal sealed class SessionUpdateOptionsParams
     [JsonPropertyName("agentContext")]
     public string? AgentContext { get; set; }
 
+    /// <summary>Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</summary>
+    [JsonPropertyName("agentDirectories")]
+    public IList<string>? AgentDirectories { get; set; }
+
     /// <summary>Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.</summary>
     [JsonPropertyName("allowAllMcpServerInstructions")]
     public bool? AllowAllMcpServerInstructions { get; set; }
@@ -20166,7 +20844,7 @@ internal sealed class SessionUpdateOptionsParams
     [JsonPropertyName("disabledSkills")]
     public IList<string>? DisabledSkills { get; set; }
 
-    /// <summary>Whether to enable loading of `.github/hooks/` filesystem hooks. Separate from the SDK callback hook mechanism.</summary>
+    /// <summary>Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.</summary>
     [JsonPropertyName("enableFileHooks")]
     public bool? EnableFileHooks { get; set; }
 
@@ -20190,7 +20868,7 @@ internal sealed class SessionUpdateOptionsParams
     [JsonPropertyName("enableSessionStore")]
     public bool? EnableSessionStore { get; set; }
 
-    /// <summary>Whether skill loading is enabled. Explicit false disables every source, including a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless an SDK skill provider is registered.</summary>
+    /// <summary>Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.</summary>
     [JsonPropertyName("enableSkills")]
     public bool? EnableSkills { get; set; }
 
@@ -20222,6 +20900,10 @@ internal sealed class SessionUpdateOptionsParams
     [JsonPropertyName("featureFlags")]
     public IDictionary<string, bool>? FeatureFlags { get; set; }
 
+    /// <summary>Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</summary>
+    [JsonPropertyName("hookDirectories")]
+    public IList<string>? HookDirectories { get; set; }
+
     /// <summary>Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.</summary>
     [JsonPropertyName("ignoredSkillsLocations")]
     public IList<string>? IgnoredSkillsLocations { get; set; }
@@ -20237,6 +20919,10 @@ internal sealed class SessionUpdateOptionsParams
     /// <summary>Full set of installed plugins for the session. Replaces the existing list; the runtime invalidates the skills cache only when the list materially changes.</summary>
     [JsonPropertyName("installedPlugins")]
     public IList<SessionInstalledPlugin>? InstalledPlugins { get; set; }
+
+    /// <summary>Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</summary>
+    [JsonPropertyName("instructionDirectories")]
+    public IList<string>? InstructionDirectories { get; set; }
 
     /// <summary>Stable integration identifier used for analytics and rate-limit attribution.</summary>
     [JsonPropertyName("integrationId")]
@@ -20329,7 +21015,7 @@ internal sealed class SessionUpdateOptionsParams
     [JsonPropertyName("shellProcessFlags")]
     public IList<string>? ShellProcessFlags { get; set; }
 
-    /// <summary>Additional directories to search for skills.</summary>
+    /// <summary>Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</summary>
     [JsonPropertyName("skillDirectories")]
     public IList<string>? SkillDirectories { get; set; }
 
@@ -28810,6 +29496,90 @@ public readonly struct SandboxProxyCaState : IEquatable<SandboxProxyCaState>
 }
 
 
+/// <summary>Authentication type.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct AuthInfoType : IEquatable<AuthInfoType>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="AuthInfoType"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="AuthInfoType"/>.</param>
+    [JsonConstructor]
+    public AuthInfoType(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="AuthInfoType"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Authentication provided by a GitHub App HMAC credential.</summary>
+    public static AuthInfoType Hmac { get; } = new("hmac");
+
+    /// <summary>Authentication resolved from environment-provided credentials.</summary>
+    public static AuthInfoType Env { get; } = new("env");
+
+    /// <summary>Authentication from an interactive user sign-in.</summary>
+    public static AuthInfoType User { get; } = new("user");
+
+    /// <summary>Authentication from a selected provider-owned account, without a GitHub credential.</summary>
+    public static AuthInfoType Account { get; } = new("account");
+
+    /// <summary>Authentication delegated to the GitHub CLI.</summary>
+    public static AuthInfoType GhCli { get; } = new("gh-cli");
+
+    /// <summary>Authentication from an API key credential.</summary>
+    public static AuthInfoType ApiKey { get; } = new("api-key");
+
+    /// <summary>Authentication from a GitHub token.</summary>
+    public static AuthInfoType Token { get; } = new("token");
+
+    /// <summary>Authentication from an SDK GitHub token callback.</summary>
+    public static AuthInfoType TokenProvider { get; } = new("token-provider");
+
+    /// <summary>Authentication from a Copilot API token.</summary>
+    public static AuthInfoType CopilotApiToken { get; } = new("copilot-api-token");
+
+    /// <summary>Returns a value indicating whether two <see cref="AuthInfoType"/> instances are equivalent.</summary>
+    public static bool operator ==(AuthInfoType left, AuthInfoType right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="AuthInfoType"/> instances are not equivalent.</summary>
+    public static bool operator !=(AuthInfoType left, AuthInfoType right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is AuthInfoType other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(AuthInfoType other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{AuthInfoType}"/> for serializing <see cref="AuthInfoType"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<AuthInfoType>
+    {
+        /// <inheritdoc />
+        public override AuthInfoType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, AuthInfoType value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AuthInfoType));
+        }
+    }
+}
+
+
 /// <summary>Server transport type: stdio, http, sse (deprecated), or memory.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
@@ -31336,6 +32106,285 @@ public readonly struct DiscoveredExtensionMode : IEquatable<DiscoveredExtensionM
 }
 
 
+/// <summary>Where this source lives — used for UI grouping.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct InstructionSourceLocation : IEquatable<InstructionSourceLocation>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="InstructionSourceLocation"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="InstructionSourceLocation"/>.</param>
+    [JsonConstructor]
+    public InstructionSourceLocation(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="InstructionSourceLocation"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Instructions live in user-level configuration.</summary>
+    public static InstructionSourceLocation User { get; } = new("user");
+
+    /// <summary>Instructions live in repository-level configuration.</summary>
+    public static InstructionSourceLocation Repository { get; } = new("repository");
+
+    /// <summary>Instructions live under the current working directory.</summary>
+    public static InstructionSourceLocation WorkingDirectory { get; } = new("working-directory");
+
+    /// <summary>Instructions live in plugin-provided configuration.</summary>
+    public static InstructionSourceLocation Plugin { get; } = new("plugin");
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceLocation"/> instances are equivalent.</summary>
+    public static bool operator ==(InstructionSourceLocation left, InstructionSourceLocation right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceLocation"/> instances are not equivalent.</summary>
+    public static bool operator !=(InstructionSourceLocation left, InstructionSourceLocation right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is InstructionSourceLocation other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(InstructionSourceLocation other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{InstructionSourceLocation}"/> for serializing <see cref="InstructionSourceLocation"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<InstructionSourceLocation>
+    {
+        /// <inheritdoc />
+        public override InstructionSourceLocation Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, InstructionSourceLocation value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionSourceLocation));
+        }
+    }
+}
+
+
+/// <summary>Category of instruction source — used for merge logic.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct InstructionSourceType : IEquatable<InstructionSourceType>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="InstructionSourceType"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="InstructionSourceType"/>.</param>
+    [JsonConstructor]
+    public InstructionSourceType(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="InstructionSourceType"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Instructions loaded from the user's home configuration.</summary>
+    public static InstructionSourceType Home { get; } = new("home");
+
+    /// <summary>Instructions loaded from repository-scoped files.</summary>
+    public static InstructionSourceType Repo { get; } = new("repo");
+
+    /// <summary>Instructions loaded from model-specific files.</summary>
+    public static InstructionSourceType Model { get; } = new("model");
+
+    /// <summary>Instructions loaded from VS Code instruction files.</summary>
+    public static InstructionSourceType Vscode { get; } = new("vscode");
+
+    /// <summary>Instructions discovered from nested agent files.</summary>
+    public static InstructionSourceType NestedAgents { get; } = new("nested-agents");
+
+    /// <summary>Instructions inherited from child instruction files.</summary>
+    public static InstructionSourceType ChildInstructions { get; } = new("child-instructions");
+
+    /// <summary>Instructions supplied by an installed plugin.</summary>
+    public static InstructionSourceType Plugin { get; } = new("plugin");
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceType"/> instances are equivalent.</summary>
+    public static bool operator ==(InstructionSourceType left, InstructionSourceType right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceType"/> instances are not equivalent.</summary>
+    public static bool operator !=(InstructionSourceType left, InstructionSourceType right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is InstructionSourceType other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(InstructionSourceType other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{InstructionSourceType}"/> for serializing <see cref="InstructionSourceType"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<InstructionSourceType>
+    {
+        /// <inheritdoc />
+        public override InstructionSourceType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, InstructionSourceType value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionSourceType));
+        }
+    }
+}
+
+
+/// <summary>Whether the target is a single file or a directory of instruction files.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct InstructionDiscoveryPathKind : IEquatable<InstructionDiscoveryPathKind>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="InstructionDiscoveryPathKind"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="InstructionDiscoveryPathKind"/>.</param>
+    [JsonConstructor]
+    public InstructionDiscoveryPathKind(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="InstructionDiscoveryPathKind"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The target is a single instruction file.</summary>
+    public static InstructionDiscoveryPathKind File { get; } = new("file");
+
+    /// <summary>The target is a directory that holds instruction files.</summary>
+    public static InstructionDiscoveryPathKind Directory { get; } = new("directory");
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathKind"/> instances are equivalent.</summary>
+    public static bool operator ==(InstructionDiscoveryPathKind left, InstructionDiscoveryPathKind right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathKind"/> instances are not equivalent.</summary>
+    public static bool operator !=(InstructionDiscoveryPathKind left, InstructionDiscoveryPathKind right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is InstructionDiscoveryPathKind other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(InstructionDiscoveryPathKind other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{InstructionDiscoveryPathKind}"/> for serializing <see cref="InstructionDiscoveryPathKind"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<InstructionDiscoveryPathKind>
+    {
+        /// <inheritdoc />
+        public override InstructionDiscoveryPathKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, InstructionDiscoveryPathKind value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionDiscoveryPathKind));
+        }
+    }
+}
+
+
+/// <summary>Which tier this target belongs to.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct InstructionDiscoveryPathLocation : IEquatable<InstructionDiscoveryPathLocation>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="InstructionDiscoveryPathLocation"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="InstructionDiscoveryPathLocation"/>.</param>
+    [JsonConstructor]
+    public InstructionDiscoveryPathLocation(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="InstructionDiscoveryPathLocation"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Instructions live in user-level configuration.</summary>
+    public static InstructionDiscoveryPathLocation User { get; } = new("user");
+
+    /// <summary>Instructions live in repository-level configuration.</summary>
+    public static InstructionDiscoveryPathLocation Repository { get; } = new("repository");
+
+    /// <summary>Instructions live under the current working directory.</summary>
+    public static InstructionDiscoveryPathLocation WorkingDirectory { get; } = new("working-directory");
+
+    /// <summary>Instructions live in plugin-provided configuration.</summary>
+    public static InstructionDiscoveryPathLocation Plugin { get; } = new("plugin");
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathLocation"/> instances are equivalent.</summary>
+    public static bool operator ==(InstructionDiscoveryPathLocation left, InstructionDiscoveryPathLocation right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathLocation"/> instances are not equivalent.</summary>
+    public static bool operator !=(InstructionDiscoveryPathLocation left, InstructionDiscoveryPathLocation right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is InstructionDiscoveryPathLocation other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(InstructionDiscoveryPathLocation other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{InstructionDiscoveryPathLocation}"/> for serializing <see cref="InstructionDiscoveryPathLocation"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<InstructionDiscoveryPathLocation>
+    {
+        /// <inheritdoc />
+        public override InstructionDiscoveryPathLocation Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, InstructionDiscoveryPathLocation value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionDiscoveryPathLocation));
+        }
+    }
+}
+
+
 /// <summary>Defines the allowed values.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
@@ -32464,285 +33513,6 @@ public readonly struct AgentDiscoveryPathScope : IEquatable<AgentDiscoveryPathSc
 }
 
 
-/// <summary>Where this source lives — used for UI grouping.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct InstructionSourceLocation : IEquatable<InstructionSourceLocation>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="InstructionSourceLocation"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="InstructionSourceLocation"/>.</param>
-    [JsonConstructor]
-    public InstructionSourceLocation(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="InstructionSourceLocation"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>Instructions live in user-level configuration.</summary>
-    public static InstructionSourceLocation User { get; } = new("user");
-
-    /// <summary>Instructions live in repository-level configuration.</summary>
-    public static InstructionSourceLocation Repository { get; } = new("repository");
-
-    /// <summary>Instructions live under the current working directory.</summary>
-    public static InstructionSourceLocation WorkingDirectory { get; } = new("working-directory");
-
-    /// <summary>Instructions live in plugin-provided configuration.</summary>
-    public static InstructionSourceLocation Plugin { get; } = new("plugin");
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceLocation"/> instances are equivalent.</summary>
-    public static bool operator ==(InstructionSourceLocation left, InstructionSourceLocation right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceLocation"/> instances are not equivalent.</summary>
-    public static bool operator !=(InstructionSourceLocation left, InstructionSourceLocation right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is InstructionSourceLocation other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(InstructionSourceLocation other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{InstructionSourceLocation}"/> for serializing <see cref="InstructionSourceLocation"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<InstructionSourceLocation>
-    {
-        /// <inheritdoc />
-        public override InstructionSourceLocation Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, InstructionSourceLocation value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionSourceLocation));
-        }
-    }
-}
-
-
-/// <summary>Category of instruction source — used for merge logic.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct InstructionSourceType : IEquatable<InstructionSourceType>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="InstructionSourceType"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="InstructionSourceType"/>.</param>
-    [JsonConstructor]
-    public InstructionSourceType(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="InstructionSourceType"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>Instructions loaded from the user's home configuration.</summary>
-    public static InstructionSourceType Home { get; } = new("home");
-
-    /// <summary>Instructions loaded from repository-scoped files.</summary>
-    public static InstructionSourceType Repo { get; } = new("repo");
-
-    /// <summary>Instructions loaded from model-specific files.</summary>
-    public static InstructionSourceType Model { get; } = new("model");
-
-    /// <summary>Instructions loaded from VS Code instruction files.</summary>
-    public static InstructionSourceType Vscode { get; } = new("vscode");
-
-    /// <summary>Instructions discovered from nested agent files.</summary>
-    public static InstructionSourceType NestedAgents { get; } = new("nested-agents");
-
-    /// <summary>Instructions inherited from child instruction files.</summary>
-    public static InstructionSourceType ChildInstructions { get; } = new("child-instructions");
-
-    /// <summary>Instructions supplied by an installed plugin.</summary>
-    public static InstructionSourceType Plugin { get; } = new("plugin");
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceType"/> instances are equivalent.</summary>
-    public static bool operator ==(InstructionSourceType left, InstructionSourceType right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionSourceType"/> instances are not equivalent.</summary>
-    public static bool operator !=(InstructionSourceType left, InstructionSourceType right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is InstructionSourceType other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(InstructionSourceType other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{InstructionSourceType}"/> for serializing <see cref="InstructionSourceType"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<InstructionSourceType>
-    {
-        /// <inheritdoc />
-        public override InstructionSourceType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, InstructionSourceType value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionSourceType));
-        }
-    }
-}
-
-
-/// <summary>Whether the target is a single file or a directory of instruction files.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct InstructionDiscoveryPathKind : IEquatable<InstructionDiscoveryPathKind>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="InstructionDiscoveryPathKind"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="InstructionDiscoveryPathKind"/>.</param>
-    [JsonConstructor]
-    public InstructionDiscoveryPathKind(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="InstructionDiscoveryPathKind"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>The target is a single instruction file.</summary>
-    public static InstructionDiscoveryPathKind File { get; } = new("file");
-
-    /// <summary>The target is a directory that holds instruction files.</summary>
-    public static InstructionDiscoveryPathKind Directory { get; } = new("directory");
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathKind"/> instances are equivalent.</summary>
-    public static bool operator ==(InstructionDiscoveryPathKind left, InstructionDiscoveryPathKind right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathKind"/> instances are not equivalent.</summary>
-    public static bool operator !=(InstructionDiscoveryPathKind left, InstructionDiscoveryPathKind right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is InstructionDiscoveryPathKind other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(InstructionDiscoveryPathKind other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{InstructionDiscoveryPathKind}"/> for serializing <see cref="InstructionDiscoveryPathKind"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<InstructionDiscoveryPathKind>
-    {
-        /// <inheritdoc />
-        public override InstructionDiscoveryPathKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, InstructionDiscoveryPathKind value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionDiscoveryPathKind));
-        }
-    }
-}
-
-
-/// <summary>Which tier this target belongs to.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct InstructionDiscoveryPathLocation : IEquatable<InstructionDiscoveryPathLocation>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="InstructionDiscoveryPathLocation"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="InstructionDiscoveryPathLocation"/>.</param>
-    [JsonConstructor]
-    public InstructionDiscoveryPathLocation(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="InstructionDiscoveryPathLocation"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>Instructions live in user-level configuration.</summary>
-    public static InstructionDiscoveryPathLocation User { get; } = new("user");
-
-    /// <summary>Instructions live in repository-level configuration.</summary>
-    public static InstructionDiscoveryPathLocation Repository { get; } = new("repository");
-
-    /// <summary>Instructions live under the current working directory.</summary>
-    public static InstructionDiscoveryPathLocation WorkingDirectory { get; } = new("working-directory");
-
-    /// <summary>Instructions live in plugin-provided configuration.</summary>
-    public static InstructionDiscoveryPathLocation Plugin { get; } = new("plugin");
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathLocation"/> instances are equivalent.</summary>
-    public static bool operator ==(InstructionDiscoveryPathLocation left, InstructionDiscoveryPathLocation right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="InstructionDiscoveryPathLocation"/> instances are not equivalent.</summary>
-    public static bool operator !=(InstructionDiscoveryPathLocation left, InstructionDiscoveryPathLocation right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is InstructionDiscoveryPathLocation other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(InstructionDiscoveryPathLocation other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{InstructionDiscoveryPathLocation}"/> for serializing <see cref="InstructionDiscoveryPathLocation"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<InstructionDiscoveryPathLocation>
-    {
-        /// <inheritdoc />
-        public override InstructionDiscoveryPathLocation Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, InstructionDiscoveryPathLocation value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(InstructionDiscoveryPathLocation));
-        }
-    }
-}
-
-
 /// <summary>Optional completion hint for the input (e.g. 'directory' for filesystem path completion).</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
 [JsonConverter(typeof(Converter))]
@@ -32864,6 +33634,225 @@ public readonly struct SlashCommandKind : IEquatable<SlashCommandKind>
         public override void Write(Utf8JsonWriter writer, SlashCommandKind value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(SlashCommandKind));
+        }
+    }
+}
+
+
+/// <summary>Whether one atomic settings edit changed a file.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct SettingsEditStatus : IEquatable<SettingsEditStatus>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="SettingsEditStatus"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="SettingsEditStatus"/>.</param>
+    [JsonConstructor]
+    public SettingsEditStatus(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="SettingsEditStatus"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>The edit changed the setting and was stored.</summary>
+    public static SettingsEditStatus Changed { get; } = new("changed");
+
+    /// <summary>The setting already had the requested state.</summary>
+    public static SettingsEditStatus Unchanged { get; } = new("unchanged");
+
+    /// <summary>The existing settings file could not be edited safely; nothing was written.</summary>
+    public static SettingsEditStatus Invalid { get; } = new("invalid");
+
+    /// <summary>Returns a value indicating whether two <see cref="SettingsEditStatus"/> instances are equivalent.</summary>
+    public static bool operator ==(SettingsEditStatus left, SettingsEditStatus right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="SettingsEditStatus"/> instances are not equivalent.</summary>
+    public static bool operator !=(SettingsEditStatus left, SettingsEditStatus right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is SettingsEditStatus other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(SettingsEditStatus other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{SettingsEditStatus}"/> for serializing <see cref="SettingsEditStatus"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<SettingsEditStatus>
+    {
+        /// <inheritdoc />
+        public override SettingsEditStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, SettingsEditStatus value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(SettingsEditStatus));
+        }
+    }
+}
+
+
+/// <summary>One atomic settings mutation.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct SettingsEditOperation : IEquatable<SettingsEditOperation>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="SettingsEditOperation"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="SettingsEditOperation"/>.</param>
+    [JsonConstructor]
+    public SettingsEditOperation(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="SettingsEditOperation"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Set one scalar value.</summary>
+    public static SettingsEditOperation Set { get; } = new("set");
+
+    /// <summary>Add one string to a list, unless present.</summary>
+    public static SettingsEditOperation AddItem { get; } = new("add-item");
+
+    /// <summary>Remove one string from a list, unless absent.</summary>
+    public static SettingsEditOperation RemoveItem { get; } = new("remove-item");
+
+    /// <summary>Remove the setting without supplying a value.</summary>
+    public static SettingsEditOperation Remove { get; } = new("remove");
+
+    /// <summary>Returns a value indicating whether two <see cref="SettingsEditOperation"/> instances are equivalent.</summary>
+    public static bool operator ==(SettingsEditOperation left, SettingsEditOperation right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="SettingsEditOperation"/> instances are not equivalent.</summary>
+    public static bool operator !=(SettingsEditOperation left, SettingsEditOperation right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is SettingsEditOperation other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(SettingsEditOperation other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{SettingsEditOperation}"/> for serializing <see cref="SettingsEditOperation"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<SettingsEditOperation>
+    {
+        /// <inheritdoc />
+        public override SettingsEditOperation Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, SettingsEditOperation value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(SettingsEditOperation));
+        }
+    }
+}
+
+
+/// <summary>The population a feature flag is declared for, before overrides.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+[JsonConverter(typeof(Converter))]
+[DebuggerDisplay("{Value,nq}")]
+public readonly struct FeatureFlagAvailability : IEquatable<FeatureFlagAvailability>
+{
+    private readonly string? _value;
+
+    /// <summary>Initializes a new instance of the <see cref="FeatureFlagAvailability"/> struct.</summary>
+    /// <param name="value">The value to associate with this <see cref="FeatureFlagAvailability"/>.</param>
+    [JsonConstructor]
+    public FeatureFlagAvailability(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        _value = value;
+    }
+
+    /// <summary>Gets the value associated with this <see cref="FeatureFlagAvailability"/>.</summary>
+    public string Value => _value ?? string.Empty;
+
+    /// <summary>Enabled for everyone, before any override.</summary>
+    public static FeatureFlagAvailability On { get; } = new("on");
+
+    /// <summary>Enabled only for accounts on the owning team.</summary>
+    public static FeatureFlagAvailability Team { get; } = new("team");
+
+    /// <summary>Enabled only for staff accounts that have also opted into experimental features.</summary>
+    public static FeatureFlagAvailability StaffAndExperimental { get; } = new("staff-and-experimental");
+
+    /// <summary>Enabled for staff accounts and for accounts that opted into experimental features.</summary>
+    public static FeatureFlagAvailability StaffOrExperimental { get; } = new("staff-or-experimental");
+
+    /// <summary>Enabled for any staff account, GitHub or Microsoft.</summary>
+    public static FeatureFlagAvailability Staff { get; } = new("staff");
+
+    /// <summary>Enabled for GitHub staff accounts only.</summary>
+    public static FeatureFlagAvailability StaffGitHub { get; } = new("staff-github");
+
+    /// <summary>Enabled for Microsoft staff accounts only.</summary>
+    public static FeatureFlagAvailability StaffMicrosoft { get; } = new("staff-microsoft");
+
+    /// <summary>Enabled only for accounts that opted into experimental features.</summary>
+    public static FeatureFlagAvailability Experimental { get; } = new("experimental");
+
+    /// <summary>Disabled for everyone, before any override.</summary>
+    public static FeatureFlagAvailability Off { get; } = new("off");
+
+    /// <summary>Returns a value indicating whether two <see cref="FeatureFlagAvailability"/> instances are equivalent.</summary>
+    public static bool operator ==(FeatureFlagAvailability left, FeatureFlagAvailability right) => left.Equals(right);
+
+    /// <summary>Returns a value indicating whether two <see cref="FeatureFlagAvailability"/> instances are not equivalent.</summary>
+    public static bool operator !=(FeatureFlagAvailability left, FeatureFlagAvailability right) => !(left == right);
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is FeatureFlagAvailability other && Equals(other);
+
+    /// <inheritdoc />
+    public bool Equals(FeatureFlagAvailability other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
+
+    /// <inheritdoc />
+    public override string ToString() => Value;
+
+    /// <summary>Provides a <see cref="JsonConverter{FeatureFlagAvailability}"/> for serializing <see cref="FeatureFlagAvailability"/> instances.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class Converter : JsonConverter<FeatureFlagAvailability>
+    {
+        /// <inheritdoc />
+        public override FeatureFlagAvailability Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
+        }
+
+        /// <inheritdoc />
+        public override void Write(Utf8JsonWriter writer, FeatureFlagAvailability value, JsonSerializerOptions options)
+        {
+            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(FeatureFlagAvailability));
         }
     }
 }
@@ -34457,90 +35446,6 @@ public readonly struct ConnectorDiscoveryAvailability : IEquatable<ConnectorDisc
         public override void Write(Utf8JsonWriter writer, ConnectorDiscoveryAvailability value, JsonSerializerOptions options)
         {
             GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(ConnectorDiscoveryAvailability));
-        }
-    }
-}
-
-
-/// <summary>Authentication type.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-[JsonConverter(typeof(Converter))]
-[DebuggerDisplay("{Value,nq}")]
-public readonly struct AuthInfoType : IEquatable<AuthInfoType>
-{
-    private readonly string? _value;
-
-    /// <summary>Initializes a new instance of the <see cref="AuthInfoType"/> struct.</summary>
-    /// <param name="value">The value to associate with this <see cref="AuthInfoType"/>.</param>
-    [JsonConstructor]
-    public AuthInfoType(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        _value = value;
-    }
-
-    /// <summary>Gets the value associated with this <see cref="AuthInfoType"/>.</summary>
-    public string Value => _value ?? string.Empty;
-
-    /// <summary>Authentication provided by a GitHub App HMAC credential.</summary>
-    public static AuthInfoType Hmac { get; } = new("hmac");
-
-    /// <summary>Authentication resolved from environment-provided credentials.</summary>
-    public static AuthInfoType Env { get; } = new("env");
-
-    /// <summary>Authentication from an interactive user sign-in.</summary>
-    public static AuthInfoType User { get; } = new("user");
-
-    /// <summary>Authentication from a selected provider-owned account, without a GitHub credential.</summary>
-    public static AuthInfoType Account { get; } = new("account");
-
-    /// <summary>Authentication delegated to the GitHub CLI.</summary>
-    public static AuthInfoType GhCli { get; } = new("gh-cli");
-
-    /// <summary>Authentication from an API key credential.</summary>
-    public static AuthInfoType ApiKey { get; } = new("api-key");
-
-    /// <summary>Authentication from a GitHub token.</summary>
-    public static AuthInfoType Token { get; } = new("token");
-
-    /// <summary>Authentication from an SDK GitHub token callback.</summary>
-    public static AuthInfoType TokenProvider { get; } = new("token-provider");
-
-    /// <summary>Authentication from a Copilot API token.</summary>
-    public static AuthInfoType CopilotApiToken { get; } = new("copilot-api-token");
-
-    /// <summary>Returns a value indicating whether two <see cref="AuthInfoType"/> instances are equivalent.</summary>
-    public static bool operator ==(AuthInfoType left, AuthInfoType right) => left.Equals(right);
-
-    /// <summary>Returns a value indicating whether two <see cref="AuthInfoType"/> instances are not equivalent.</summary>
-    public static bool operator !=(AuthInfoType left, AuthInfoType right) => !(left == right);
-
-    /// <inheritdoc />
-    public override bool Equals(object? obj) => obj is AuthInfoType other && Equals(other);
-
-    /// <inheritdoc />
-    public bool Equals(AuthInfoType other) => string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
-
-    /// <inheritdoc />
-    public override string ToString() => Value;
-
-    /// <summary>Provides a <see cref="JsonConverter{AuthInfoType}"/> for serializing <see cref="AuthInfoType"/> instances.</summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public sealed class Converter : JsonConverter<AuthInfoType>
-    {
-        /// <inheritdoc />
-        public override AuthInfoType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            return new(GeneratedStringEnumJson.ReadValue(ref reader, typeToConvert));
-        }
-
-        /// <inheritdoc />
-        public override void Write(Utf8JsonWriter writer, AuthInfoType value, JsonSerializerOptions options)
-        {
-            GeneratedStringEnumJson.WriteValue(writer, value.Value, typeof(AuthInfoType));
         }
     }
 }
@@ -43783,6 +44688,12 @@ public sealed class ServerRpc
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
 
+    /// <summary>Instructions APIs.</summary>
+    public ServerInstructionsApi Instructions =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
     /// <summary>Skills APIs.</summary>
     public ServerSkillsApi Skills =>
         field ??
@@ -43807,12 +44718,6 @@ public sealed class ServerRpc
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
 
-    /// <summary>Instructions APIs.</summary>
-    public ServerInstructionsApi Instructions =>
-        field ??
-        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
-        field;
-
     /// <summary>GlobalState APIs.</summary>
     public ServerGlobalStateApi GlobalState =>
         field ??
@@ -43827,6 +44732,18 @@ public sealed class ServerRpc
 
     /// <summary>User APIs.</summary>
     public ServerUserApi User =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
+    /// <summary>FeatureFlags APIs.</summary>
+    public ServerFeatureFlagsApi FeatureFlags =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+
+    /// <summary>Repo APIs.</summary>
+    public ServerRepoApi Repo =>
         field ??
         Interlocked.CompareExchange(ref field, new(_rpc), null) ??
         field;
@@ -44097,6 +45014,16 @@ public sealed class ServerHooksApi
         var request = new HooksDiscoverRequest { ProjectPaths = projectPaths, ExcludeHostHooks = excludeHostHooks };
         return await CopilotClient.InvokeRpcAsync<HooksDiscoverResult>(_rpc, "hooks.discover", [request], cancellationToken);
     }
+
+    /// <summary>Discovers hook actions enabled under server-side discovery settings from user, repository, plugin, and managed-policy sources.</summary>
+    /// <param name="request">Optional project paths and host-exclusion behavior for server-scoped hook discovery.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Server-discovered hook actions and partial-load diagnostics from user, repository, plugin, and managed-policy sources. Concrete sessions may include additional session-specific hook sources.</returns>
+    public async Task<HooksDiscoverResult> DiscoverAsync(HooksDiscoverRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await CopilotClient.InvokeRpcAsync<HooksDiscoverResult>(_rpc, "hooks.discover", [request], cancellationToken);
+    }
 }
 
 /// <summary>Provides server-scoped Models APIs.</summary>
@@ -44301,6 +45228,51 @@ public sealed class ServerAccountApi
         var request = new AccountLogoutRequest { SelectionId = selectionId, AuthInfo = authInfo };
         return await CopilotClient.InvokeRpcAsync<AccountLogoutResult>(_rpc, "account.logout", [request], cancellationToken);
     }
+
+    /// <summary>Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.</summary>
+    /// <param name="identity">Identity to describe.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The wording the runtime uses for an authentication identity.</returns>
+    internal async Task<AccountDescribeAuthInfoResult> DescribeAuthInfoAsync(AuthIdentity identity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        var request = new AccountDescribeAuthInfoRequest { Identity = identity };
+        return await CopilotClient.InvokeRpcAsync<AccountDescribeAuthInfoResult>(_rpc, "account.describeAuthInfo", [request], cancellationToken);
+    }
+
+    /// <summary>Reports whether the supplied identity can create gists. Gists are unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed Users on github.com, so a host that offers gist actions should hide or disable them when this reports no support.</summary>
+    /// <param name="identity">Identity to evaluate.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Whether the identity can create gists, and why not when it cannot.</returns>
+    internal async Task<AccountGetGistSupportResult> GetGistSupportAsync(AuthIdentity identity, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+
+        var request = new AccountGetGistSupportRequest { Identity = identity };
+        return await CopilotClient.InvokeRpcAsync<AccountGetGistSupportResult>(_rpc, "account.getGistSupport", [request], cancellationToken);
+    }
+
+    /// <summary>Resolves a path on the identity's GitHub host into an absolute URL, so a host can link to settings or documentation on the enterprise instance the user is signed in to rather than to github.com. Falls back to the public host when no identity is supplied.</summary>
+    /// <param name="path">Host-relative path, without a leading slash, for example `settings/copilot/features`.</param>
+    /// <param name="identity">Identity whose host the path resolves against. Omit to resolve against the public github.com host.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>An absolute URL on the identity's GitHub host.</returns>
+    internal async Task<AccountGetWebUrlResult> GetWebUrlAsync(string path, AuthIdentity? identity = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        var request = new AccountGetWebUrlRequest { Path = path, Identity = identity };
+        return await CopilotClient.InvokeRpcAsync<AccountGetWebUrlResult>(_rpc, "account.getWebUrl", [request], cancellationToken);
+    }
+
+    /// <summary>Names the environment variable supplying a classic personal access token, if one is set. A classic token cannot be upgraded in place, so a host that finds one should tell the user which variable to unset rather than starting an interactive sign-in that the variable would override.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The environment variable supplying a classic personal access token, when one is set.</returns>
+    internal async Task<AccountGetTokenEnvVarResult> GetTokenEnvVarAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<AccountGetTokenEnvVarResult>(_rpc, "account.getTokenEnvVar", [], cancellationToken);
+    }
 }
 
 /// <summary>Provides server-scoped Secrets APIs.</summary>
@@ -44347,6 +45319,14 @@ public sealed class ServerMcpApi
     {
         var request = new McpDiscoverRequest { WorkingDirectory = workingDirectory, IncludeEffectiveSource = includeEffectiveSource };
         return await CopilotClient.InvokeRpcAsync<McpDiscoverResult>(_rpc, "mcp.discover", [request], cancellationToken);
+    }
+
+    /// <summary>Lists the MCP servers the runtime supplies itself, so a host that disables the built-ins wholesale suppresses exactly the set the runtime would otherwise add. The names are fixed for a build and depend on no configuration, session or account.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Names of the MCP servers the runtime supplies itself.</returns>
+    internal async Task<McpListBuiltinServerNamesResult> ListBuiltinServerNamesAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<McpListBuiltinServerNamesResult>(_rpc, "mcp.listBuiltinServerNames", [], cancellationToken);
     }
 
     /// <summary>Reports whether the gh-replaceable GitHub MCP tools may be clipped for a session, which a host feeds back as the `excludeGhReplaceableTools` build option. The tools are redundant only when the session can reach a shell *and* the host has the `gh` that would replace them, so both halves are decided here. The shell half runs the platform shell tool through the runtime's own tool-filter matcher, so entry forms like `builtin:bash` and `builtin:*` behave exactly as they do when a session builds its tool catalog. The host half probes for `gh`, and is skipped entirely when the filters already rule the shell out. Host presence alone is not enough: a session restricted to, say, `view` would otherwise lose the built-in issue-read fallback while having no shell to replace it with. The answer describes the host the runtime runs on, so it is never forwarded to a remote engine.</summary>
@@ -44509,12 +45489,11 @@ public sealed class ServerMcpConfigApi
     /// <param name="name">Unique name for the MCP server.</param>
     /// <param name="config">MCP server configuration (stdio process or remote HTTP/SSE).</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    public async Task AddAsync(string name, object config, CancellationToken cancellationToken = default)
+    public async Task AddAsync(string name, object? config, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
-        ArgumentNullException.ThrowIfNull(config);
 
-        var request = new McpConfigAddRequest { Name = name, Config = CopilotClient.ToJsonElementForWire(config)!.Value };
+        var request = new McpConfigAddRequest { Name = name, Config = CopilotClient.ToJsonElementForWire(config) ?? JsonElement.Parse("null") };
         await CopilotClient.InvokeRpcAsync(_rpc, "mcp.config.add", [request], cancellationToken);
     }
 
@@ -44522,12 +45501,11 @@ public sealed class ServerMcpConfigApi
     /// <param name="name">Name of the MCP server to update.</param>
     /// <param name="config">MCP server configuration (stdio process or remote HTTP/SSE).</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    public async Task UpdateAsync(string name, object config, CancellationToken cancellationToken = default)
+    public async Task UpdateAsync(string name, object? config, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
-        ArgumentNullException.ThrowIfNull(config);
 
-        var request = new McpConfigUpdateRequest { Name = name, Config = CopilotClient.ToJsonElementForWire(config)!.Value };
+        var request = new McpConfigUpdateRequest { Name = name, Config = CopilotClient.ToJsonElementForWire(config) ?? JsonElement.Parse("null") };
         await CopilotClient.InvokeRpcAsync(_rpc, "mcp.config.update", [request], cancellationToken);
     }
 
@@ -44600,11 +45578,9 @@ public sealed class ServerMcpRegistryApi
     /// <param name="repository">Repository used for the policy lookup, as `owner/name`. The policy selects the registry URL and whether the user token goes to the registry. The registry receives this repository only when the policy entry lists it as required context. A value that is not a string is refused.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Servers selected from the registry response.</returns>
-    internal async Task<McpRegistrySearchResult> SearchAsync(long requestId, object authInfo, long limit, string? query = null, string? repository = null, CancellationToken cancellationToken = default)
+    internal async Task<McpRegistrySearchResult> SearchAsync(long requestId, object? authInfo, long limit, string? query = null, string? repository = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(authInfo);
-
-        var request = new McpRegistrySearchRequest { RequestId = requestId, AuthInfo = CopilotClient.ToJsonElementForWire(authInfo)!.Value, Limit = limit, Query = query, Repository = repository };
+        var request = new McpRegistrySearchRequest { RequestId = requestId, AuthInfo = CopilotClient.ToJsonElementForWire(authInfo) ?? JsonElement.Parse("null"), Limit = limit, Query = query, Repository = repository };
         return await CopilotClient.InvokeRpcAsync<McpRegistrySearchResult>(_rpc, "mcp.registry.search", [request], cancellationToken);
     }
 
@@ -44729,6 +45705,92 @@ public sealed class ServerExtensionsApi
     }
 }
 
+/// <summary>Provides server-scoped Instructions APIs.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class ServerInstructionsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerInstructionsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Returns the prompt the `init` command runs to author repository instructions. A host offering its own initialize action sends this text so the instructions it produces match the ones the CLI produces. The text is fixed for a build and depends on no configuration, session or repository.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The prompt the init command runs.</returns>
+    internal async Task<InstructionsInitPromptResult> GetInitPromptAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<InstructionsInitPromptResult>(_rpc, "instructions.getInitPrompt", [], cancellationToken);
+    }
+
+    /// <summary>Discovers instruction sources across user, repository, and plugin sources.</summary>
+    /// <param name="projectPaths">Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).</param>
+    /// <param name="excludeHostInstructions">When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Instruction sources discovered across user, repository, and plugin sources.</returns>
+    public async Task<ServerInstructionSourceList> DiscoverAsync(IList<string>? projectPaths = null, bool? excludeHostInstructions = null, CancellationToken cancellationToken = default)
+    {
+        var request = new InstructionsDiscoverRequest { ProjectPaths = projectPaths, ExcludeHostInstructions = excludeHostInstructions };
+        return await CopilotClient.InvokeRpcAsync<ServerInstructionSourceList>(_rpc, "instructions.discover", [request], cancellationToken);
+    }
+
+    /// <summary>Discovers instruction sources across user, repository, and plugin sources.</summary>
+    /// <param name="request">Optional project paths to include in instruction discovery.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Instruction sources discovered across user, repository, and plugin sources.</returns>
+    public async Task<ServerInstructionSourceList> DiscoverAsync(InstructionsDiscoverRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await CopilotClient.InvokeRpcAsync<ServerInstructionSourceList>(_rpc, "instructions.discover", [request], cancellationToken);
+    }
+
+    /// <summary>Discovers the instruction sources for one caller-named location and returns them in the order the runtime applies them. `discover` answers for a set of project paths and derives the rest of its scope itself; this one instead takes every argument from the caller — the extra directories to scan and whether to descend into nested instruction files — and honors them as given. It also includes instruction directories from trusted repository settings, matching native repository discovery. Use it when the caller knows its own scope and no session exists to derive that scope from, such as a host reporting how many instruction files a directory contributes before any session starts. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.</summary>
+    /// <param name="location">Repository location to discover. An empty string selects no repository scope; cwdPath can still supply working-directory sources.</param>
+    /// <param name="isCli">When true, include the sources a command-line host reads. Hosts that are not the CLI omit it.</param>
+    /// <param name="cwdPath">Working directory whose instruction sources should also be included. Omission adds no separate working-directory scope.</param>
+    /// <param name="configDir">Copilot configuration directory for user-level sources. An omitted or empty value uses the server's configuration home.</param>
+    /// <param name="additionalDirs">Extra directories to scan alongside instruction directories configured in the runtime environment.</param>
+    /// <param name="enableChildInstructions">When true, also discover instruction files nested below the location.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Instruction sources discovered across user, repository, and plugin sources.</returns>
+    internal async Task<ServerInstructionSourceList> DiscoverRepoSourcesAsync(string location, bool? isCli = null, string? cwdPath = null, string? configDir = null, IList<string>? additionalDirs = null, bool? enableChildInstructions = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(location);
+
+        var request = new InstructionsDiscoverRepoSourcesRequest { Location = location, IsCli = isCli, CwdPath = cwdPath, ConfigDir = configDir, AdditionalDirs = additionalDirs, EnableChildInstructions = enableChildInstructions };
+        return await CopilotClient.InvokeRpcAsync<ServerInstructionSourceList>(_rpc, "instructions.discoverRepoSources", [request], cancellationToken);
+    }
+
+    /// <summary>Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.</summary>
+    /// <param name="projectPaths">Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.</param>
+    /// <param name="excludeHostInstructions">When true, omit the host's user-level instruction targets, leaving only repository targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Canonical files and directories where custom instructions can be created so the runtime will recognize them.</returns>
+    public async Task<InstructionDiscoveryPathList> GetDiscoveryPathsAsync(IList<string>? projectPaths = null, bool? excludeHostInstructions = null, CancellationToken cancellationToken = default)
+    {
+        var request = new InstructionsGetDiscoveryPathsRequest { ProjectPaths = projectPaths, ExcludeHostInstructions = excludeHostInstructions };
+        return await CopilotClient.InvokeRpcAsync<InstructionDiscoveryPathList>(_rpc, "instructions.getDiscoveryPaths", [request], cancellationToken);
+    }
+
+    /// <summary>Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.</summary>
+    /// <param name="request">Optional project paths to include when enumerating instruction discovery targets.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Canonical files and directories where custom instructions can be created so the runtime will recognize them.</returns>
+    public async Task<InstructionDiscoveryPathList> GetDiscoveryPathsAsync(InstructionsGetDiscoveryPathsRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await CopilotClient.InvokeRpcAsync<InstructionDiscoveryPathList>(_rpc, "instructions.getDiscoveryPaths", [request], cancellationToken);
+    }
+
+    /// <summary>Drops the runtime's in-memory cache of discovered custom instructions so the next discovery reads them from disk again. A host calls this after it changes instruction files, or after it trusts a folder whose instructions an earlier discovery skipped, so that a session started afterwards sees the current files instead of a cached earlier answer. The call performs no I/O of its own and removes nothing from disk; it only invalidates, so the cost lands on the next discovery.         Returns once the cache is clear, which is what lets a caller order a session start after it. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task ClearCacheAsync(CancellationToken cancellationToken = default)
+    {
+        await CopilotClient.InvokeRpcAsync(_rpc, "instructions.clearCache", [], cancellationToken);
+    }
+}
+
 /// <summary>Provides server-scoped Skills APIs.</summary>
 [Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
 public sealed class ServerSkillsApi
@@ -44806,7 +45868,7 @@ public sealed class ServerSkillsApi
 
     /// <summary>Discovers skills across global and project sources.</summary>
     /// <param name="projectPaths">Optional list of project directory paths to scan for project-scoped skills.</param>
-    /// <param name="skillDirectories">Optional list of additional skill directory paths to include.</param>
+    /// <param name="skillDirectories">Explicit discovery-only skill roots, not filesystem grants. Available without ambient discovery, subject to skill/managed disables. Relative paths resolve against the request's effective working directory when supplied. Null and omission are equivalent; an empty array contributes no explicit roots.</param>
     /// <param name="ignoredSkillsLocations">Optional skill scan paths to exclude from discovery.</param>
     /// <param name="excludeHostSkills">When true, omit skills from the host's global sources (personal, custom, plugin, and built-in), returning only project-scoped skills. For multitenant deployments.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
@@ -44826,6 +45888,16 @@ public sealed class ServerSkillsApi
     public async Task<SkillDiscoveryPathList> GetDiscoveryPathsAsync(IList<string>? projectPaths = null, IList<string>? ignoredSkillsLocations = null, bool? excludeHostSkills = null, CancellationToken cancellationToken = default)
     {
         var request = new SkillsGetDiscoveryPathsRequest { ProjectPaths = projectPaths, IgnoredSkillsLocations = ignoredSkillsLocations, ExcludeHostSkills = excludeHostSkills };
+        return await CopilotClient.InvokeRpcAsync<SkillDiscoveryPathList>(_rpc, "skills.getDiscoveryPaths", [request], cancellationToken);
+    }
+
+    /// <summary>Returns the canonical directories where a client may create skills that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.</summary>
+    /// <param name="request">Optional project paths to enumerate.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Canonical locations where skills can be created so the runtime will recognize them.</returns>
+    public async Task<SkillDiscoveryPathList> GetDiscoveryPathsAsync(SkillsGetDiscoveryPathsRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
         return await CopilotClient.InvokeRpcAsync<SkillDiscoveryPathList>(_rpc, "skills.getDiscoveryPaths", [request], cancellationToken);
     }
 
@@ -45234,6 +46306,16 @@ public sealed class ServerAgentsApi
         return await CopilotClient.InvokeRpcAsync<ServerAgentList>(_rpc, "agents.discover", [request], cancellationToken);
     }
 
+    /// <summary>Discovers custom agents across user, project, plugin, and remote sources.</summary>
+    /// <param name="request">Optional project paths to include in agent discovery.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Agents discovered across user, project, plugin, and remote sources.</returns>
+    public async Task<ServerAgentList> DiscoverAsync(AgentsDiscoverRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await CopilotClient.InvokeRpcAsync<ServerAgentList>(_rpc, "agents.discover", [request], cancellationToken);
+    }
+
     /// <summary>Returns the canonical directories where a client may create custom agents that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.</summary>
     /// <param name="projectPaths">Optional list of project directory paths. When omitted or empty, only the user-level directory is returned.</param>
     /// <param name="excludeHostAgents">When true, omit the host's user-level agent directory, leaving only project directories. For multitenant deployments (mirrors `discover`'s `excludeHostAgents`).</param>
@@ -45242,6 +46324,16 @@ public sealed class ServerAgentsApi
     public async Task<AgentDiscoveryPathList> GetDiscoveryPathsAsync(IList<string>? projectPaths = null, bool? excludeHostAgents = null, CancellationToken cancellationToken = default)
     {
         var request = new AgentsGetDiscoveryPathsRequest { ProjectPaths = projectPaths, ExcludeHostAgents = excludeHostAgents };
+        return await CopilotClient.InvokeRpcAsync<AgentDiscoveryPathList>(_rpc, "agents.getDiscoveryPaths", [request], cancellationToken);
+    }
+
+    /// <summary>Returns the canonical directories where a client may create custom agents that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.</summary>
+    /// <param name="request">Optional project paths to include when enumerating agent discovery directories.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Canonical locations where custom agents can be created so the runtime will recognize them.</returns>
+    public async Task<AgentDiscoveryPathList> GetDiscoveryPathsAsync(AgentsGetDiscoveryPathsRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
         return await CopilotClient.InvokeRpcAsync<AgentDiscoveryPathList>(_rpc, "agents.getDiscoveryPaths", [request], cancellationToken);
     }
 
@@ -45301,40 +46393,6 @@ public sealed class ServerAgentsApi
 
         var request = new AgentsCustomAgentInitialModelDecisionParams { AgentModelsJson = agentModelsJson, AvailableModelsJson = availableModelsJson };
         return await CopilotClient.InvokeRpcAsync<AgentsCustomAgentInitialModelDecisionResult>(_rpc, "agents.customAgentInitialModelDecision", [request], cancellationToken);
-    }
-}
-
-/// <summary>Provides server-scoped Instructions APIs.</summary>
-[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
-public sealed class ServerInstructionsApi
-{
-    private readonly JsonRpc _rpc;
-
-    internal ServerInstructionsApi(JsonRpc rpc)
-    {
-        _rpc = rpc;
-    }
-
-    /// <summary>Discovers instruction sources across user, repository, and plugin sources.</summary>
-    /// <param name="projectPaths">Optional list of project directory paths to scan for repository/working-directory instruction sources. When omitted or empty, only user-level and plugin instruction sources are returned (no project scan).</param>
-    /// <param name="excludeHostInstructions">When true, omit the host's instruction sources (user/home-level files and plugin rules), leaving only repository and working-directory sources. For multitenant deployments.</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Instruction sources discovered across user, repository, and plugin sources.</returns>
-    public async Task<ServerInstructionSourceList> DiscoverAsync(IList<string>? projectPaths = null, bool? excludeHostInstructions = null, CancellationToken cancellationToken = default)
-    {
-        var request = new InstructionsDiscoverRequest { ProjectPaths = projectPaths, ExcludeHostInstructions = excludeHostInstructions };
-        return await CopilotClient.InvokeRpcAsync<ServerInstructionSourceList>(_rpc, "instructions.discover", [request], cancellationToken);
-    }
-
-    /// <summary>Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.</summary>
-    /// <param name="projectPaths">Optional list of project directory paths. When omitted or empty, only the user-level targets are returned.</param>
-    /// <param name="excludeHostInstructions">When true, omit the host's user-level instruction targets, leaving only repository targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).</param>
-    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    /// <returns>Canonical files and directories where custom instructions can be created so the runtime will recognize them.</returns>
-    public async Task<InstructionDiscoveryPathList> GetDiscoveryPathsAsync(IList<string>? projectPaths = null, bool? excludeHostInstructions = null, CancellationToken cancellationToken = default)
-    {
-        var request = new InstructionsGetDiscoveryPathsRequest { ProjectPaths = projectPaths, ExcludeHostInstructions = excludeHostInstructions };
-        return await CopilotClient.InvokeRpcAsync<InstructionDiscoveryPathList>(_rpc, "instructions.getDiscoveryPaths", [request], cancellationToken);
     }
 }
 
@@ -45438,15 +46496,246 @@ public sealed class ServerUserSettingsApi
         return await CopilotClient.InvokeRpcAsync<UserSettingsGetResult>(_rpc, "user.settings.get", [], cancellationToken);
     }
 
+    /// <summary>Resolves the on-disk locations of the settings files this runtime reads, so a consumer can show or open them. The user path is the same file `user.settings.get`, `user.settings.load`, and `user.settings.set` operate on. Supply `repoRoot` to also resolve that repository's checked-in and local settings paths. A path is reported whether or not the file exists.</summary>
+    /// <param name="repoRoot">Absolute path of a repository root. Supply it to also resolve that repository's two settings file paths; omit it to resolve only the user path.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>On-disk locations of the settings files this runtime reads. A path is reported whether or not the file exists.</returns>
+    internal async Task<UserSettingsGetPathsResult> GetPathsAsync(string? repoRoot = null, CancellationToken cancellationToken = default)
+    {
+        var request = new UserSettingsGetPathsRequest { RepoRoot = repoRoot };
+        return await CopilotClient.InvokeRpcAsync<UserSettingsGetPathsResult>(_rpc, "user.settings.getPaths", [request], cancellationToken);
+    }
+
     /// <summary>Writes one or more user settings to settings.json, replacing each provided top-level key. A key whose value is null is removed.</summary>
     /// <param name="settings">Partial user settings to write, as a free-form object keyed by setting name.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    public async Task SetAsync(object settings, CancellationToken cancellationToken = default)
+    public async Task SetAsync(object? settings, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(settings);
-
-        var request = new UserSettingsSetRequest { Settings = CopilotClient.ToJsonElementForWire(settings)!.Value };
+        var request = new UserSettingsSetRequest { Settings = CopilotClient.ToJsonElementForWire(settings) ?? JsonElement.Parse("null") };
         await CopilotClient.InvokeRpcAsync(_rpc, "user.settings.set", [request], cancellationToken);
+    }
+
+    /// <summary>Lists the top-level user-setting keys by who is allowed to govern them: `repo` keys a repository may override through `.github/copilot/settings.json`, `claudeRepo` keys a repository may override through a Claude-compatible config, and `managed` keys an enterprise policy may fix. The lists are static for a given runtime build and fail closed: a key absent from a list cannot be governed that way.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Top-level user-setting keys grouped by who may govern them.</returns>
+    internal async Task<UserSettingsGovernanceKeysResult> ListGovernanceKeysAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<UserSettingsGovernanceKeysResult>(_rpc, "user.settings.listGovernanceKeys", [], cancellationToken);
+    }
+
+    /// <summary>Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call.</summary>
+    /// <param name="canonicalPath">Nonempty canonical path segments of the setting to edit, starting with its top-level key.</param>
+    /// <param name="operation">Set a scalar, add or remove a string list item, or remove the setting. The handler rejects a missing or incompatible value.</param>
+    /// <param name="configDir">Configuration directory to edit. Omitted or empty resolves the server's own home, as in `user.settings.loadForConfigDir`.</param>
+    /// <param name="value">Required boolean, string or number for set, required string for add-item and remove-item, and forbidden for remove. The runtime rejects all other JSON values.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Outcome of an atomic user or repository settings edit.</returns>
+    internal async Task<SettingsEditResult> EditAsync(IList<string> canonicalPath, SettingsEditOperation operation, string? configDir = null, object? value = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalPath);
+
+        var request = new UserSettingsEditRequest { CanonicalPath = canonicalPath, Operation = operation, ConfigDir = configDir, Value = CopilotClient.ToJsonElementForWire(value) };
+        return await CopilotClient.InvokeRpcAsync<SettingsEditResult>(_rpc, "user.settings.edit", [request], cancellationToken);
+    }
+
+    /// <summary>Rewrites legacy and snake_case setting names in a settings object to their canonical spelling. A caller editing settings.json must normalize before writing: a legacy key left in place survives the write, is re-normalized on the next load, and silently shadows the canonical value the write just stored.</summary>
+    /// <param name="settings">Free-form settings object, possibly using legacy or snake_case key names.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Settings object with canonical key names.</returns>
+    internal async Task<UserSettingsNormalizeResult> NormalizeAsync(object? settings, CancellationToken cancellationToken = default)
+    {
+        var request = new UserSettingsNormalizeRequest { Settings = CopilotClient.ToJsonElementForWire(settings) ?? JsonElement.Parse("null") };
+        return await CopilotClient.InvokeRpcAsync<UserSettingsNormalizeResult>(_rpc, "user.settings.normalize", [request], cancellationToken);
+    }
+
+    /// <summary>Diagnoses a set of already-loaded settings layers, reporting each key that will not take effect and why. Settings load tolerantly so that one bad key does not stop a session from starting; this method surfaces what was dropped so a caller can report it instead of silently ignoring the user's intent. Takes the layers as given rather than reading them, so a caller can diagnose exactly the content it is showing, including unsaved edits. Never echoes a setting's value, because a value may be a token or another secret. Marked internal because it exists to carry a CLI call site off the native addon, not to serve a consumer-facing need; it becomes public once an SDK consumer needs to inspect settings health itself.</summary>
+    /// <param name="sources">Layers to diagnose, in the precedence order the caller applies them.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The settings that will not take effect across the given layers.</returns>
+    internal async Task<UserSettingsProblemsResult> DiagnoseProblemsAsync(IList<UserSettingsProblemSource>? sources = null, CancellationToken cancellationToken = default)
+    {
+        var request = new UserSettingsProblemsRequest { Sources = sources };
+        return await CopilotClient.InvokeRpcAsync<UserSettingsProblemsResult>(_rpc, "user.settings.diagnoseProblems", [request], cancellationToken);
+    }
+
+    /// <summary>Validates one top-level setting subtree and writes just that key to settings.json as a single step. Doing both here closes the race a caller cannot close itself: between a separate preflight read and the write, the file may change. Rewriting only the touched key keeps legacy siblings out of settings.json. Answers a status rather than failing, so a validation problem and a write problem stay distinguishable.</summary>
+    /// <param name="canonicalPath">Canonical path of the setting the caller is editing. Currently informational only.</param>
+    /// <param name="topKey">Top-level setting name to write.</param>
+    /// <param name="value">Value to write for the whole top-level key. Omitted when `delete` is true. Explicit null is preserved and validated as null.</param>
+    /// <param name="delete">True to remove the top-level key instead of writing it.</param>
+    /// <param name="completeStaffUpdateChannelMigration">Records that the user chose an update channel explicitly, so the one-time staff channel migration stops reapplying. Honored only for the `autoUpdatesChannel` key.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Outcome of validating and writing one top-level setting subtree.</returns>
+    internal async Task<UserSettingsApplyTopKeyResult> ApplyTopKeyAsync(IList<string> canonicalPath, string topKey, object? value = null, bool? delete = null, bool? completeStaffUpdateChannelMigration = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(canonicalPath);
+        ArgumentNullException.ThrowIfNull(topKey);
+
+        var request = new UserSettingsApplyTopKeyRequest { CanonicalPath = canonicalPath, TopKey = topKey, Value = CopilotClient.ToJsonElementForWire(value), Delete = delete, CompleteStaffUpdateChannelMigration = completeStaffUpdateChannelMigration };
+        var payload = JsonSerializer.SerializeToNode(request, RpcJsonContext.Default.UserSettingsApplyTopKeyRequest)!.AsObject();
+        if (request.Delete != true && request.Value is null) payload["value"] = null;
+        return await CopilotClient.InvokeRpcAsync<UserSettingsApplyTopKeyResult>(_rpc, "user.settings.applyTopKey", [payload], cancellationToken);
+    }
+
+    /// <summary>Replaces the user settings file's entire content in one write. A key absent from `settings` is removed, which is what distinguishes this from `user.settings.set`: that one merges, so it can never clear a key the caller has dropped. For a caller saving the result of a raw edit, a merge would silently resurrect every key the user deleted. Records the same one-time mutation marks a per-key write records, so a setting the user has now chosen explicitly stops being migrated for them.</summary>
+    /// <param name="settings">The settings object to store. It replaces the file's entire content, so a key absent here is removed.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task WriteAllAsync(object? settings, CancellationToken cancellationToken = default)
+    {
+        var request = new UserSettingsWriteAllRequest { Settings = CopilotClient.ToJsonElementForWire(settings) ?? JsonElement.Parse("null") };
+        await CopilotClient.InvokeRpcAsync(_rpc, "user.settings.writeAll", [request], cancellationToken);
+    }
+
+    /// <summary>Merges a partial object into one top-level user setting, re-reading the stored value inside this runtime process's settings.json write lock so that concurrent writers in this process to different sub-fields of the same key do not clobber each other. Unlike `user.settings.set`, which replaces a key's whole value with what the caller last read, this keeps sub-fields the caller did not name when both the stored value and supplied value are objects; otherwise the supplied value replaces the stored value. Use it whenever two independent surfaces own different sub-fields of one setting. Returns the key's stored value after the write, in `value`.</summary>
+    /// <param name="key">Top-level user-setting key to merge into, such as `extensions`.</param>
+    /// <param name="value">Value to store for `key`. When both the stored value and this value are objects, their fields are shallow-merged and fields this object does not name are preserved. Otherwise this value replaces the stored value.</param>
+    /// <param name="configDir">Copilot configuration directory to write the settings document in, taking precedence over the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to use the directory the server resolved for itself.</param>
+    /// <param name="subDir">Single-component name for the settings document at `&lt;configDir&gt;/settings/&lt;subDir&gt;.json`; path separators, `.` and `..` are rejected. Omit it, or pass an empty string, to use the main settings document.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The stored value of the user setting after the merge.</returns>
+    internal async Task<UserSettingsUpdateResult> UpdateAsync(string key, object? value, string? configDir = null, string? subDir = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        var request = new UserSettingsUpdateRequest { Key = key, Value = CopilotClient.ToJsonElementForWire(value) ?? JsonElement.Parse("null"), ConfigDir = configDir, SubDir = subDir };
+        return await CopilotClient.InvokeRpcAsync<UserSettingsUpdateResult>(_rpc, "user.settings.update", [request], cancellationToken);
+    }
+
+    /// <summary>Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Contents of settings.json as stored, for a caller about to rewrite it.</returns>
+    internal async Task<UserSettingsLoadForEditResult> LoadForEditAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<UserSettingsLoadForEditResult>(_rpc, "user.settings.loadForEdit", [], cancellationToken);
+    }
+
+    /// <summary>Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it.</summary>
+    /// <param name="topKey">Top-level setting name to validate.</param>
+    /// <param name="value">Value to validate. Omitted when `delete` is true.</param>
+    /// <param name="delete">True to validate a removal of this key. The current settings file is not read.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Outcome of validating one top-level setting subtree.</returns>
+    internal async Task<UserSettingsValidateResult> ValidateAsync(string topKey, object? value = null, bool? delete = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(topKey);
+
+        var request = new UserSettingsValidateRequest { TopKey = topKey, Value = CopilotClient.ToJsonElementForWire(value), Delete = delete };
+        return await CopilotClient.InvokeRpcAsync<UserSettingsValidateResult>(_rpc, "user.settings.validate", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped FeatureFlags APIs.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class ServerFeatureFlagsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerFeatureFlagsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Lists every feature flag this runtime declares, with the population each one is declared for, its experimental description, and the online-experiment flag it maps to. This is the static catalog: it describes how each flag is defined, not whether it is on for anyone. Use `featureFlags.resolve` for static values with caller overrides, not active runtime values or experiment assignments.</summary>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Every feature flag this runtime declares, with the shape each one was declared with.</returns>
+    internal async Task<FeatureFlagsMetadataResult> ListMetadataAsync(CancellationToken cancellationToken = default)
+    {
+        return await CopilotClient.InvokeRpcAsync<FeatureFlagsMetadataResult>(_rpc, "featureFlags.listMetadata", [], cancellationToken);
+    }
+
+    /// <summary>Computes static feature flags from the supplied population and overrides without changing runtime state or verifying audience membership. Starts from declared availability, then applies direct feature-flag environment values, user settings, and explicit `flagOverrides`. It does not apply `COPILOT_EXP_*` experiment assignments, authenticated startup gates, or active runtime state. Settings include `enabledFeatureFlags`, the legacy `feature_flags.enabled` list, and supported convenience settings. Supply `baseFlags` to use an existing flag set instead of declared availability. Omit `isStaffGitHub` or `isStaffMicrosoft` when membership was never recorded: a legacy staff account then counts as both populations.</summary>
+    /// <param name="isStaff">Whether the caller is GitHub or Microsoft staff.</param>
+    /// <param name="isExperimental">Whether the caller is in an experimental population.</param>
+    /// <param name="isTeam">Whether the caller belongs to the team population used by feature availability.</param>
+    /// <param name="isStaffGithub">GitHub-staff membership. Omit when it was never recorded: a legacy staff account then counts as both staff populations and keeps every staff feature.</param>
+    /// <param name="isStaffMicrosoft">Microsoft-staff membership. Omitted the same way as `isStaffGitHub`.</param>
+    /// <param name="baseFlags">Resolve against this already-computed flag set rather than each flag's declared availability. Keyed by flag name.</param>
+    /// <param name="environment">Environment for direct feature-flag overrides and `COPILOT_CLI_ENABLED_FEATURE_FLAGS`. Does not apply `COPILOT_EXP_*` experiment assignments. Defaults to this runtime process's own environment.</param>
+    /// <param name="config">User settings to apply, including `enabledFeatureFlags`, legacy `feature_flags.enabled`, and supported convenience settings.</param>
+    /// <param name="flagOverrides">Flags forced to a value after every other layer, keyed by flag name.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>The resolved feature flags, keyed by flag name.</returns>
+    internal async Task<IDictionary<string, bool>> ResolveAsync(bool isStaff, bool isExperimental, bool isTeam, bool? isStaffGithub = null, bool? isStaffMicrosoft = null, IDictionary<string, bool>? baseFlags = null, IDictionary<string, string>? environment = null, object? config = null, IDictionary<string, bool>? flagOverrides = null, CancellationToken cancellationToken = default)
+    {
+        var request = new FeatureFlagsResolveRequest { IsStaff = isStaff, IsExperimental = isExperimental, IsTeam = isTeam, IsStaffGitHub = isStaffGithub, IsStaffMicrosoft = isStaffMicrosoft, BaseFlags = baseFlags, Environment = environment, Config = CopilotClient.ToJsonElementForWire(config), FlagOverrides = flagOverrides };
+        return await CopilotClient.InvokeRpcAsync<IDictionary<string, bool>>(_rpc, "featureFlags.resolve", [request], cancellationToken);
+    }
+}
+
+/// <summary>Provides server-scoped Repo APIs.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class ServerRepoApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerRepoApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Settings APIs.</summary>
+    public ServerRepoSettingsApi Settings =>
+        field ??
+        Interlocked.CompareExchange(ref field, new(_rpc), null) ??
+        field;
+}
+
+/// <summary>Provides server-scoped RepoSettings APIs.</summary>
+[Experimental(global::GitHub.Copilot.Diagnostics.Experimental)]
+public sealed class ServerRepoSettingsApi
+{
+    private readonly JsonRpc _rpc;
+
+    internal ServerRepoSettingsApi(JsonRpc rpc)
+    {
+        _rpc = rpc;
+    }
+
+    /// <summary>Reads one repository settings file without settings normalization or layering. The existing JSONC parser accepts comments and trailing commas and applies its prototype-safety rules. Missing or blank files return an empty valid config. Invalid files return an empty config with invalid=true; other read failures reject.</summary>
+    /// <param name="repoRoot">Absolute path of the repository root.</param>
+    /// <param name="scope">Use repo for shared settings or local for settings.local.json. Other scopes are rejected.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Parsed repository settings without normalization or layering.</returns>
+    internal async Task<RepoSettingsReadRawResult> ReadRawAsync(string repoRoot, string scope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repoRoot);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var request = new RepoSettingsReadRawRequest { RepoRoot = repoRoot, Scope = scope };
+        return await CopilotClient.InvokeRpcAsync<RepoSettingsReadRawResult>(_rpc, "repo.settings.readRaw", [request], cancellationToken);
+    }
+
+    /// <summary>Writes or removes one allowed top-level repository setting through the existing validator and file lock. Preserves unrelated stored keys. Invalid keys, values, existing documents, and I/O errors reject without replacing the file. Deletion requires delete=true; otherwise value must be present.</summary>
+    /// <param name="repoRoot">Absolute path of the repository root.</param>
+    /// <param name="scope">Use repo for shared settings or local for settings.local.json. Other scopes are rejected.</param>
+    /// <param name="key">Canonical top-level key permitted by the repository settings allowlist.</param>
+    /// <param name="value">Value to validate and write. Required unless delete is true; a null value is validated, not treated as deletion.</param>
+    /// <param name="delete">True to remove the key instead of writing it.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task WriteKeyAsync(string repoRoot, string scope, string key, object? value = null, bool? delete = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repoRoot);
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(key);
+
+        var request = new RepoSettingsWriteKeyRequest { RepoRoot = repoRoot, Scope = scope, Key = key, Value = CopilotClient.ToJsonElementForWire(value), Delete = delete };
+        var payload = JsonSerializer.SerializeToNode(request, RpcJsonContext.Default.RepoSettingsWriteKeyRequest)!.AsObject();
+        if (request.Delete != true && request.Value is null) payload["value"] = null;
+        await CopilotClient.InvokeRpcAsync(_rpc, "repo.settings.writeKey", [payload], cancellationToken);
+    }
+
+    /// <summary>Replaces the repository-overridable settings in one locked write. Allowed keys present in settings are validated and written; allowed keys absent from settings are removed. Other input keys are ignored, and unknown keys already stored in the file remain unchanged. Invalid values or an invalid existing file reject without a partial write.</summary>
+    /// <param name="repoRoot">Absolute path of the repository root.</param>
+    /// <param name="scope">Use repo for shared settings or local for settings.local.json. Other scopes are rejected.</param>
+    /// <param name="settings">Object of allowed settings to store. Missing allowlisted keys are removed. Other input keys are ignored, while unknown stored keys are preserved.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    internal async Task WriteAllAsync(string repoRoot, string scope, object? settings, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(repoRoot);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var request = new RepoSettingsWriteAllRequest { RepoRoot = repoRoot, Scope = scope, Settings = CopilotClient.ToJsonElementForWire(settings) ?? JsonElement.Parse("null") };
+        await CopilotClient.InvokeRpcAsync(_rpc, "repo.settings.writeAll", [request], cancellationToken);
     }
 }
 
@@ -45498,11 +46787,9 @@ public sealed class ServerGitHubOwnersApi
     /// <param name="authInfo">The credential the listing runs under, carried opaquely because its shape is the host's own and the runtime only resolves a token and a GitHub host from it. No credential travels: this selects one the runtime already holds.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Outcome of an owner listing. Exactly one of `owners` and `message` is present, except that `throwError` reports a failure the caller is expected to raise rather than render.</returns>
-    internal async Task<GitHubOwnersListResult> ListAsync(long requestId, object authInfo, CancellationToken cancellationToken = default)
+    internal async Task<GitHubOwnersListResult> ListAsync(long requestId, object? authInfo, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(authInfo);
-
-        var request = new GitHubOwnersListRequest { RequestId = requestId, AuthInfo = CopilotClient.ToJsonElementForWire(authInfo)!.Value };
+        var request = new GitHubOwnersListRequest { RequestId = requestId, AuthInfo = CopilotClient.ToJsonElementForWire(authInfo) ?? JsonElement.Parse("null") };
         return await CopilotClient.InvokeRpcAsync<GitHubOwnersListResult>(_rpc, "gitHubOwners.list", [request], cancellationToken);
     }
 
@@ -45621,11 +46908,9 @@ public sealed class ServerManagedSettingsApi
     /// <param name="layer">Channel the document is meant for (`device`, `server`, or `policyHelper`). Some keys are only honored in some channels; for example, a `policyHelper` registration is ignored in policy-helper output. When omitted, no channel-specific checks run.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Result of validating a managed-settings document.</returns>
-    public async Task<ManagedSettingsValidateResult> ValidateAsync(object content, string? layer = null, CancellationToken cancellationToken = default)
+    public async Task<ManagedSettingsValidateResult> ValidateAsync(object? content, string? layer = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(content);
-
-        var request = new ManagedSettingsValidateRequest { Content = CopilotClient.ToJsonElementForWire(content)!.Value, Layer = layer };
+        var request = new ManagedSettingsValidateRequest { Content = CopilotClient.ToJsonElementForWire(content) ?? JsonElement.Parse("null"), Layer = layer };
         return await CopilotClient.InvokeRpcAsync<ManagedSettingsValidateResult>(_rpc, "managedSettings.validate", [request], cancellationToken);
     }
 
@@ -47278,14 +48563,13 @@ public sealed class CanvasProviderApi
     /// <param name="info">Provider metadata supplied by the host.</param>
     /// <param name="canvases">Canvas contributions supplied by the provider.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
-    internal async Task RegisterAsync(string connectionId, object info, IList<object?> canvases, CancellationToken cancellationToken = default)
+    internal async Task RegisterAsync(string connectionId, object? info, IList<object?> canvases, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connectionId);
-        ArgumentNullException.ThrowIfNull(info);
         ArgumentNullException.ThrowIfNull(canvases);
         _session.ThrowIfDisposed();
 
-        var request = new CanvasProviderRegisterRequest { SessionId = _session.SessionId, ConnectionId = connectionId, Info = CopilotClient.ToJsonElementForWire(info)!.Value, Canvases = canvases.Select(static v => CopilotClient.ToJsonElementForWire(v)!.Value).ToList() };
+        var request = new CanvasProviderRegisterRequest { SessionId = _session.SessionId, ConnectionId = connectionId, Info = CopilotClient.ToJsonElementForWire(info) ?? JsonElement.Parse("null"), Canvases = canvases.Select(static v => CopilotClient.ToJsonElementForWire(v)!.Value).ToList() };
         await CopilotClient.InvokeRpcAsync(_session.Rpc, "session.canvas.provider.register", [request], cancellationToken);
     }
 
@@ -47319,13 +48603,12 @@ public sealed class WorkflowApi
     /// <param name="options">Workflow invocation options.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Complete current or terminal workflow run envelope.</returns>
-    public async Task<WorkflowRunResult> RunAsync(string name, object args, WorkflowRunOptions? options = null, CancellationToken cancellationToken = default)
+    public async Task<WorkflowRunResult> RunAsync(string name, object? args, WorkflowRunOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
-        ArgumentNullException.ThrowIfNull(args);
         _session.ThrowIfDisposed();
 
-        var request = new WorkflowRunRequest { SessionId = _session.SessionId, Name = name, Args = CopilotClient.ToJsonElementForWire(args)!.Value, Options = options };
+        var request = new WorkflowRunRequest { SessionId = _session.SessionId, Name = name, Args = CopilotClient.ToJsonElementForWire(args) ?? JsonElement.Parse("null"), Options = options };
         return await CopilotClient.InvokeRpcAsync<WorkflowRunResult>(_session.Rpc, "session.workflow.run", [request], cancellationToken);
     }
 
@@ -47352,13 +48635,12 @@ public sealed class WorkflowApi
     /// <param name="toolCallId">Opaque identifier of the originating tool call.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Complete current or terminal workflow run envelope.</returns>
-    internal async Task<WorkflowRunResult> RunFromToolAsync(string name, object args, WorkflowToolRunOptions? options = null, string? toolCallId = null, CancellationToken cancellationToken = default)
+    internal async Task<WorkflowRunResult> RunFromToolAsync(string name, object? args, WorkflowToolRunOptions? options = null, string? toolCallId = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
-        ArgumentNullException.ThrowIfNull(args);
         _session.ThrowIfDisposed();
 
-        var request = new WorkflowToolRunRequest { SessionId = _session.SessionId, Name = name, Args = CopilotClient.ToJsonElementForWire(args)!.Value, Options = options, ToolCallId = toolCallId };
+        var request = new WorkflowToolRunRequest { SessionId = _session.SessionId, Name = name, Args = CopilotClient.ToJsonElementForWire(args) ?? JsonElement.Parse("null"), Options = options, ToolCallId = toolCallId };
         return await CopilotClient.InvokeRpcAsync<WorkflowRunResult>(_session.Rpc, "session.workflow.runFromTool", [request], cancellationToken);
     }
 
@@ -47554,15 +48836,14 @@ public sealed class WorkflowJournalApi
     /// <param name="resultJson">JSON result to memoize.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Acknowledgement that a workflow request was accepted.</returns>
-    public async Task<WorkflowAckResult> PutAsync(string runId, string executionToken, string key, object resultJson, CancellationToken cancellationToken = default)
+    public async Task<WorkflowAckResult> PutAsync(string runId, string executionToken, string key, object? resultJson, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(runId);
         ArgumentNullException.ThrowIfNull(executionToken);
         ArgumentNullException.ThrowIfNull(key);
-        ArgumentNullException.ThrowIfNull(resultJson);
         _session.ThrowIfDisposed();
 
-        var request = new WorkflowJournalPutRequest { SessionId = _session.SessionId, RunId = runId, ExecutionToken = executionToken, Key = key, ResultJson = CopilotClient.ToJsonElementForWire(resultJson)!.Value };
+        var request = new WorkflowJournalPutRequest { SessionId = _session.SessionId, RunId = runId, ExecutionToken = executionToken, Key = key, ResultJson = CopilotClient.ToJsonElementForWire(resultJson) ?? JsonElement.Parse("null") };
         return await CopilotClient.InvokeRpcAsync<WorkflowAckResult>(_session.Rpc, "session.workflow.journal.put", [request], cancellationToken);
     }
 }
@@ -47702,6 +48983,19 @@ public sealed class ModelApi
 
         var request = new ModelSetReasoningEffortRequest { SessionId = _session.SessionId, ReasoningEffort = reasoningEffort };
         return await CopilotClient.InvokeRpcAsync<ModelSetReasoningEffortResult>(_session.Rpc, "session.model.setReasoningEffort", [request], cancellationToken);
+    }
+
+    /// <summary>Computes whether the session's current model shows reasoning summaries and how a host should present them: the default Ctrl+T visibility, reasoning headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is redundant. The runtime folds in the session's model catalog, selection and reasoning-summaries experiment assignment; the host supplies only its own persisted setting and current visibility. This method reads the session's resolved model catalog rather than resolving it, so call `session.model.list` first on a session that has not listed models or run a turn; until then the result is `ready: false`. A session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider, never caches one and stays `ready: false`.</summary>
+    /// <param name="persistedShowReasoning">The host's persisted `showReasoning` user setting, omitted when unset.</param>
+    /// <param name="summariesVisible">Whether the host is currently showing reasoning summaries. Defaults to false.</param>
+    /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
+    /// <returns>Reasoning-summaries presentation policy for the session's current model.</returns>
+    public async Task<ModelGetReasoningSummariesResult> GetReasoningSummariesAsync(bool? persistedShowReasoning = null, bool? summariesVisible = null, CancellationToken cancellationToken = default)
+    {
+        _session.ThrowIfDisposed();
+
+        var request = new ModelGetReasoningSummariesRequest { SessionId = _session.SessionId, PersistedShowReasoning = persistedShowReasoning, SummariesVisible = summariesVisible };
+        return await CopilotClient.InvokeRpcAsync<ModelGetReasoningSummariesResult>(_session.Rpc, "session.model.getReasoningSummaries", [request], cancellationToken);
     }
 
     /// <summary>Lists models available to this session using its own auth and integration context. Connected hosts (CLI TUI, GitHub App) should call this through the session client so remote sessions return the remote CLI's available models rather than the caller's.</summary>
@@ -48792,15 +50086,14 @@ public sealed class McpApi
     /// <param name="request">Raw MCP CreateMessageRequest params, as received in the `sampling.requested` event. Treated as opaque at the schema layer; the runtime converts the embedded MCP messages into the OpenAI chat-completion shape internally.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Outcome of an MCP sampling execution: success result, failure error, or cancellation.</returns>
-    public async Task<McpSamplingExecutionResult> ExecuteSamplingAsync(string requestId, string serverName, object mcpRequestId, McpExecuteSamplingRequest request, CancellationToken cancellationToken = default)
+    public async Task<McpSamplingExecutionResult> ExecuteSamplingAsync(string requestId, string serverName, object? mcpRequestId, McpExecuteSamplingRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requestId);
         ArgumentNullException.ThrowIfNull(serverName);
-        ArgumentNullException.ThrowIfNull(mcpRequestId);
         ArgumentNullException.ThrowIfNull(request);
         _session.ThrowIfDisposed();
 
-        var rpcRequest = new McpExecuteSamplingParams { SessionId = _session.SessionId, RequestId = requestId, ServerName = serverName, McpRequestId = CopilotClient.ToJsonElementForWire(mcpRequestId)!.Value, Request = request };
+        var rpcRequest = new McpExecuteSamplingParams { SessionId = _session.SessionId, RequestId = requestId, ServerName = serverName, McpRequestId = CopilotClient.ToJsonElementForWire(mcpRequestId) ?? JsonElement.Parse("null"), Request = request };
         return await CopilotClient.InvokeRpcAsync<McpSamplingExecutionResult>(_session.Rpc, "session.mcp.executeSampling", [rpcRequest], cancellationToken);
     }
 
@@ -49911,7 +51204,10 @@ public sealed class OptionsApi
     /// <param name="logInteractiveShells">Whether interactive shell sessions are logged.</param>
     /// <param name="envValueMode">How env values are passed to MCP servers (`direct` inlines literal values; `indirect` resolves at launch).</param>
     /// <param name="allowAllMcpServerInstructions">Whether to include instructions from every MCP server in the system prompt instead of only allowlisted servers.</param>
-    /// <param name="skillDirectories">Additional directories to search for skills.</param>
+    /// <param name="skillDirectories">Explicit discovery-only skill roots, not filesystem grants. Available without enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</param>
+    /// <param name="agentDirectories">Explicit discovery-only agent roots, separate from customAgents and filesystem grants. Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</param>
+    /// <param name="instructionDirectories">Explicit discovery-only instruction roots using existing SDK instruction formats, not filesystem grants. Available without enableConfigDiscovery, subject to instruction/managed disables. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</param>
+    /// <param name="hookDirectories">Explicit discovery-only file-hook roots, separate from callback hooks and filesystem grants. Available without enableConfigDiscovery or enableFileHooks, which controls repository-origin hooks only; hook/managed disables still apply. Relative SDK paths resolve once when supplied against the request's effective workingDirectory; retained roots do not move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK contribution.</param>
     /// <param name="ignoredSkillsLocations">Skill scan directories and descendants excluded from discovery. Supports `~`-relative paths.</param>
     /// <param name="includedBuiltinSkills">Built-in skill names to include in this session. When specified, only these runtime-bundled skills are available. Skills from other sources with the same name remain available. Set to null to remove the allowlist restriction.</param>
     /// <param name="disabledSkills">Skill IDs that should be excluded from this session.</param>
@@ -49938,19 +51234,19 @@ public sealed class OptionsApi
     /// <param name="sessionCapabilities">Replaces the session's capability set with the given list. Use to enable or disable capabilities mid-session (e.g., remove `memory` for reproducible scripted runs). Omit the field to leave the existing capability set unchanged.</param>
     /// <param name="skipEmbeddingRetrieval">Whether to skip embedding retrieval pipeline initialization and execution.</param>
     /// <param name="organizationCustomInstructions">Organization-level custom instructions to inject into the system prompt.</param>
-    /// <param name="enableFileHooks">Whether to enable loading of `.github/hooks/` filesystem hooks. Separate from the SDK callback hook mechanism.</param>
+    /// <param name="enableFileHooks">Whether to enable repository-origin file hooks from `.github/hooks/` and trusted repository-configured roots. Does not control explicit hookDirectories or SDK callback hooks.</param>
     /// <param name="enableHostGitOperations">Whether to enable host git operations (context resolution, child repo scanning, git info in system prompt).</param>
     /// <param name="enableSessionStore">Whether to enable cross-session store writes and reads.</param>
-    /// <param name="enableSkills">Whether skill loading is enabled. Explicit false disables every source, including a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless an SDK skill provider is registered.</param>
+    /// <param name="enableSkills">Whether skill loading is enabled. Explicit false disables every source, including explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless explicit SDK skill roots or an SDK skill provider are supplied.</param>
     /// <param name="contextTier">Context tier for models with tiered pricing. The session uses this to derive effective `modelCapabilitiesOverrides` so compaction, truncation, token display, and request limits honor the selected tier.</param>
     /// <param name="sessionLimits">Optional session limits. Pass null to clear the session limits.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Indicates whether the session options patch was applied successfully.</returns>
-    public async Task<SessionUpdateOptionsResult> UpdateAsync(string? model = null, ModelCapabilitiesOverride? modelCapabilitiesOverrides = null, string? reasoningEffort = null, OptionsUpdateReasoningSummary? reasoningSummary = null, Verbosity? verbosity = null, string? clientName = null, string? lspClientName = null, string? integrationId = null, IDictionary<string, bool>? featureFlags = null, bool? isExperimentalMode = null, ProviderConfig? provider = null, CapiSessionOptions? capi = null, string? workingDirectory = null, IList<string>? availableTools = null, IList<string>? excludedTools = null, IList<string>? includedBuiltinAgents = null, IList<string>? excludedBuiltinAgents = null, OptionsUpdateToolFilterPrecedence? toolFilterPrecedence = null, bool? enableScriptSafety = null, ShellOptions? shell = null, string? shellInitProfile = null, IList<string>? shellProcessFlags = null, SandboxConfig? sandboxConfig = null, SandboxConfigSource? sandboxConfigSource = null, bool? logInteractiveShells = null, OptionsUpdateEnvValueMode? envValueMode = null, bool? allowAllMcpServerInstructions = null, IList<string>? skillDirectories = null, IList<string>? ignoredSkillsLocations = null, IList<string>? includedBuiltinSkills = null, IList<string>? disabledSkills = null, bool? enableOnDemandInstructionDiscovery = null, long? maxInlineBinaryBytes = null, IList<SessionInstalledPlugin>? installedPlugins = null, bool? customAgentsLocalOnly = null, bool? suppressCustomAgentPrompt = null, bool? skipCustomInstructions = null, IList<string>? disabledInstructionSources = null, bool? coauthorEnabled = null, string? trajectoryFile = null, bool? enableStreaming = null, string? copilotUrl = null, bool? askUserDisabled = null, bool? continueOnAutoMode = null, bool? runningInInteractiveMode = null, bool? enableReasoningSummaries = null, string? agentContext = null, string? eventsLogDirectory = null, bool? eventsLogIncludesSubagents = null, IList<OptionsUpdateAdditionalContentExclusionPolicy>? additionalContentExclusionPolicies = null, bool? manageScheduleEnabled = null, IList<SessionCapability>? sessionCapabilities = null, bool? skipEmbeddingRetrieval = null, string? organizationCustomInstructions = null, bool? enableFileHooks = null, bool? enableHostGitOperations = null, bool? enableSessionStore = null, bool? enableSkills = null, OptionsUpdateContextTier? contextTier = null, SessionLimitsConfig? sessionLimits = null, CancellationToken cancellationToken = default)
+    public async Task<SessionUpdateOptionsResult> UpdateAsync(string? model = null, ModelCapabilitiesOverride? modelCapabilitiesOverrides = null, string? reasoningEffort = null, OptionsUpdateReasoningSummary? reasoningSummary = null, Verbosity? verbosity = null, string? clientName = null, string? lspClientName = null, string? integrationId = null, IDictionary<string, bool>? featureFlags = null, bool? isExperimentalMode = null, ProviderConfig? provider = null, CapiSessionOptions? capi = null, string? workingDirectory = null, IList<string>? availableTools = null, IList<string>? excludedTools = null, IList<string>? includedBuiltinAgents = null, IList<string>? excludedBuiltinAgents = null, OptionsUpdateToolFilterPrecedence? toolFilterPrecedence = null, bool? enableScriptSafety = null, ShellOptions? shell = null, string? shellInitProfile = null, IList<string>? shellProcessFlags = null, SandboxConfig? sandboxConfig = null, SandboxConfigSource? sandboxConfigSource = null, bool? logInteractiveShells = null, OptionsUpdateEnvValueMode? envValueMode = null, bool? allowAllMcpServerInstructions = null, IList<string>? skillDirectories = null, IList<string>? agentDirectories = null, IList<string>? instructionDirectories = null, IList<string>? hookDirectories = null, IList<string>? ignoredSkillsLocations = null, IList<string>? includedBuiltinSkills = null, IList<string>? disabledSkills = null, bool? enableOnDemandInstructionDiscovery = null, long? maxInlineBinaryBytes = null, IList<SessionInstalledPlugin>? installedPlugins = null, bool? customAgentsLocalOnly = null, bool? suppressCustomAgentPrompt = null, bool? skipCustomInstructions = null, IList<string>? disabledInstructionSources = null, bool? coauthorEnabled = null, string? trajectoryFile = null, bool? enableStreaming = null, string? copilotUrl = null, bool? askUserDisabled = null, bool? continueOnAutoMode = null, bool? runningInInteractiveMode = null, bool? enableReasoningSummaries = null, string? agentContext = null, string? eventsLogDirectory = null, bool? eventsLogIncludesSubagents = null, IList<OptionsUpdateAdditionalContentExclusionPolicy>? additionalContentExclusionPolicies = null, bool? manageScheduleEnabled = null, IList<SessionCapability>? sessionCapabilities = null, bool? skipEmbeddingRetrieval = null, string? organizationCustomInstructions = null, bool? enableFileHooks = null, bool? enableHostGitOperations = null, bool? enableSessionStore = null, bool? enableSkills = null, OptionsUpdateContextTier? contextTier = null, SessionLimitsConfig? sessionLimits = null, CancellationToken cancellationToken = default)
     {
         _session.ThrowIfDisposed();
 
-        var request = new SessionUpdateOptionsParams { SessionId = _session.SessionId, Model = model, ModelCapabilitiesOverrides = modelCapabilitiesOverrides, ReasoningEffort = reasoningEffort, ReasoningSummary = reasoningSummary, Verbosity = verbosity, ClientName = clientName, LspClientName = lspClientName, IntegrationId = integrationId, FeatureFlags = featureFlags, IsExperimentalMode = isExperimentalMode, Provider = provider, Capi = capi, WorkingDirectory = workingDirectory, AvailableTools = availableTools, ExcludedTools = excludedTools, IncludedBuiltinAgents = includedBuiltinAgents, ExcludedBuiltinAgents = excludedBuiltinAgents, ToolFilterPrecedence = toolFilterPrecedence, EnableScriptSafety = enableScriptSafety, Shell = shell, ShellInitProfile = shellInitProfile, ShellProcessFlags = shellProcessFlags, SandboxConfig = sandboxConfig, SandboxConfigSource = sandboxConfigSource, LogInteractiveShells = logInteractiveShells, EnvValueMode = envValueMode, AllowAllMcpServerInstructions = allowAllMcpServerInstructions, SkillDirectories = skillDirectories, IgnoredSkillsLocations = ignoredSkillsLocations, IncludedBuiltinSkills = includedBuiltinSkills, DisabledSkills = disabledSkills, EnableOnDemandInstructionDiscovery = enableOnDemandInstructionDiscovery, MaxInlineBinaryBytes = maxInlineBinaryBytes, InstalledPlugins = installedPlugins, CustomAgentsLocalOnly = customAgentsLocalOnly, SuppressCustomAgentPrompt = suppressCustomAgentPrompt, SkipCustomInstructions = skipCustomInstructions, DisabledInstructionSources = disabledInstructionSources, CoauthorEnabled = coauthorEnabled, TrajectoryFile = trajectoryFile, EnableStreaming = enableStreaming, CopilotUrl = copilotUrl, AskUserDisabled = askUserDisabled, ContinueOnAutoMode = continueOnAutoMode, RunningInInteractiveMode = runningInInteractiveMode, EnableReasoningSummaries = enableReasoningSummaries, AgentContext = agentContext, EventsLogDirectory = eventsLogDirectory, EventsLogIncludesSubagents = eventsLogIncludesSubagents, AdditionalContentExclusionPolicies = additionalContentExclusionPolicies, ManageScheduleEnabled = manageScheduleEnabled, SessionCapabilities = sessionCapabilities, SkipEmbeddingRetrieval = skipEmbeddingRetrieval, OrganizationCustomInstructions = organizationCustomInstructions, EnableFileHooks = enableFileHooks, EnableHostGitOperations = enableHostGitOperations, EnableSessionStore = enableSessionStore, EnableSkills = enableSkills, ContextTier = contextTier, SessionLimits = sessionLimits };
+        var request = new SessionUpdateOptionsParams { SessionId = _session.SessionId, Model = model, ModelCapabilitiesOverrides = modelCapabilitiesOverrides, ReasoningEffort = reasoningEffort, ReasoningSummary = reasoningSummary, Verbosity = verbosity, ClientName = clientName, LspClientName = lspClientName, IntegrationId = integrationId, FeatureFlags = featureFlags, IsExperimentalMode = isExperimentalMode, Provider = provider, Capi = capi, WorkingDirectory = workingDirectory, AvailableTools = availableTools, ExcludedTools = excludedTools, IncludedBuiltinAgents = includedBuiltinAgents, ExcludedBuiltinAgents = excludedBuiltinAgents, ToolFilterPrecedence = toolFilterPrecedence, EnableScriptSafety = enableScriptSafety, Shell = shell, ShellInitProfile = shellInitProfile, ShellProcessFlags = shellProcessFlags, SandboxConfig = sandboxConfig, SandboxConfigSource = sandboxConfigSource, LogInteractiveShells = logInteractiveShells, EnvValueMode = envValueMode, AllowAllMcpServerInstructions = allowAllMcpServerInstructions, SkillDirectories = skillDirectories, AgentDirectories = agentDirectories, InstructionDirectories = instructionDirectories, HookDirectories = hookDirectories, IgnoredSkillsLocations = ignoredSkillsLocations, IncludedBuiltinSkills = includedBuiltinSkills, DisabledSkills = disabledSkills, EnableOnDemandInstructionDiscovery = enableOnDemandInstructionDiscovery, MaxInlineBinaryBytes = maxInlineBinaryBytes, InstalledPlugins = installedPlugins, CustomAgentsLocalOnly = customAgentsLocalOnly, SuppressCustomAgentPrompt = suppressCustomAgentPrompt, SkipCustomInstructions = skipCustomInstructions, DisabledInstructionSources = disabledInstructionSources, CoauthorEnabled = coauthorEnabled, TrajectoryFile = trajectoryFile, EnableStreaming = enableStreaming, CopilotUrl = copilotUrl, AskUserDisabled = askUserDisabled, ContinueOnAutoMode = continueOnAutoMode, RunningInInteractiveMode = runningInInteractiveMode, EnableReasoningSummaries = enableReasoningSummaries, AgentContext = agentContext, EventsLogDirectory = eventsLogDirectory, EventsLogIncludesSubagents = eventsLogIncludesSubagents, AdditionalContentExclusionPolicies = additionalContentExclusionPolicies, ManageScheduleEnabled = manageScheduleEnabled, SessionCapabilities = sessionCapabilities, SkipEmbeddingRetrieval = skipEmbeddingRetrieval, OrganizationCustomInstructions = organizationCustomInstructions, EnableFileHooks = enableFileHooks, EnableHostGitOperations = enableHostGitOperations, EnableSessionStore = enableSessionStore, EnableSkills = enableSkills, ContextTier = contextTier, SessionLimits = sessionLimits };
         return await CopilotClient.InvokeRpcAsync<SessionUpdateOptionsResult>(_session.Rpc, "session.options.update", [request], cancellationToken);
     }
 }
@@ -50078,13 +51374,12 @@ public sealed class ToolsApi
     /// <param name="toolCallId">Optional identifier used to correlate this invocation with its tool call.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Canonical result returned by a session tool.</returns>
-    public async Task<JsonElement> ExecuteAsync(string name, object arguments, string? toolCallId = null, CancellationToken cancellationToken = default)
+    public async Task<JsonElement> ExecuteAsync(string name, object? arguments, string? toolCallId = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(name);
-        ArgumentNullException.ThrowIfNull(arguments);
         _session.ThrowIfDisposed();
 
-        var request = new ToolsExecuteRequest { SessionId = _session.SessionId, Name = name, Arguments = CopilotClient.ToJsonElementForWire(arguments)!.Value, ToolCallId = toolCallId };
+        var request = new ToolsExecuteRequest { SessionId = _session.SessionId, Name = name, Arguments = CopilotClient.ToJsonElementForWire(arguments) ?? JsonElement.Parse("null"), ToolCallId = toolCallId };
         return await CopilotClient.InvokeRpcAsync<JsonElement>(_session.Rpc, "session.tools.execute", [request], cancellationToken);
     }
 
@@ -50111,13 +51406,12 @@ public sealed class ToolsApi
     /// <param name="finalResult">Final expanded result returned by the task_complete tool.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Task completion notification with summary from the agent.</returns>
-    public async Task<TaskCompleteData> TaskCompleteEventDataAsync(object toolArgs, ToolResultExpanded finalResult, CancellationToken cancellationToken = default)
+    public async Task<TaskCompleteData> TaskCompleteEventDataAsync(object? toolArgs, ToolResultExpanded finalResult, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(toolArgs);
         ArgumentNullException.ThrowIfNull(finalResult);
         _session.ThrowIfDisposed();
 
-        var request = new ToolsTaskCompleteEventDataRequest { SessionId = _session.SessionId, ToolArgs = CopilotClient.ToJsonElementForWire(toolArgs)!.Value, FinalResult = finalResult };
+        var request = new ToolsTaskCompleteEventDataRequest { SessionId = _session.SessionId, ToolArgs = CopilotClient.ToJsonElementForWire(toolArgs) ?? JsonElement.Parse("null"), FinalResult = finalResult };
         return await CopilotClient.InvokeRpcAsync<TaskCompleteData>(_session.Rpc, "session.tools.taskCompleteEventData", [request], cancellationToken);
     }
 
@@ -51535,12 +52829,11 @@ public sealed class QueueApi
     /// <param name="filter">Opaque runtime-owned filter object.</param>
     /// <param name="cancellationToken">The <see cref="CancellationToken"/> to monitor for cancellation requests. The default is <see cref="CancellationToken.None"/>.</param>
     /// <returns>Indicates whether a user-facing pending item was removed.</returns>
-    internal async Task<QueueRemoveMostRecentResult> ConsumeSystemNotificationsAsync(object filter, CancellationToken cancellationToken = default)
+    internal async Task<QueueRemoveMostRecentResult> ConsumeSystemNotificationsAsync(object? filter, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(filter);
         _session.ThrowIfDisposed();
 
-        var request = new QueueConsumeSystemNotificationsRequest { SessionId = _session.SessionId, Filter = CopilotClient.ToJsonElementForWire(filter)!.Value };
+        var request = new QueueConsumeSystemNotificationsRequest { SessionId = _session.SessionId, Filter = CopilotClient.ToJsonElementForWire(filter) ?? JsonElement.Parse("null") };
         return await CopilotClient.InvokeRpcAsync<QueueRemoveMostRecentResult>(_session.Rpc, "session.queue.consumeSystemNotifications", [request], cancellationToken);
     }
 
@@ -52914,9 +54207,16 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(AbortRequest))]
 [JsonSerializable(typeof(AbortResult))]
 [JsonSerializable(typeof(AccountAllUsers))]
+[JsonSerializable(typeof(AccountDescribeAuthInfoRequest))]
+[JsonSerializable(typeof(AccountDescribeAuthInfoResult))]
 [JsonSerializable(typeof(AccountGetCurrentAuthResult))]
+[JsonSerializable(typeof(AccountGetGistSupportRequest))]
+[JsonSerializable(typeof(AccountGetGistSupportResult))]
 [JsonSerializable(typeof(AccountGetQuotaRequest))]
 [JsonSerializable(typeof(AccountGetQuotaResult))]
+[JsonSerializable(typeof(AccountGetTokenEnvVarResult))]
+[JsonSerializable(typeof(AccountGetWebUrlRequest))]
+[JsonSerializable(typeof(AccountGetWebUrlResult))]
 [JsonSerializable(typeof(AccountLoginRequest))]
 [JsonSerializable(typeof(AccountLoginResult))]
 [JsonSerializable(typeof(AccountLogoutRequest))]
@@ -53121,6 +54421,9 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ExternalToolTextResultForLlmBinaryResultsForLlm))]
 [JsonSerializable(typeof(ExternalToolTextResultForLlmContent))]
 [JsonSerializable(typeof(ExternalToolTextResultForLlmContentResourceLinkIcon))]
+[JsonSerializable(typeof(FeatureFlagMetadata))]
+[JsonSerializable(typeof(FeatureFlagsMetadataResult))]
+[JsonSerializable(typeof(FeatureFlagsResolveRequest))]
 [JsonSerializable(typeof(FleetStartRequest))]
 [JsonSerializable(typeof(FleetStartResult))]
 [JsonSerializable(typeof(FolderTrustAddParams))]
@@ -53192,6 +54495,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(HostStartRequest))]
 [JsonSerializable(typeof(HostStartResult))]
 [JsonSerializable(typeof(IDictionary<string, JsonElement>))]
+[JsonSerializable(typeof(IDictionary<string, bool>))]
 [JsonSerializable(typeof(IDictionary<string, string>))]
 [JsonSerializable(typeof(IList<AccountAllUsers>))]
 [JsonSerializable(typeof(IList<AuthValidationError>))]
@@ -53207,9 +54511,11 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(InstructionDiscoveryPath))]
 [JsonSerializable(typeof(InstructionDiscoveryPathList))]
 [JsonSerializable(typeof(InstructionSource))]
+[JsonSerializable(typeof(InstructionsDiscoverRepoSourcesRequest))]
 [JsonSerializable(typeof(InstructionsDiscoverRequest))]
 [JsonSerializable(typeof(InstructionsGetDiscoveryPathsRequest))]
 [JsonSerializable(typeof(InstructionsGetSourcesResult))]
+[JsonSerializable(typeof(InstructionsInitPromptResult))]
 [JsonSerializable(typeof(InterruptMainTurnRequest))]
 [JsonSerializable(typeof(InterruptMainTurnResult))]
 [JsonSerializable(typeof(JsonSchemaResponseFormat))]
@@ -53318,6 +54624,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(McpInstallationsRequest))]
 [JsonSerializable(typeof(McpIsServerRunningRequest))]
 [JsonSerializable(typeof(McpIsServerRunningResult))]
+[JsonSerializable(typeof(McpListBuiltinServerNamesResult))]
 [JsonSerializable(typeof(McpListToolsRequest))]
 [JsonSerializable(typeof(McpListToolsResult))]
 [JsonSerializable(typeof(McpOauthAuthenticationStateChangedRequest))]
@@ -53437,6 +54744,8 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(ModelCapabilitiesOverrideLimitsVision))]
 [JsonSerializable(typeof(ModelCapabilitiesOverrideSupports))]
 [JsonSerializable(typeof(ModelCapabilitiesSupports))]
+[JsonSerializable(typeof(ModelGetReasoningSummariesRequest))]
+[JsonSerializable(typeof(ModelGetReasoningSummariesResult))]
 [JsonSerializable(typeof(ModelList))]
 [JsonSerializable(typeof(ModelMessage))]
 [JsonSerializable(typeof(ModelPickerPersistenceRequest))]
@@ -53643,6 +54952,10 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(RemoteSessionConnectionResult))]
 [JsonSerializable(typeof(RemoteSessionMetadataRepository))]
 [JsonSerializable(typeof(RemoteSessionMetadataValue))]
+[JsonSerializable(typeof(RepoSettingsReadRawRequest))]
+[JsonSerializable(typeof(RepoSettingsReadRawResult))]
+[JsonSerializable(typeof(RepoSettingsWriteAllRequest))]
+[JsonSerializable(typeof(RepoSettingsWriteKeyRequest))]
 [JsonSerializable(typeof(ResponseFormat))]
 [JsonSerializable(typeof(SandboxConfig))]
 [JsonSerializable(typeof(SandboxConfigAuth))]
@@ -53940,6 +55253,7 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(SessionsUpdateWorkspaceFieldsRequest))]
 [JsonSerializable(typeof(SessionsUpdateWorkspaceFieldsResult))]
 [JsonSerializable(typeof(SettableAuthInfo))]
+[JsonSerializable(typeof(SettingsEditResult))]
 [JsonSerializable(typeof(ShellCancelUserRequestedRequest))]
 [JsonSerializable(typeof(ShellCredentials))]
 [JsonSerializable(typeof(ShellExecRequest))]
@@ -54062,8 +55376,28 @@ internal static class ClientGlobalApiRegistration
 [JsonSerializable(typeof(UpdateSubagentSettingsRequestSubagents))]
 [JsonSerializable(typeof(UserRequestedShellCommandResult))]
 [JsonSerializable(typeof(UserSettingMetadata))]
+[JsonSerializable(typeof(UserSettingsApplyTopKeyRequest))]
+[JsonSerializable(typeof(UserSettingsApplyTopKeyResult))]
+[JsonSerializable(typeof(UserSettingsEditRequest))]
+[JsonSerializable(typeof(UserSettingsGetPathsRequest))]
+[JsonSerializable(typeof(UserSettingsGetPathsResult))]
 [JsonSerializable(typeof(UserSettingsGetResult))]
+[JsonSerializable(typeof(UserSettingsGovernanceKeysResult))]
+[JsonSerializable(typeof(UserSettingsLoadForEditResult))]
+[JsonSerializable(typeof(UserSettingsNormalizeRequest))]
+[JsonSerializable(typeof(UserSettingsNormalizeResult))]
+[JsonSerializable(typeof(UserSettingsProblem))]
+[JsonSerializable(typeof(UserSettingsProblemLocation))]
+[JsonSerializable(typeof(UserSettingsProblemSource))]
+[JsonSerializable(typeof(UserSettingsProblemsRequest))]
+[JsonSerializable(typeof(UserSettingsProblemsResult))]
 [JsonSerializable(typeof(UserSettingsSetRequest))]
+[JsonSerializable(typeof(UserSettingsUpdateRequest))]
+[JsonSerializable(typeof(UserSettingsUpdateResult))]
+[JsonSerializable(typeof(UserSettingsValidateRequest))]
+[JsonSerializable(typeof(UserSettingsValidateResult))]
+[JsonSerializable(typeof(UserSettingsValidationIssue))]
+[JsonSerializable(typeof(UserSettingsWriteAllRequest))]
 [JsonSerializable(typeof(VisibilityGetResult))]
 [JsonSerializable(typeof(VisibilitySetRequest))]
 [JsonSerializable(typeof(VisibilitySetResult))]

@@ -78,6 +78,13 @@ impl<'a> ClientRpc<'a> {
         }
     }
 
+    /// `featureFlags.*` sub-namespace.
+    pub fn feature_flags(&self) -> ClientRpcFeatureFlags<'a> {
+        ClientRpcFeatureFlags {
+            client: self.client,
+        }
+    }
+
     /// `git.*` sub-namespace.
     pub fn git(&self) -> ClientRpcGit<'a> {
         ClientRpcGit {
@@ -158,6 +165,13 @@ impl<'a> ClientRpc<'a> {
     /// `plugins.*` sub-namespace.
     pub fn plugins(&self) -> ClientRpcPlugins<'a> {
         ClientRpcPlugins {
+            client: self.client,
+        }
+    }
+
+    /// `repo.*` sub-namespace.
+    pub fn repo(&self) -> ClientRpcRepo<'a> {
+        ClientRpcRepo {
             client: self.client,
         }
     }
@@ -463,6 +477,123 @@ impl<'a> ClientRpcAccount<'a> {
             .await?;
         Ok(serde_json::from_value(_value)?)
     }
+
+    /// Renders the sign-in banner and the one-line account description the runtime uses for an authentication identity. The runtime words these in several places for its own callers, so a host that announces a sign-in or an account switch should render them from here rather than composing its own, which would let the two spellings drift apart.
+    ///
+    /// Wire method: `account.describeAuthInfo`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The authentication identity whose shared wording should be rendered.
+    ///
+    /// # Returns
+    ///
+    /// The wording the runtime uses for an authentication identity.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn describe_auth_info(
+        &self,
+        params: AccountDescribeAuthInfoRequest,
+    ) -> Result<AccountDescribeAuthInfoResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::ACCOUNT_DESCRIBEAUTHINFO, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Reports whether the supplied identity can create gists. Gists are unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed Users on github.com, so a host that offers gist actions should hide or disable them when this reports no support.
+    ///
+    /// Wire method: `account.getGistSupport`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The authentication identity whose gist support should be reported.
+    ///
+    /// # Returns
+    ///
+    /// Whether the identity can create gists, and why not when it cannot.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_gist_support(
+        &self,
+        params: AccountGetGistSupportRequest,
+    ) -> Result<AccountGetGistSupportResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::ACCOUNT_GETGISTSUPPORT, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Resolves a path on the identity's GitHub host into an absolute URL, so a host can link to settings or documentation on the enterprise instance the user is signed in to rather than to github.com. Falls back to the public host when no identity is supplied.
+    ///
+    /// Wire method: `account.getWebUrl`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A path to resolve against the GitHub host an identity is signed in to.
+    ///
+    /// # Returns
+    ///
+    /// An absolute URL on the identity's GitHub host.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_web_url(
+        &self,
+        params: AccountGetWebUrlRequest,
+    ) -> Result<AccountGetWebUrlResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::ACCOUNT_GETWEBURL, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Names the environment variable supplying a classic personal access token, if one is set. A classic token cannot be upgraded in place, so a host that finds one should tell the user which variable to unset rather than starting an interactive sign-in that the variable would override.
+    ///
+    /// Wire method: `account.getTokenEnvVar`.
+    ///
+    /// # Returns
+    ///
+    /// The environment variable supplying a classic personal access token, when one is set.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_token_env_var(&self) -> Result<AccountGetTokenEnvVarResult, Error> {
+        let wire_params = serde_json::json!({});
+        let _value = self
+            .client
+            .call(rpc_methods::ACCOUNT_GETTOKENENVVAR, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
 }
 
 /// `agentRegistry.*` RPCs.
@@ -539,6 +670,39 @@ impl<'a> ClientRpcAgents<'a> {
         Ok(serde_json::from_value(_value)?)
     }
 
+    /// Discovers custom agents across user, project, plugin, and remote sources.
+    ///
+    /// Wire method: `agents.discover`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional project paths to include in agent discovery.
+    ///
+    /// # Returns
+    ///
+    /// Agents discovered across user, project, plugin, and remote sources.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`AgentsDiscoverOptions`], including inputs added after [`AgentsDiscoverRequest`].
+    pub async fn discover_with_options(
+        &self,
+        params: AgentsDiscoverOptions,
+    ) -> Result<ServerAgentList, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::AGENTS_DISCOVER, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
     /// Returns the canonical directories where a client may create custom agents that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
     ///
     /// Wire method: `agents.getDiscoveryPaths`.
@@ -561,6 +725,39 @@ impl<'a> ClientRpcAgents<'a> {
     pub async fn get_discovery_paths(
         &self,
         params: AgentsGetDiscoveryPathsRequest,
+    ) -> Result<AgentDiscoveryPathList, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::AGENTS_GETDISCOVERYPATHS, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Returns the canonical directories where a client may create custom agents that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
+    ///
+    /// Wire method: `agents.getDiscoveryPaths`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional project paths to include when enumerating agent discovery directories.
+    ///
+    /// # Returns
+    ///
+    /// Canonical locations where custom agents can be created so the runtime will recognize them.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`AgentsGetDiscoveryPathsOptions`], including inputs added after [`AgentsGetDiscoveryPathsRequest`].
+    pub async fn get_discovery_paths_with_options(
+        &self,
+        params: AgentsGetDiscoveryPathsOptions,
     ) -> Result<AgentDiscoveryPathList, Error> {
         let wire_params = serde_json::to_value(params)?;
         let _value = self
@@ -1156,6 +1353,69 @@ impl<'a> ClientRpcExtensions<'a> {
     }
 }
 
+/// `featureFlags.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcFeatureFlags<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcFeatureFlags<'a> {
+    /// Lists every feature flag this runtime declares, with the population each one is declared for, its experimental description, and the online-experiment flag it maps to. This is the static catalog: it describes how each flag is defined, not whether it is on for anyone. Use `featureFlags.resolve` for static values with caller overrides, not active runtime values or experiment assignments.
+    ///
+    /// Wire method: `featureFlags.listMetadata`.
+    ///
+    /// # Returns
+    ///
+    /// Every feature flag this runtime declares, with the shape each one was declared with.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn list_metadata(&self) -> Result<FeatureFlagsMetadataResult, Error> {
+        let wire_params = serde_json::json!({});
+        let _value = self
+            .client
+            .call(rpc_methods::FEATUREFLAGS_LISTMETADATA, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Computes static feature flags from the supplied population and overrides without changing runtime state or verifying audience membership. Starts from declared availability, then applies direct feature-flag environment values, user settings, and explicit `flagOverrides`. It does not apply `COPILOT_EXP_*` experiment assignments, authenticated startup gates, or active runtime state. Settings include `enabledFeatureFlags`, the legacy `feature_flags.enabled` list, and supported convenience settings. Supply `baseFlags` to use an existing flag set instead of declared availability. Omit `isStaffGitHub` or `isStaffMicrosoft` when membership was never recorded: a legacy staff account then counts as both populations.
+    ///
+    /// Wire method: `featureFlags.resolve`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Caller population and overrides for static feature-flag resolution, independent of experiment assignments and active runtime state.
+    ///
+    /// # Returns
+    ///
+    /// The resolved feature flags, keyed by flag name.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn resolve(
+        &self,
+        params: FeatureFlagsResolveRequest,
+    ) -> Result<FeatureFlagsResolveResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::FEATUREFLAGS_RESOLVE, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+}
+
 /// `git.*` RPCs.
 #[derive(Clone, Copy)]
 pub struct ClientRpcGit<'a> {
@@ -1514,6 +1774,39 @@ impl<'a> ClientRpcHooks<'a> {
             .await?;
         Ok(serde_json::from_value(_value)?)
     }
+
+    /// Discovers hook actions enabled under server-side discovery settings from user, repository, plugin, and managed-policy sources.
+    ///
+    /// Wire method: `hooks.discover`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional project paths and host-exclusion behavior for server-scoped hook discovery.
+    ///
+    /// # Returns
+    ///
+    /// Server-discovered hook actions and partial-load diagnostics from user, repository, plugin, and managed-policy sources. Concrete sessions may include additional session-specific hook sources.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`HooksDiscoverOptions`], including inputs added after [`HooksDiscoverRequest`].
+    pub async fn discover_with_options(
+        &self,
+        params: HooksDiscoverOptions,
+    ) -> Result<HooksDiscoverResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::HOOKS_DISCOVER, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
 }
 
 /// `host.*` RPCs.
@@ -1825,6 +2118,30 @@ pub struct ClientRpcInstructions<'a> {
 }
 
 impl<'a> ClientRpcInstructions<'a> {
+    /// Returns the prompt the `init` command runs to author repository instructions. A host offering its own initialize action sends this text so the instructions it produces match the ones the CLI produces. The text is fixed for a build and depends on no configuration, session or repository.
+    ///
+    /// Wire method: `instructions.getInitPrompt`.
+    ///
+    /// # Returns
+    ///
+    /// The prompt the init command runs.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_init_prompt(&self) -> Result<InstructionsInitPromptResult, Error> {
+        let wire_params = serde_json::json!({});
+        let _value = self
+            .client
+            .call(rpc_methods::INSTRUCTIONS_GETINITPROMPT, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
     /// Discovers instruction sources across user, repository, and plugin sources.
     ///
     /// Wire method: `instructions.discover`.
@@ -1852,6 +2169,73 @@ impl<'a> ClientRpcInstructions<'a> {
         let _value = self
             .client
             .call(rpc_methods::INSTRUCTIONS_DISCOVER, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Discovers instruction sources across user, repository, and plugin sources.
+    ///
+    /// Wire method: `instructions.discover`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional project paths to include in instruction discovery.
+    ///
+    /// # Returns
+    ///
+    /// Instruction sources discovered across user, repository, and plugin sources.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`InstructionsDiscoverOptions`], including inputs added after [`InstructionsDiscoverRequest`].
+    pub async fn discover_with_options(
+        &self,
+        params: InstructionsDiscoverOptions,
+    ) -> Result<ServerInstructionSourceList, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::INSTRUCTIONS_DISCOVER, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Discovers the instruction sources for one caller-named location and returns them in the order the runtime applies them. `discover` answers for a set of project paths and derives the rest of its scope itself; this one instead takes every argument from the caller — the extra directories to scan and whether to descend into nested instruction files — and honors them as given. It also includes instruction directories from trusted repository settings, matching native repository discovery. Use it when the caller knows its own scope and no session exists to derive that scope from, such as a host reporting how many instruction files a directory contributes before any session starts. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.
+    ///
+    /// Wire method: `instructions.discoverRepoSources`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Explicit discovery arguments for one location, supplied by the caller rather than derived from a session.
+    ///
+    /// # Returns
+    ///
+    /// Instruction sources discovered across user, repository, and plugin sources.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn discover_repo_sources(
+        &self,
+        params: InstructionsDiscoverRepoSourcesRequest,
+    ) -> Result<ServerInstructionSourceList, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(
+                rpc_methods::INSTRUCTIONS_DISCOVERREPOSOURCES,
+                Some(wire_params),
+            )
             .await?;
         Ok(serde_json::from_value(_value)?)
     }
@@ -1888,6 +2272,62 @@ impl<'a> ClientRpcInstructions<'a> {
             )
             .await?;
         Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Returns the canonical files and directories where a client may create custom instructions that the runtime will recognize, including ones that do not exist yet. Repository targets become active once created.
+    ///
+    /// Wire method: `instructions.getDiscoveryPaths`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional project paths to include when enumerating instruction discovery targets.
+    ///
+    /// # Returns
+    ///
+    /// Canonical files and directories where custom instructions can be created so the runtime will recognize them.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`InstructionsGetDiscoveryPathsOptions`], including inputs added after [`InstructionsGetDiscoveryPathsRequest`].
+    pub async fn get_discovery_paths_with_options(
+        &self,
+        params: InstructionsGetDiscoveryPathsOptions,
+    ) -> Result<InstructionDiscoveryPathList, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(
+                rpc_methods::INSTRUCTIONS_GETDISCOVERYPATHS,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Drops the runtime's in-memory cache of discovered custom instructions so the next discovery reads them from disk again. A host calls this after it changes instruction files, or after it trusts a folder whose instructions an earlier discovery skipped, so that a session started afterwards sees the current files instead of a cached earlier answer. The call performs no I/O of its own and removes nothing from disk; it only invalidates, so the cost lands on the next discovery.         Returns once the cache is clear, which is what lets a caller order a session start after it. Marked internal because it exists to carry a CLI call site off the napi boundary onto the SDK contract; it is migration plumbing, not a surface consumers are meant to depend on.
+    ///
+    /// Wire method: `instructions.clearCache`.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn clear_cache(&self) -> Result<(), Error> {
+        let wire_params = serde_json::json!({});
+        let _value = self
+            .client
+            .call(rpc_methods::INSTRUCTIONS_CLEARCACHE, Some(wire_params))
+            .await?;
+        Ok(())
     }
 }
 
@@ -2285,6 +2725,32 @@ impl<'a> ClientRpcMcp<'a> {
         let _value = self
             .client
             .call(rpc_methods::MCP_DISCOVER, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Lists the MCP servers the runtime supplies itself, so a host that disables the built-ins wholesale suppresses exactly the set the runtime would otherwise add. The names are fixed for a build and depend on no configuration, session or account.
+    ///
+    /// Wire method: `mcp.listBuiltinServerNames`.
+    ///
+    /// # Returns
+    ///
+    /// Names of the MCP servers the runtime supplies itself.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn list_builtin_server_names(
+        &self,
+    ) -> Result<McpListBuiltinServerNamesResult, Error> {
+        let wire_params = serde_json::json!({});
+        let _value = self
+            .client
+            .call(rpc_methods::MCP_LISTBUILTINSERVERNAMES, Some(wire_params))
             .await?;
         Ok(serde_json::from_value(_value)?)
     }
@@ -3404,6 +3870,108 @@ impl<'a> ClientRpcPluginsMarketplaces<'a> {
             .call(rpc_methods::PLUGINS_MARKETPLACES_REFRESH, Some(wire_params))
             .await?;
         Ok(serde_json::from_value(_value)?)
+    }
+}
+
+/// `repo.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcRepo<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcRepo<'a> {
+    /// `repo.settings.*` sub-namespace.
+    pub fn settings(&self) -> ClientRpcRepoSettings<'a> {
+        ClientRpcRepoSettings {
+            client: self.client,
+        }
+    }
+}
+
+/// `repo.settings.*` RPCs.
+#[derive(Clone, Copy)]
+pub struct ClientRpcRepoSettings<'a> {
+    pub(crate) client: &'a Client,
+}
+
+impl<'a> ClientRpcRepoSettings<'a> {
+    /// Reads one repository settings file without settings normalization or layering. The existing JSONC parser accepts comments and trailing commas and applies its prototype-safety rules. Missing or blank files return an empty valid config. Invalid files return an empty config with invalid=true; other read failures reject.
+    ///
+    /// Wire method: `repo.settings.readRaw`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Which repository settings file to read.
+    ///
+    /// # Returns
+    ///
+    /// Parsed repository settings without normalization or layering.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn read_raw(
+        &self,
+        params: RepoSettingsReadRawRequest,
+    ) -> Result<RepoSettingsReadRawResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::REPO_SETTINGS_READRAW, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Writes or removes one allowed top-level repository setting through the existing validator and file lock. Preserves unrelated stored keys. Invalid keys, values, existing documents, and I/O errors reject without replacing the file. Deletion requires delete=true; otherwise value must be present.
+    ///
+    /// Wire method: `repo.settings.writeKey`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - One key to write or remove in a repository settings file.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn write_key(&self, params: RepoSettingsWriteKeyRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::REPO_SETTINGS_WRITEKEY, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Replaces the repository-overridable settings in one locked write. Allowed keys present in settings are validated and written; allowed keys absent from settings are removed. Other input keys are ignored, and unknown keys already stored in the file remain unchanged. Invalid values or an invalid existing file reject without a partial write.
+    ///
+    /// Wire method: `repo.settings.writeAll`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The complete set of repository-overridable settings to store.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn write_all(&self, params: RepoSettingsWriteAllRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::REPO_SETTINGS_WRITEALL, Some(wire_params))
+            .await?;
+        Ok(())
     }
 }
 
@@ -5038,6 +5606,39 @@ impl<'a> ClientRpcSkills<'a> {
             .await?;
         Ok(serde_json::from_value(_value)?)
     }
+
+    /// Returns the canonical directories where a client may create skills that the runtime will recognize, including ones that do not exist yet. Project directories become active once created.
+    ///
+    /// Wire method: `skills.getDiscoveryPaths`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Optional project paths to enumerate.
+    ///
+    /// # Returns
+    ///
+    /// Canonical locations where skills can be created so the runtime will recognize them.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    ///
+    /// Accepts [`SkillsGetDiscoveryPathsOptions`], including inputs added after [`SkillsGetDiscoveryPathsRequest`].
+    pub async fn get_discovery_paths_with_options(
+        &self,
+        params: SkillsGetDiscoveryPathsOptions,
+    ) -> Result<SkillDiscoveryPathList, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::SKILLS_GETDISCOVERYPATHS, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
 }
 
 /// `skills.config.*` RPCs.
@@ -5356,6 +5957,37 @@ impl<'a> ClientRpcUserSettings<'a> {
         Ok(serde_json::from_value(_value)?)
     }
 
+    /// Resolves the on-disk locations of the settings files this runtime reads, so a consumer can show or open them. The user path is the same file `user.settings.get`, `user.settings.load`, and `user.settings.set` operate on. Supply `repoRoot` to also resolve that repository's checked-in and local settings paths. A path is reported whether or not the file exists.
+    ///
+    /// Wire method: `user.settings.getPaths`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Selects which settings file paths to resolve.
+    ///
+    /// # Returns
+    ///
+    /// On-disk locations of the settings files this runtime reads. A path is reported whether or not the file exists.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn get_paths(
+        &self,
+        params: UserSettingsGetPathsRequest,
+    ) -> Result<UserSettingsGetPathsResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_GETPATHS, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
     /// Writes one or more user settings to settings.json, replacing each provided top-level key. A key whose value is null is removed.
     ///
     /// Wire method: `user.settings.set`.
@@ -5378,6 +6010,272 @@ impl<'a> ClientRpcUserSettings<'a> {
             .call(rpc_methods::USER_SETTINGS_SET, Some(wire_params))
             .await?;
         Ok(())
+    }
+
+    /// Lists the top-level user-setting keys by who is allowed to govern them: `repo` keys a repository may override through `.github/copilot/settings.json`, `claudeRepo` keys a repository may override through a Claude-compatible config, and `managed` keys an enterprise policy may fix. The lists are static for a given runtime build and fail closed: a key absent from a list cannot be governed that way.
+    ///
+    /// Wire method: `user.settings.listGovernanceKeys`.
+    ///
+    /// # Returns
+    ///
+    /// Top-level user-setting keys grouped by who may govern them.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn list_governance_keys(
+        &self,
+    ) -> Result<UserSettingsGovernanceKeysResult, Error> {
+        let wire_params = serde_json::json!({});
+        let _value = self
+            .client
+            .call(
+                rpc_methods::USER_SETTINGS_LISTGOVERNANCEKEYS,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Atomically edits one canonical user setting inside its settings-file lock. Reads, canonicalizes touched aliases, applies the edit, validates the resulting top-level setting and writes before releasing the lock. An explicit autoUpdatesChannel set completes the staff migration in the same transaction. Only a malformed existing file returns `invalid`; refused keys, invalid values and I/O errors reject the call.
+    ///
+    /// Wire method: `user.settings.edit`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - One atomic edit of a canonical setting in settings.json.
+    ///
+    /// # Returns
+    ///
+    /// Outcome of an atomic user or repository settings edit.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn edit(
+        &self,
+        params: UserSettingsEditRequest,
+    ) -> Result<SettingsEditResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_EDIT, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Rewrites legacy and snake_case setting names in a settings object to their canonical spelling. A caller editing settings.json must normalize before writing: a legacy key left in place survives the write, is re-normalized on the next load, and silently shadows the canonical value the write just stored.
+    ///
+    /// Wire method: `user.settings.normalize`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Settings object whose key names should be canonicalized.
+    ///
+    /// # Returns
+    ///
+    /// Settings object with canonical key names.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn normalize(
+        &self,
+        params: UserSettingsNormalizeRequest,
+    ) -> Result<UserSettingsNormalizeResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_NORMALIZE, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Diagnoses a set of already-loaded settings layers, reporting each key that will not take effect and why. Settings load tolerantly so that one bad key does not stop a session from starting; this method surfaces what was dropped so a caller can report it instead of silently ignoring the user's intent. Takes the layers as given rather than reading them, so a caller can diagnose exactly the content it is showing, including unsaved edits. Never echoes a setting's value, because a value may be a token or another secret. Marked internal because it exists to carry a CLI call site off the native addon, not to serve a consumer-facing need; it becomes public once an SDK consumer needs to inspect settings health itself.
+    ///
+    /// Wire method: `user.settings.diagnoseProblems`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The settings layers to diagnose.
+    ///
+    /// # Returns
+    ///
+    /// The settings that will not take effect across the given layers.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn diagnose_problems(
+        &self,
+        params: UserSettingsProblemsRequest,
+    ) -> Result<UserSettingsProblemsResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(
+                rpc_methods::USER_SETTINGS_DIAGNOSEPROBLEMS,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Validates one top-level setting subtree and writes just that key to settings.json as a single step. Doing both here closes the race a caller cannot close itself: between a separate preflight read and the write, the file may change. Rewriting only the touched key keeps legacy siblings out of settings.json. Answers a status rather than failing, so a validation problem and a write problem stay distinguishable.
+    ///
+    /// Wire method: `user.settings.applyTopKey`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A single top-level setting subtree to validate and write.
+    ///
+    /// # Returns
+    ///
+    /// Outcome of validating and writing one top-level setting subtree.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn apply_top_key(
+        &self,
+        params: UserSettingsApplyTopKeyRequest,
+    ) -> Result<UserSettingsApplyTopKeyResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_APPLYTOPKEY, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Replaces the user settings file's entire content in one write. A key absent from `settings` is removed, which is what distinguishes this from `user.settings.set`: that one merges, so it can never clear a key the caller has dropped. For a caller saving the result of a raw edit, a merge would silently resurrect every key the user deleted. Records the same one-time mutation marks a per-key write records, so a setting the user has now chosen explicitly stops being migrated for them.
+    ///
+    /// Wire method: `user.settings.writeAll`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - The whole content to store in the user settings file.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn write_all(&self, params: UserSettingsWriteAllRequest) -> Result<(), Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_WRITEALL, Some(wire_params))
+            .await?;
+        Ok(())
+    }
+
+    /// Merges a partial object into one top-level user setting, re-reading the stored value inside this runtime process's settings.json write lock so that concurrent writers in this process to different sub-fields of the same key do not clobber each other. Unlike `user.settings.set`, which replaces a key's whole value with what the caller last read, this keeps sub-fields the caller did not name when both the stored value and supplied value are objects; otherwise the supplied value replaces the stored value. Use it whenever two independent surfaces own different sub-fields of one setting. Returns the key's stored value after the write, in `value`.
+    ///
+    /// Wire method: `user.settings.update`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Names the user setting to merge into, and the partial object to merge.
+    ///
+    /// # Returns
+    ///
+    /// The stored value of the user setting after the merge.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn update(
+        &self,
+        params: UserSettingsUpdateRequest,
+    ) -> Result<UserSettingsUpdateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_UPDATE, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Reads settings.json as stored for a caller that is about to edit it. Unlike `user.settings.get`, this returns file values rather than per-key metadata and defaults. Reports `missing` for an absent file and `invalid` when the existing file will not parse. Retired config.json and extensionless files are not read.
+    ///
+    /// Wire method: `user.settings.loadForEdit`.
+    ///
+    /// # Returns
+    ///
+    /// Contents of settings.json as stored, for a caller about to rewrite it.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn load_for_edit(&self) -> Result<UserSettingsLoadForEditResult, Error> {
+        let wire_params = serde_json::json!({});
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_LOADFOREDIT, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Validates one top-level setting subtree without writing it, reporting each problem with the path it applies to. Scoped to a single top-level key on purpose: validating the whole file would reject an edit whenever an unrelated pre-existing field is malformed, locking the user out of the very tool that could fix it.
+    ///
+    /// Wire method: `user.settings.validate`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - A single top-level setting subtree to validate.
+    ///
+    /// # Returns
+    ///
+    /// Outcome of validating one top-level setting subtree.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub(crate) async fn validate(
+        &self,
+        params: UserSettingsValidateRequest,
+    ) -> Result<UserSettingsValidateResult, Error> {
+        let wire_params = serde_json::to_value(params)?;
+        let _value = self
+            .client
+            .call(rpc_methods::USER_SETTINGS_VALIDATE, Some(wire_params))
+            .await?;
+        Ok(serde_json::from_value(_value)?)
     }
 }
 
@@ -11002,6 +11900,42 @@ impl<'a> SessionRpcModel<'a> {
             .client()
             .call(
                 rpc_methods::SESSION_MODEL_SETREASONINGEFFORT,
+                Some(wire_params),
+            )
+            .await?;
+        Ok(serde_json::from_value(_value)?)
+    }
+
+    /// Computes whether the session's current model shows reasoning summaries and how a host should present them: the default Ctrl+T visibility, reasoning headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is redundant. The runtime folds in the session's model catalog, selection and reasoning-summaries experiment assignment; the host supplies only its own persisted setting and current visibility. This method reads the session's resolved model catalog rather than resolving it, so call `session.model.list` first on a session that has not listed models or run a turn; until then the result is `ready: false`. A session that resolves models without a Copilot catalog, that is a BYOK registry or an alternate provider, never caches one and stays `ready: false`.
+    ///
+    /// Wire method: `session.model.getReasoningSummaries`.
+    ///
+    /// # Parameters
+    ///
+    /// * `params` - Host presentation state the reasoning-summaries policy depends on.
+    ///
+    /// # Returns
+    ///
+    /// Reasoning-summaries presentation policy for the session's current model.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Experimental.** This API is part of an experimental wire-protocol surface
+    /// and may change or be removed in future SDK or CLI releases. Pin both the
+    /// SDK and CLI versions if your code depends on it.
+    ///
+    /// </div>
+    pub async fn get_reasoning_summaries(
+        &self,
+        params: ModelGetReasoningSummariesRequest,
+    ) -> Result<ModelGetReasoningSummariesResult, Error> {
+        let mut wire_params = serde_json::to_value(params)?;
+        wire_params["sessionId"] = serde_json::Value::String(self.session.id().to_string());
+        let _value = self
+            .session
+            .client()
+            .call(
+                rpc_methods::SESSION_MODEL_GETREASONINGSUMMARIES,
                 Some(wire_params),
             )
             .await?;

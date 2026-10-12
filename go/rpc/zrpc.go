@@ -39,6 +39,28 @@ type AccountAllUsers struct {
 	Token *string `json:"token,omitempty"`
 }
 
+// The authentication identity whose shared wording should be rendered.
+// Experimental: AccountDescribeAuthInfoRequest is part of an experimental API and may
+// change or be removed.
+// Internal: AccountDescribeAuthInfoRequest is an internal SDK API and is not part of the
+// public surface.
+type AccountDescribeAuthInfoRequest struct {
+	// Identity to describe.
+	Identity AuthIdentity `json:"identity"`
+}
+
+// The wording the runtime uses for an authentication identity.
+// Experimental: AccountDescribeAuthInfoResult is part of an experimental API and may change
+// or be removed.
+// Internal: AccountDescribeAuthInfoResult is an internal SDK API and is not part of the
+// public surface.
+type AccountDescribeAuthInfoResult struct {
+	// One-line description of the identity, suitable after a verb such as "Switched to".
+	Description string `json:"description"`
+	// Sign-in banner announcing the authenticated user.
+	Message string `json:"message"`
+}
+
 // List of all authenticated users
 // Experimental: AccountGetAllUsersResult is part of an experimental API and may change or
 // be removed.
@@ -52,6 +74,30 @@ type AccountGetCurrentAuthResult struct {
 	AuthErrors []string `json:"authErrors,omitzero"`
 	// Current authentication information, if authenticated
 	AuthInfo AuthInfo `json:"authInfo,omitempty"`
+}
+
+// The authentication identity whose gist support should be reported.
+// Experimental: AccountGetGistSupportRequest is part of an experimental API and may change
+// or be removed.
+// Internal: AccountGetGistSupportRequest is an internal SDK API and is not part of the
+// public surface.
+type AccountGetGistSupportRequest struct {
+	// Identity to evaluate.
+	Identity AuthIdentity `json:"identity"`
+}
+
+// Whether the identity can create gists, and why not when it cannot.
+// Experimental: AccountGetGistSupportResult is part of an experimental API and may change
+// or be removed.
+// Internal: AccountGetGistSupportResult is an internal SDK API and is not part of the
+// public surface.
+type AccountGetGistSupportResult struct {
+	// Machine-readable reason category when unsupported.
+	Kind *string `json:"kind,omitempty"`
+	// Human-readable explanation to show where the gist action would have been.
+	Reason *string `json:"reason,omitempty"`
+	// True when the identity can create gists.
+	Supported bool `json:"supported"`
 }
 
 // Experimental: AccountGetQuotaRequest is part of an experimental API and may change or be
@@ -71,6 +117,40 @@ type AccountGetQuotaRequest struct {
 type AccountGetQuotaResult struct {
 	// Quota snapshots keyed by type (e.g., chat, completions, premium_interactions)
 	QuotaSnapshots map[string]AccountQuotaSnapshot `json:"quotaSnapshots"`
+}
+
+// The environment variable supplying a classic personal access token, when one is set.
+// Experimental: AccountGetTokenEnvVarResult is part of an experimental API and may change
+// or be removed.
+// Internal: AccountGetTokenEnvVarResult is an internal SDK API and is not part of the
+// public surface.
+type AccountGetTokenEnvVarResult struct {
+	// Variable name, for example `GH_TOKEN`. Absent when no classic token is present in the
+	// environment.
+	Name *string `json:"name,omitempty"`
+}
+
+// A path to resolve against the GitHub host an identity is signed in to.
+// Experimental: AccountGetWebURLRequest is part of an experimental API and may change or be
+// removed.
+// Internal: AccountGetWebURLRequest is an internal SDK API and is not part of the public
+// surface.
+type AccountGetWebURLRequest struct {
+	// Identity whose host the path resolves against. Omit to resolve against the public
+	// github.com host.
+	Identity *AuthIdentity `json:"identity,omitempty"`
+	// Host-relative path, without a leading slash, for example `settings/copilot/features`.
+	Path string `json:"path"`
+}
+
+// An absolute URL on the identity's GitHub host.
+// Experimental: AccountGetWebURLResult is part of an experimental API and may change or be
+// removed.
+// Internal: AccountGetWebURLResult is an internal SDK API and is not part of the public
+// surface.
+type AccountGetWebURLResult struct {
+	// Absolute URL for the requested path.
+	URL string `json:"url"`
 }
 
 // Credentials to validate and store. Omit login to resolve the authenticated user from the
@@ -226,6 +306,8 @@ type AgentInfo struct {
 	DisableModelInvocation *bool `json:"disableModelInvocation,omitempty"`
 	// Human-readable display name
 	DisplayName string `json:"displayName"`
+	// Declarative hook actions keyed by event name, executed only while this agent is active.
+	Hooks map[string][]any `json:"hooks,omitzero"`
 	// Stable identifier for selection. For most agents this is the same as `name`; for
 	// plugin/builtin agents it may differ. Always populated; defaults to `name` when no
 	// distinct id was assigned.
@@ -506,6 +588,11 @@ type AgentsCustomAgentInitialModelDecisionResult struct {
 // Experimental: AgentsDiscoverRequest is part of an experimental API and may change or be
 // removed.
 type AgentsDiscoverRequest struct {
+	// Explicit discovery-only agent roots, separate from customAgents and filesystem grants.
+	// Available without ambient discovery, subject to managed/source disables. Relative paths
+	// resolve against the request's effective working directory when supplied. Null and
+	// omission are equivalent; an empty array contributes no explicit roots.
+	AgentDirectories []string `json:"agentDirectories,omitzero"`
 	// When true, omit the host's agents (the user-level agent directory and all plugin agents),
 	// leaving only project and remote agents. For multitenant deployments.
 	ExcludeHostAgents *bool `json:"excludeHostAgents,omitempty"`
@@ -639,6 +726,11 @@ type AgentsGetBuiltinsResult struct {
 // Experimental: AgentsGetDiscoveryPathsRequest is part of an experimental API and may
 // change or be removed.
 type AgentsGetDiscoveryPathsRequest struct {
+	// Explicit discovery-only agent roots to enumerate, including configured missing
+	// directories. Relative paths resolve against the request's effective working directory
+	// when supplied. These are not filesystem grants or preferred creation targets. Null and
+	// omission are equivalent.
+	AgentDirectories []string `json:"agentDirectories,omitzero"`
 	// When true, omit the host's user-level agent directory, leaving only project directories.
 	// For multitenant deployments (mirrors `discover`'s `excludeHostAgents`).
 	ExcludeHostAgents *bool `json:"excludeHostAgents,omitempty"`
@@ -4954,6 +5046,82 @@ type ExternalToolTextResultForLlmContentResourceLinkIcon struct {
 	Theme *ExternalToolTextResultForLlmContentResourceLinkIconTheme `json:"theme,omitempty"`
 }
 
+// The declared shape of one feature flag, independent of any caller population.
+// Experimental: FeatureFlagMetadata is part of an experimental API and may change or be
+// removed.
+// Internal: FeatureFlagMetadata is an internal SDK API and is not part of the public
+// surface.
+type FeatureFlagMetadata struct {
+	// The population the flag is declared for before any environment or user-settings override
+	// is applied.
+	// Internal: Availability is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Availability FeatureFlagAvailability `json:"availability"`
+	// Whether the flag participates in the CAPI sanity suite.
+	CapiSanity bool `json:"capiSanity"`
+	// Text shown to a user choosing whether to turn the flag on in experimental mode. Absent
+	// when the flag is not user-facing.
+	ExperimentalDescription *string `json:"experimentalDescription,omitempty"`
+	// The online-experiment (ExP) flag this maps to, when the flag is assigned by an experiment
+	// rather than declared statically.
+	ExpFlag *string `json:"expFlag,omitempty"`
+	// Environment variable that overrides this flag's experiment assignment locally in the
+	// experiment service, not in `featureFlags.resolve`. Present exactly when `expFlag` is, and
+	// derived from it, so a caller reads a local override without reproducing the naming rule.
+	ExpFlagEnvVar *string `json:"expFlagEnvVar,omitempty"`
+	// The flag's name, matching the key it is listed under.
+	Name string `json:"name"`
+}
+
+// Every feature flag this runtime declares, with the shape each one was declared with.
+// Experimental: FeatureFlagsMetadataResult is part of an experimental API and may change or
+// be removed.
+// Internal: FeatureFlagsMetadataResult is an internal SDK API and is not part of the public
+// surface.
+type FeatureFlagsMetadataResult struct {
+	// Declared feature flags keyed by flag name.
+	// Internal: Flags is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Flags map[string]FeatureFlagMetadata `json:"flags"`
+}
+
+// Caller population and overrides for static feature-flag resolution, independent of
+// experiment assignments and active runtime state.
+// Experimental: FeatureFlagsResolveRequest is part of an experimental API and may change or
+// be removed.
+// Internal: FeatureFlagsResolveRequest is an internal SDK API and is not part of the public
+// surface.
+type FeatureFlagsResolveRequest struct {
+	// Resolve against this already-computed flag set rather than each flag's declared
+	// availability. Keyed by flag name.
+	BaseFlags map[string]bool `json:"baseFlags,omitzero"`
+	// User settings to apply, including `enabledFeatureFlags`, legacy `feature_flags.enabled`,
+	// and supported convenience settings.
+	Config any `json:"config,omitempty"`
+	// Environment for direct feature-flag overrides and `COPILOT_CLI_ENABLED_FEATURE_FLAGS`.
+	// Does not apply `COPILOT_EXP_*` experiment assignments. Defaults to this runtime process's
+	// own environment.
+	Environment map[string]string `json:"environment,omitzero"`
+	// Flags forced to a value after every other layer, keyed by flag name.
+	FlagOverrides map[string]bool `json:"flagOverrides,omitzero"`
+	// Whether the caller is in an experimental population.
+	IsExperimental bool `json:"isExperimental"`
+	// Whether the caller is GitHub or Microsoft staff.
+	IsStaff bool `json:"isStaff"`
+	// GitHub-staff membership. Omit when it was never recorded: a legacy staff account then
+	// counts as both staff populations and keeps every staff feature.
+	IsStaffGitHub *bool `json:"isStaffGithub,omitempty"`
+	// Microsoft-staff membership. Omitted the same way as `isStaffGitHub`.
+	IsStaffMicrosoft *bool `json:"isStaffMicrosoft,omitempty"`
+	// Whether the caller belongs to the team population used by feature availability.
+	IsTeam bool `json:"isTeam"`
+}
+
+// The resolved feature flags, keyed by flag name.
+// Experimental: FeatureFlagsResolveResult is part of an experimental API and may change or
+// be removed.
+type FeatureFlagsResolveResult map[string]bool
+
 // Content filtering mode to apply to all tools, or a map of tool name to content filtering
 // mode.
 // Experimental: FilterMapping is part of an experimental API and may change or be removed.
@@ -5145,6 +5313,8 @@ type GitHubOwnersListResult struct {
 // listing only. Long-abandoned unused ids can be released by later allocations.
 // Experimental: GitHubOwnersRequestIDResult is part of an experimental API and may change
 // or be removed.
+// Internal: GitHubOwnersRequestIDResult is an internal SDK API and is not part of the
+// public surface.
 type GitHubOwnersRequestIDResult struct {
 	// Request id to pass to `gitHubOwners.list` and, to abandon it, `gitHubOwners.cancel`.
 	RequestID int64 `json:"requestId"`
@@ -5770,6 +5940,12 @@ type HooksDiscoverRequest struct {
 	// still contribute to each remaining row's effective enabled state. This filters sources
 	// rather than simulating a host with no settings.
 	ExcludeHostHooks *bool `json:"excludeHostHooks,omitempty"`
+	// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem
+	// grants. Available without ambient discovery or repository file-hook enablement, subject
+	// to managed/hook disables. Relative paths resolve against the request's effective working
+	// directory when supplied. Null and omission are equivalent; an empty array contributes no
+	// explicit roots.
+	HookDirectories []string `json:"hookDirectories,omitzero"`
 	// Optional project directory paths whose trusted repository and project-expanded plugin
 	// hooks should be discovered. When omitted or empty, user, managed-policy, and globally
 	// enabled installed or explicit plugin hooks are returned without project expansion.
@@ -6413,6 +6589,37 @@ type InstructionDiscoveryPathList struct {
 	Paths []InstructionDiscoveryPath `json:"paths"`
 }
 
+// Experimental: InstructionsClearCacheResult is part of an experimental API and may change
+// or be removed.
+type InstructionsClearCacheResult struct {
+}
+
+// Explicit discovery arguments for one location, supplied by the caller rather than derived
+// from a session.
+// Experimental: InstructionsDiscoverRepoSourcesRequest is part of an experimental API and
+// may change or be removed.
+// Internal: InstructionsDiscoverRepoSourcesRequest is an internal SDK API and is not part
+// of the public surface.
+type InstructionsDiscoverRepoSourcesRequest struct {
+	// Extra directories to scan alongside instruction directories configured in the runtime
+	// environment.
+	AdditionalDirs []string `json:"additionalDirs,omitzero"`
+	// Copilot configuration directory for user-level sources. An omitted or empty value uses
+	// the server's configuration home.
+	ConfigDir *string `json:"configDir,omitempty"`
+	// Working directory whose instruction sources should also be included. Omission adds no
+	// separate working-directory scope.
+	CwdPath *string `json:"cwdPath,omitempty"`
+	// When true, also discover instruction files nested below the location.
+	EnableChildInstructions *bool `json:"enableChildInstructions,omitempty"`
+	// When true, include the sources a command-line host reads. Hosts that are not the CLI omit
+	// it.
+	IsCLI *bool `json:"isCli,omitempty"`
+	// Repository location to discover. An empty string selects no repository scope; cwdPath can
+	// still supply working-directory sources.
+	Location string `json:"location"`
+}
+
 // Optional project paths to include in instruction discovery.
 // Experimental: InstructionsDiscoverRequest is part of an experimental API and may change
 // or be removed.
@@ -6420,6 +6627,11 @@ type InstructionsDiscoverRequest struct {
 	// When true, omit the host's instruction sources (user/home-level files and plugin rules),
 	// leaving only repository and working-directory sources. For multitenant deployments.
 	ExcludeHostInstructions *bool `json:"excludeHostInstructions,omitempty"`
+	// Explicit discovery-only instruction roots using existing SDK instruction formats, not
+	// filesystem grants. Available without ambient discovery, subject to instruction/managed
+	// disables. Relative paths resolve against the request's effective working directory when
+	// supplied. Null and omission are equivalent; an empty array contributes no explicit roots.
+	InstructionDirectories []string `json:"instructionDirectories,omitzero"`
 	// Optional list of project directory paths to scan for repository/working-directory
 	// instruction sources. When omitted or empty, only user-level and plugin instruction
 	// sources are returned (no project scan).
@@ -6433,6 +6645,11 @@ type InstructionsGetDiscoveryPathsRequest struct {
 	// When true, omit the host's user-level instruction targets, leaving only repository
 	// targets. For multitenant deployments (mirrors `discover`'s `excludeHostInstructions`).
 	ExcludeHostInstructions *bool `json:"excludeHostInstructions,omitempty"`
+	// Explicit discovery-only instruction roots to enumerate, including configured missing
+	// directories. Relative paths resolve against the request's effective working directory
+	// when supplied. These are not filesystem grants or preferred creation targets. Null and
+	// omission are equivalent.
+	InstructionDirectories []string `json:"instructionDirectories,omitzero"`
 	// Optional list of project directory paths. When omitted or empty, only the user-level
 	// targets are returned.
 	ProjectPaths []string `json:"projectPaths,omitzero"`
@@ -6444,6 +6661,16 @@ type InstructionsGetDiscoveryPathsRequest struct {
 type InstructionsGetSourcesResult struct {
 	// Instruction sources for the session
 	Sources []InstructionSource `json:"sources"`
+}
+
+// The prompt the init command runs.
+// Experimental: InstructionsInitPromptResult is part of an experimental API and may change
+// or be removed.
+// Internal: InstructionsInitPromptResult is an internal SDK API and is not part of the
+// public surface.
+type InstructionsInitPromptResult struct {
+	// Prompt text authoring repository instructions.
+	Prompt string `json:"prompt"`
 }
 
 // Loaded instruction source for a session, including path, content, category, location,
@@ -7579,6 +7806,8 @@ type MCPConfiguredServerState struct {
 // Credential-free authentication identity used to configure GitHub MCP.
 // Experimental: MCPConfigureGitHubRequest is part of an experimental API and may change or
 // be removed.
+// Internal: MCPConfigureGitHubRequest is an internal SDK API and is not part of the public
+// surface.
 type MCPConfigureGitHubRequest struct {
 	// Opaque runtime auth info for GitHub MCP configuration. Marked internal: an in-process
 	// runtime shape (configureGitHubMcp is a no-op over the wire).
@@ -8385,6 +8614,17 @@ type MCPIsServerRunningRequest struct {
 type MCPIsServerRunningResult struct {
 	// True if the server has an active client and transport.
 	Running bool `json:"running"`
+}
+
+// Names of the MCP servers the runtime supplies itself.
+// Experimental: MCPListBuiltinServerNamesResult is part of an experimental API and may
+// change or be removed.
+// Internal: MCPListBuiltinServerNamesResult is an internal SDK API and is not part of the
+// public surface.
+type MCPListBuiltinServerNamesResult struct {
+	// Every built-in server name. A host disabling the built-ins wholesale suppresses exactly
+	// this set.
+	Names []string `json:"names"`
 }
 
 // Server name whose tool list should be returned.
@@ -9299,6 +9539,8 @@ type MCPPromptsListResult struct {
 // Registration parameters for an external MCP client.
 // Experimental: MCPRegisterExternalClientRequest is part of an experimental API and may
 // change or be removed.
+// Internal: MCPRegisterExternalClientRequest is an internal SDK API and is not part of the
+// public surface.
 type MCPRegisterExternalClientRequest struct {
 	// In-process MCP Client instance. Marked internal: cannot be serialized across the JSON-RPC
 	// boundary.
@@ -9322,6 +9564,8 @@ type MCPRegisterExternalClientRequest struct {
 // Registry search to abandon.
 // Experimental: MCPRegistryCancelRequest is part of an experimental API and may change or
 // be removed.
+// Internal: MCPRegistryCancelRequest is an internal SDK API and is not part of the public
+// surface.
 type MCPRegistryCancelRequest struct {
 	// Request ID from `mcp.registry.allocateRequestId` that the search uses.
 	RequestID int64 `json:"requestId"`
@@ -9330,6 +9574,8 @@ type MCPRegistryCancelRequest struct {
 // Whether the cancel reached a live search.
 // Experimental: MCPRegistryCancelResult is part of an experimental API and may change or be
 // removed.
+// Internal: MCPRegistryCancelResult is an internal SDK API and is not part of the public
+// surface.
 type MCPRegistryCancelResult struct {
 	// True when the cancel stopped a running search. False for unknown or reclaimed IDs,
 	// completed or canceled searches, and unused reservations. The cancel releases an unused
@@ -9340,6 +9586,8 @@ type MCPRegistryCancelResult struct {
 // Request id naming a cancellable registry search.
 // Experimental: MCPRegistryRequestIDResult is part of an experimental API and may change or
 // be removed.
+// Internal: MCPRegistryRequestIDResult is an internal SDK API and is not part of the public
+// surface.
 type MCPRegistryRequestIDResult struct {
 	// Request ID for `mcp.registry.search` and `mcp.registry.cancel`. It serves one search.
 	// Allocation can reclaim unused IDs at the 1,024-ID reservation limit.
@@ -9350,6 +9598,8 @@ type MCPRegistryRequestIDResult struct {
 // search cancellable.
 // Experimental: MCPRegistrySearchRequest is part of an experimental API and may change or
 // be removed.
+// Internal: MCPRegistrySearchRequest is an internal SDK API and is not part of the public
+// surface.
 type MCPRegistrySearchRequest struct {
 	// The credential the search runs under, carried opaquely. Hosts usually send
 	// credential-free `AuthIdentity`; a `token` identity can be resolved only when it embeds a
@@ -9373,6 +9623,8 @@ type MCPRegistrySearchRequest struct {
 // Servers selected from the registry response.
 // Experimental: MCPRegistrySearchResult is part of an experimental API and may change or be
 // removed.
+// Internal: MCPRegistrySearchResult is an internal SDK API and is not part of the public
+// surface.
 type MCPRegistrySearchResult struct {
 	// The server objects, carried opaquely. The runtime follows pages, keeps the newest entry
 	// per server name, cuts the list to `limit`, and sorts an empty-query result by GitHub
@@ -9382,6 +9634,7 @@ type MCPRegistrySearchResult struct {
 
 // In-process MCP reload configuration.
 // Experimental: MCPReloadConfig is part of an experimental API and may change or be removed.
+// Internal: MCPReloadConfig is an internal SDK API and is not part of the public surface.
 type MCPReloadConfig struct {
 	ActiveGitHubToken *string `json:"activeGitHubToken,omitempty"`
 	// Server names the CLI enabled for this session via `--enable-mcp-server`.
@@ -9402,6 +9655,8 @@ type MCPReloadConfig struct {
 // Opaque MCP reload configuration.
 // Experimental: MCPReloadWithConfigRequest is part of an experimental API and may change or
 // be removed.
+// Internal: MCPReloadWithConfigRequest is an internal SDK API and is not part of the public
+// surface.
 type MCPReloadWithConfigRequest struct {
 	// Opaque runtime MCP reload configuration. Marked internal: an in-process runtime shape
 	// (reloadMcpServers throws over the wire).
@@ -9907,6 +10162,8 @@ func (MCPServerConfigHTTP) mcpServerConfig()    {}
 // In-process MCP server configuration used by embedded SDK clients.
 // Experimental: MCPServerConfigMemory is part of an experimental API and may change or be
 // removed.
+// Internal: MCPServerConfigMemory is an internal SDK API and is not part of the public
+// surface.
 type MCPServerConfigMemory struct {
 	// Configuration warnings recorded while loading the server.
 	ConfigWarnings []string `json:"configWarnings,omitzero"`
@@ -10031,6 +10288,8 @@ type MCPSetEnvValueModeResult struct {
 // with.
 // Experimental: MCPShouldExcludeGitHubToolsRequest is part of an experimental API and may
 // change or be removed.
+// Internal: MCPShouldExcludeGitHubToolsRequest is an internal SDK API and is not part of
+// the public surface.
 type MCPShouldExcludeGitHubToolsRequest struct {
 	// The session's tool allowlist, when it set one. Omitted means the session constrains
 	// nothing this way.
@@ -10048,6 +10307,8 @@ type MCPShouldExcludeGitHubToolsRequest struct {
 // the request.
 // Experimental: MCPShouldExcludeGitHubToolsResult is part of an experimental API and may
 // change or be removed.
+// Internal: MCPShouldExcludeGitHubToolsResult is an internal SDK API and is not part of the
+// public surface.
 type MCPShouldExcludeGitHubToolsResult struct {
 	// True only when both halves hold: the session's filters still reach the platform shell
 	// tool, and the host actually has the `gh` those tools would be replaced by. Feed it
@@ -10181,6 +10442,8 @@ type MCPUninstallPlan struct {
 // Server name identifying the external client to remove.
 // Experimental: MCPUnregisterExternalClientRequest is part of an experimental API and may
 // change or be removed.
+// Internal: MCPUnregisterExternalClientRequest is an internal SDK API and is not part of
+// the public surface.
 type MCPUnregisterExternalClientRequest struct {
 	// Server name of the external client to unregister
 	ServerName string `json:"serverName"`
@@ -10719,6 +10982,68 @@ type ModelClearStartupSeedRequest struct {
 // public surface.
 type ModelClearStartupSeedResult struct {
 	Cleared bool `json:"cleared"`
+}
+
+// Host presentation state the reasoning-summaries policy depends on.
+// Experimental: ModelGetReasoningSummariesRequest is part of an experimental API and may
+// change or be removed.
+type ModelGetReasoningSummariesRequest struct {
+	// The host's persisted `showReasoning` user setting, omitted when unset.
+	PersistedShowReasoning *bool `json:"persistedShowReasoning,omitempty"`
+	// Whether the host is currently showing reasoning summaries. Defaults to false.
+	SummariesVisible *bool `json:"summariesVisible,omitempty"`
+}
+
+// Reasoning-summaries presentation policy for the session's current model.
+// Experimental: ModelGetReasoningSummariesResult is part of an experimental API and may
+// change or be removed.
+type ModelGetReasoningSummariesResult struct {
+	// Whether the supplied `persistedShowReasoning` setting only restates the model default.
+	// This reports a redundancy, not a standing instruction to delete the setting: it stays
+	// true for as long as the setting and the model default agree, including for a user who
+	// later chose that value deliberately. It exists for a one-time migration of a legacy
+	// setting written before the model default made it redundant, so a host that acts on it
+	// owns the cleanup and must gate it behind its own persisted `done` marker, delete only a
+	// setting whose value still matches the one it read, and never repeat the deletion on a
+	// later launch. Under an off-by-default reasoning-summaries experiment an explicit
+	// `showReasoning: true` opt-in also reads as redundant on a summary-producing model, so an
+	// ungated host would keep deleting that opt-in and hide summaries again on every launch.
+	ClearRedundantSetting bool `json:"clearRedundantSetting"`
+	// Whether the session's reasoning-summaries experiment assignment has settled. False means
+	// this read does not wait for a pending assignment and reports the experiment-derived
+	// fields conservatively: `showHiddenHint` is false and `visibility` falls back to
+	// `persistedShowReasoning`, or is omitted when none was supplied. A host that wants the
+	// assigned answer re-reads until this is true.
+	ExperimentSettled bool `json:"experimentSettled"`
+	// Whether the selected model shows reasoning summaries by default.
+	ModelDefaultShowsSummaries bool `json:"modelDefaultShowsSummaries"`
+	// False until the session has a model catalog and a selected model. This read never
+	// resolves the catalog itself, and the runtime emits no readiness notification, so
+	// repeating this call alone leaves `ready` false indefinitely on a session that has neither
+	// listed models nor run a turn. `session.model.list` is the prerequisite and the signal: it
+	// resolves and caches the catalog for the session, so a successful return means the next
+	// read is ready. The exception is a session that resolves models without a Copilot catalog,
+	// that is a BYOK registry or an alternate provider: `session.model.list` returns an empty
+	// list without caching a catalog, so `ready` stays false and this policy is unavailable
+	// there. While false, every model-policy field is false and `visibility` is omitted;
+	// `experimentSettled` is independent of readiness and still reports the assignment state.
+	Ready bool `json:"ready"`
+	// Whether turns on this session produce reasoning summaries, honouring an explicit session
+	// reasoning-summary override.
+	SessionShowsSummaries bool `json:"sessionShowsSummaries"`
+	// Whether to show the hint that reasoning summaries are hidden. Always false while
+	// `experimentSettled` is false.
+	ShowHiddenHint bool `json:"showHiddenHint"`
+	// Whether the selected model emits reasoning headers.
+	ShowReasoningHeaders bool `json:"showReasoningHeaders"`
+	// Default reasoning visibility, and only meaningful once `ready` is true: false when the
+	// session produces no summaries, else the persisted setting, else the experiment's default.
+	// While `ready` is true it is omitted only when all three are unavailable, that is when the
+	// session produces summaries, no `persistedShowReasoning` was supplied, and
+	// `experimentSettled` is false. While `ready` is false there is no model policy to report
+	// and this field is always omitted, so an absent value alone does not imply a pending
+	// experiment.
+	Visibility *bool `json:"visibility,omitempty"`
 }
 
 // List of Copilot models available to the resolved user, including capabilities and billing
@@ -12322,6 +12647,12 @@ type PermissionRecoveryData struct {
 	// Policy selected from the current client's response capability; mode or client changes may
 	// update it during recovery
 	OnBlocked PermissionRecoveryOnBlocked `json:"onBlocked"`
+	// Subagent identifier that owns this recovery episode when the request was delegated
+	// through a parent permission service
+	OwnerAgentID *string `json:"ownerAgentId,omitempty"`
+	// Root or child execution-session identifier that owns this recovery episode; omitted for
+	// legacy snapshots
+	OwnerSessionID *string `json:"ownerSessionId,omitempty"`
 	// Controlled reason for the latest episode transition
 	Reason PermissionRecoveryReason `json:"reason"`
 	// Current lifecycle state of the recovery episode
@@ -14658,6 +14989,76 @@ type RemoteSessionRepository struct {
 	Owner string `json:"owner"`
 }
 
+// Which repository settings file to read.
+// Experimental: RepoSettingsReadRawRequest is part of an experimental API and may change or
+// be removed.
+// Internal: RepoSettingsReadRawRequest is an internal SDK API and is not part of the public
+// surface.
+type RepoSettingsReadRawRequest struct {
+	// Absolute path of the repository root.
+	RepoRoot string `json:"repoRoot"`
+	// Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+	Scope string `json:"scope"`
+}
+
+// Parsed repository settings without normalization or layering.
+// Experimental: RepoSettingsReadRawResult is part of an experimental API and may change or
+// be removed.
+// Internal: RepoSettingsReadRawResult is an internal SDK API and is not part of the public
+// surface.
+type RepoSettingsReadRawResult struct {
+	// Stored JSON values after the existing JSONC parser and prototype-safety checks. Empty
+	// when the file is missing, blank, or invalid.
+	Config any `json:"config"`
+	// True when the file exists but did not parse, so `config` is empty for that reason rather
+	// than because nothing is set.
+	Invalid bool `json:"invalid"`
+}
+
+// The complete set of repository-overridable settings to store.
+// Experimental: RepoSettingsWriteAllRequest is part of an experimental API and may change
+// or be removed.
+// Internal: RepoSettingsWriteAllRequest is an internal SDK API and is not part of the
+// public surface.
+type RepoSettingsWriteAllRequest struct {
+	// Absolute path of the repository root.
+	RepoRoot string `json:"repoRoot"`
+	// Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+	Scope string `json:"scope"`
+	// Object of allowed settings to store. Missing allowlisted keys are removed. Other input
+	// keys are ignored, while unknown stored keys are preserved.
+	Settings any `json:"settings"`
+}
+
+// Experimental: RepoSettingsWriteAllResult is part of an experimental API and may change or
+// be removed.
+type RepoSettingsWriteAllResult struct {
+}
+
+// One key to write or remove in a repository settings file.
+// Experimental: RepoSettingsWriteKeyRequest is part of an experimental API and may change
+// or be removed.
+// Internal: RepoSettingsWriteKeyRequest is an internal SDK API and is not part of the
+// public surface.
+type RepoSettingsWriteKeyRequest struct {
+	// True to remove the key instead of writing it.
+	Delete *bool `json:"delete,omitempty"`
+	// Canonical top-level key permitted by the repository settings allowlist.
+	Key string `json:"key"`
+	// Absolute path of the repository root.
+	RepoRoot string `json:"repoRoot"`
+	// Use repo for shared settings or local for settings.local.json. Other scopes are rejected.
+	Scope string `json:"scope"`
+	// Value to validate and write. Required unless delete is true; a null value is validated,
+	// not treated as deletion.
+	Value any `json:"value,omitempty"`
+}
+
+// Experimental: RepoSettingsWriteKeyResult is part of an experimental API and may change or
+// be removed.
+type RepoSettingsWriteKeyResult struct {
+}
+
 // Experimental: ResponseFormat is part of an experimental API and may change or be removed.
 type ResponseFormat struct {
 	// JSON Schema and provider options for the turn's output.
@@ -16765,6 +17166,12 @@ type SessionOpenOptions struct {
 	AdditionalDirectories []string `json:"additionalDirectories,omitzero"`
 	// Runtime context discriminator for agent filtering.
 	AgentContext *string `json:"agentContext,omitempty"`
+	// Explicit discovery-only agent roots, separate from customAgents and filesystem grants.
+	// Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK
+	// paths resolve once when supplied against the request's effective workingDirectory;
+	// retained roots do not move on cwd changes. Null and omission are equivalent; [] clears
+	// only the explicit SDK contribution.
+	AgentDirectories []string `json:"agentDirectories,omitzero"`
 	// Whether to include instructions from every MCP server in the system prompt instead of
 	// only allowlisted servers.
 	AllowAllMCPServerInstructions *bool `json:"allowAllMcpServerInstructions,omitempty"`
@@ -16842,8 +17249,8 @@ type SessionOpenOptions struct {
 	EnableOnDemandInstructionDiscovery *bool `json:"enableOnDemandInstructionDiscovery,omitempty"`
 	// Whether shell-script safety heuristics are enabled.
 	EnableScriptSafety *bool `json:"enableScriptSafety,omitempty"`
-	// Whether skill loading is enabled. When omitted, an SDK skill provider enables skills by
-	// default.
+	// Whether skill loading is enabled. When omitted, explicit SDK skill roots or an SDK skill
+	// provider enable skills independently of enableConfigDiscovery.
 	EnableSkills *bool `json:"enableSkills,omitempty"`
 	// Whether model responses stream as delta events.
 	EnableStreaming *bool `json:"enableStreaming,omitempty"`
@@ -16882,6 +17289,13 @@ type SessionOpenOptions struct {
 	// Internal: HasSkillProvider is part of the SDK's internal API surface and is not intended
 	// for external use.
 	HasSkillProvider *bool `json:"hasSkillProvider,omitempty"`
+	// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem
+	// grants. Available without enableConfigDiscovery or enableFileHooks, which controls
+	// repository-origin hooks only; hook/managed disables still apply. Relative SDK paths
+	// resolve once when supplied against the request's effective workingDirectory; retained
+	// roots do not move on cwd changes. Null and omission are equivalent; [] clears only the
+	// explicit SDK contribution.
+	HookDirectories []string `json:"hookDirectories,omitzero"`
 	// Skill scan directories and descendants excluded from discovery. Supports `~`-relative
 	// paths.
 	IgnoredSkillsLocations []string `json:"ignoredSkillsLocations,omitzero"`
@@ -16895,6 +17309,12 @@ type SessionOpenOptions struct {
 	IncludedBuiltinSkills []string `json:"includedBuiltinSkills,omitzero"`
 	// Installed plugins visible to the session.
 	InstalledPlugins []InstalledPlugin `json:"installedPlugins,omitzero"`
+	// Explicit discovery-only instruction roots using existing SDK instruction formats, not
+	// filesystem grants. Available without enableConfigDiscovery, subject to
+	// instruction/managed disables. Relative SDK paths resolve once when supplied against the
+	// request's effective workingDirectory; retained roots do not move on cwd changes. Null and
+	// omission are equivalent; [] clears only the explicit SDK contribution.
+	InstructionDirectories []string `json:"instructionDirectories,omitzero"`
 	// Stable integration identifier for analytics.
 	IntegrationID *string `json:"integrationId,omitempty"`
 	// Whether experimental behavior is enabled.
@@ -16972,7 +17392,11 @@ type SessionOpenOptions struct {
 	ShellInitProfile *string `json:"shellInitProfile,omitempty"`
 	// PowerShell process flags applied to built-in and user-requested shell commands.
 	ShellProcessFlags []string `json:"shellProcessFlags,omitzero"`
-	// Additional directories to search for skills.
+	// Explicit discovery-only skill roots, not filesystem grants. Available without
+	// enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once
+	// when supplied against the request's effective workingDirectory; retained roots do not
+	// move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK
+	// contribution.
 	SkillDirectories []string `json:"skillDirectories,omitzero"`
 	// Whether to skip custom instruction sources.
 	SkipCustomInstructions *bool `json:"skipCustomInstructions,omitempty"`
@@ -18322,6 +18746,12 @@ type SessionUpdateOptionsParams struct {
 	AdditionalContentExclusionPolicies []OptionsUpdateAdditionalContentExclusionPolicy `json:"additionalContentExclusionPolicies,omitzero"`
 	// Runtime context discriminator (e.g., `cli`, `actions`).
 	AgentContext *string `json:"agentContext,omitempty"`
+	// Explicit discovery-only agent roots, separate from customAgents and filesystem grants.
+	// Available without enableConfigDiscovery, subject to managed/source disables. Relative SDK
+	// paths resolve once when supplied against the request's effective workingDirectory;
+	// retained roots do not move on cwd changes. Null and omission are equivalent; [] clears
+	// only the explicit SDK contribution.
+	AgentDirectories []string `json:"agentDirectories,omitzero"`
 	// Whether to include instructions from every MCP server in the system prompt instead of
 	// only allowlisted servers.
 	AllowAllMCPServerInstructions *bool `json:"allowAllMcpServerInstructions,omitempty"`
@@ -18349,8 +18779,9 @@ type SessionUpdateOptionsParams struct {
 	DisabledInstructionSources []string `json:"disabledInstructionSources,omitzero"`
 	// Skill IDs that should be excluded from this session.
 	DisabledSkills []string `json:"disabledSkills,omitzero"`
-	// Whether to enable loading of `.github/hooks/` filesystem hooks. Separate from the SDK
-	// callback hook mechanism.
+	// Whether to enable repository-origin file hooks from `.github/hooks/` and trusted
+	// repository-configured roots. Does not control explicit hookDirectories or SDK callback
+	// hooks.
 	EnableFileHooks *bool `json:"enableFileHooks,omitempty"`
 	// Whether to enable host git operations (context resolution, child repo scanning, git info
 	// in system prompt).
@@ -18365,9 +18796,10 @@ type SessionUpdateOptionsParams struct {
 	EnableScriptSafety *bool `json:"enableScriptSafety,omitempty"`
 	// Whether to enable cross-session store writes and reads.
 	EnableSessionStore *bool `json:"enableSessionStore,omitempty"`
-	// Whether skill loading is enabled. Explicit false disables every source, including a bound
-	// SDK provider; changing the value invalidates the loaded skill snapshot. When omitted,
-	// creation falls back to enableConfigDiscovery unless an SDK skill provider is registered.
+	// Whether skill loading is enabled. Explicit false disables every source, including
+	// explicit SDK roots and a bound SDK provider; changing the value invalidates the loaded
+	// skill snapshot. When omitted, creation falls back to enableConfigDiscovery unless
+	// explicit SDK skill roots or an SDK skill provider are supplied.
 	EnableSkills *bool `json:"enableSkills,omitempty"`
 	// Whether to stream model responses.
 	EnableStreaming *bool `json:"enableStreaming,omitempty"`
@@ -18387,6 +18819,13 @@ type SessionUpdateOptionsParams struct {
 	ExcludedTools []string `json:"excludedTools,omitzero"`
 	// Map of feature-flag IDs to their boolean enabled state.
 	FeatureFlags map[string]bool `json:"featureFlags,omitzero"`
+	// Explicit discovery-only file-hook roots, separate from callback hooks and filesystem
+	// grants. Available without enableConfigDiscovery or enableFileHooks, which controls
+	// repository-origin hooks only; hook/managed disables still apply. Relative SDK paths
+	// resolve once when supplied against the request's effective workingDirectory; retained
+	// roots do not move on cwd changes. Null and omission are equivalent; [] clears only the
+	// explicit SDK contribution.
+	HookDirectories []string `json:"hookDirectories,omitzero"`
 	// Skill scan directories and descendants excluded from discovery. Supports `~`-relative
 	// paths.
 	IgnoredSkillsLocations []string `json:"ignoredSkillsLocations,omitzero"`
@@ -18401,6 +18840,12 @@ type SessionUpdateOptionsParams struct {
 	// Full set of installed plugins for the session. Replaces the existing list; the runtime
 	// invalidates the skills cache only when the list materially changes.
 	InstalledPlugins []SessionInstalledPlugin `json:"installedPlugins,omitzero"`
+	// Explicit discovery-only instruction roots using existing SDK instruction formats, not
+	// filesystem grants. Available without enableConfigDiscovery, subject to
+	// instruction/managed disables. Relative SDK paths resolve once when supplied against the
+	// request's effective workingDirectory; retained roots do not move on cwd changes. Null and
+	// omission are equivalent; [] clears only the explicit SDK contribution.
+	InstructionDirectories []string `json:"instructionDirectories,omitzero"`
 	// Stable integration identifier used for analytics and rate-limit attribution.
 	IntegrationID *string `json:"integrationId,omitempty"`
 	// Whether experimental capabilities are enabled.
@@ -18456,7 +18901,11 @@ type SessionUpdateOptionsParams struct {
 	ShellInitProfile *string `json:"shellInitProfile,omitempty"`
 	// PowerShell process flags applied to built-in and user-requested shell commands.
 	ShellProcessFlags []string `json:"shellProcessFlags,omitzero"`
-	// Additional directories to search for skills.
+	// Explicit discovery-only skill roots, not filesystem grants. Available without
+	// enableConfigDiscovery, subject to skill/managed disables. Relative SDK paths resolve once
+	// when supplied against the request's effective workingDirectory; retained roots do not
+	// move on cwd changes. Null and omission are equivalent; [] clears only the explicit SDK
+	// contribution.
 	SkillDirectories []string `json:"skillDirectories,omitzero"`
 	// Whether to skip loading custom instruction sources.
 	SkipCustomInstructions *bool `json:"skipCustomInstructions,omitempty"`
@@ -18645,6 +19094,18 @@ func (SettableTokenAuthInfo) settableAuthInfoType() SettableAuthInfoType {
 func (UserAuthInfo) settableAuthInfo() {}
 func (UserAuthInfo) settableAuthInfoType() SettableAuthInfoType {
 	return SettableAuthInfoTypeUser
+}
+
+// Outcome of an atomic user or repository settings edit.
+// Experimental: SettingsEditResult is part of an experimental API and may change or be
+// removed.
+// Internal: SettingsEditResult is an internal SDK API and is not part of the public surface.
+type SettingsEditResult struct {
+	// Changed, unchanged or invalid existing file. Rejected input, validation failures and I/O
+	// errors remain RPC errors.
+	// Internal: Status is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Status SettingsEditStatus `json:"status"`
 }
 
 // User-requested shell execution cancellation handle.
@@ -19600,7 +20061,10 @@ type SkillsDiscoverRequest struct {
 	IgnoredSkillsLocations []string `json:"ignoredSkillsLocations,omitzero"`
 	// Optional list of project directory paths to scan for project-scoped skills
 	ProjectPaths []string `json:"projectPaths,omitzero"`
-	// Optional list of additional skill directory paths to include
+	// Explicit discovery-only skill roots, not filesystem grants. Available without ambient
+	// discovery, subject to skill/managed disables. Relative paths resolve against the
+	// request's effective working directory when supplied. Null and omission are equivalent; an
+	// empty array contributes no explicit roots.
 	SkillDirectories []string `json:"skillDirectories,omitzero"`
 }
 
@@ -19638,6 +20102,11 @@ type SkillsGetDiscoveryPathsRequest struct {
 	// Optional list of project directory paths. When omitted or empty, only personal and custom
 	// directories are returned.
 	ProjectPaths []string `json:"projectPaths,omitzero"`
+	// Explicit discovery-only skill roots to enumerate, including configured missing
+	// directories. Relative paths resolve against the request's effective working directory
+	// when supplied. These are not filesystem grants or preferred creation targets. Null and
+	// omission are equivalent.
+	SkillDirectories []string `json:"skillDirectories,omitzero"`
 }
 
 // Skills invoked during this session, ordered by invocation time (most recent last).
@@ -21516,6 +21985,82 @@ type UserSettingMetadata struct {
 	Value any `json:"value"`
 }
 
+// A single top-level setting subtree to validate and write.
+// Experimental: UserSettingsApplyTopKeyRequest is part of an experimental API and may
+// change or be removed.
+type UserSettingsApplyTopKeyRequest struct {
+	// Canonical path of the setting the caller is editing. Currently informational only.
+	CanonicalPath []string `json:"canonicalPath"`
+	// Records that the user chose an update channel explicitly, so the one-time staff channel
+	// migration stops reapplying. Honored only for the `autoUpdatesChannel` key.
+	CompleteStaffUpdateChannelMigration *bool `json:"completeStaffUpdateChannelMigration,omitempty"`
+	// True to remove the top-level key instead of writing it.
+	Delete *bool `json:"delete,omitempty"`
+	// Top-level setting name to write.
+	TopKey string `json:"topKey"`
+	// Value to write for the whole top-level key. Omitted when `delete` is true. Explicit null
+	// is preserved and validated as null.
+	Value *any `json:"value,omitempty"`
+}
+
+// Outcome of validating and writing one top-level setting subtree.
+// Experimental: UserSettingsApplyTopKeyResult is part of an experimental API and may change
+// or be removed.
+type UserSettingsApplyTopKeyResult struct {
+	// Why the write failed, present only when `status` is `write-error`.
+	Error *string `json:"error,omitempty"`
+	// Problems found, present only when `status` is `validation-error`.
+	Issues []UserSettingsValidationIssue `json:"issues,omitzero"`
+	// `ok` when the value was written, `validation-error` when it was rejected before any
+	// write, `write-error` when validation passed but the write failed.
+	Status string `json:"status"`
+}
+
+// One atomic edit of a canonical setting in settings.json.
+// Experimental: UserSettingsEditRequest is part of an experimental API and may change or be
+// removed.
+// Internal: UserSettingsEditRequest is an internal SDK API and is not part of the public
+// surface.
+type UserSettingsEditRequest struct {
+	// Nonempty canonical path segments of the setting to edit, starting with its top-level key.
+	CanonicalPath []string `json:"canonicalPath"`
+	// Configuration directory to edit. Omitted or empty resolves the server's own home, as in
+	// `user.settings.loadForConfigDir`.
+	ConfigDir *string `json:"configDir,omitempty"`
+	// Set a scalar, add or remove a string list item, or remove the setting. The handler
+	// rejects a missing or incompatible value.
+	// Internal: Operation is part of the SDK's internal API surface and is not intended for
+	// external use.
+	Operation SettingsEditOperation `json:"operation"`
+	// Required boolean, string or number for set, required string for add-item and remove-item,
+	// and forbidden for remove. The runtime rejects all other JSON values.
+	Value any `json:"value,omitempty"`
+}
+
+// Selects which settings file paths to resolve.
+// Experimental: UserSettingsGetPathsRequest is part of an experimental API and may change
+// or be removed.
+type UserSettingsGetPathsRequest struct {
+	// Absolute path of a repository root. Supply it to also resolve that repository's two
+	// settings file paths; omit it to resolve only the user path.
+	RepoRoot *string `json:"repoRoot,omitempty"`
+}
+
+// On-disk locations of the settings files this runtime reads. A path is reported whether or
+// not the file exists.
+// Experimental: UserSettingsGetPathsResult is part of an experimental API and may change or
+// be removed.
+type UserSettingsGetPathsResult struct {
+	// The repository's local, untracked settings file, or null when no repository root was
+	// supplied.
+	RepoLocalSettings *string `json:"repoLocalSettings,omitempty"`
+	// The repository's checked-in settings file, or null when no repository root was supplied.
+	RepoSettings *string `json:"repoSettings,omitempty"`
+	// The user settings file: `settings.json` under the resolved Copilot home. This is the file
+	// `user.settings.get`, `user.settings.load`, and `user.settings.set` read and write.
+	UserSettings string `json:"userSettings"`
+}
+
 // Per-key metadata for every known user setting in settings.json, including settings left
 // at their default. Excludes repository- and enterprise-managed overrides.
 // Experimental: UserSettingsGetResult is part of an experimental API and may change or be
@@ -21524,6 +22069,114 @@ type UserSettingsGetResult struct {
 	// Every known user setting keyed by setting name, each with its effective value, default,
 	// and whether it is at the default.
 	Settings map[string]UserSettingMetadata `json:"settings"`
+}
+
+// Top-level user-setting keys grouped by who may govern them.
+// Experimental: UserSettingsGovernanceKeysResult is part of an experimental API and may
+// change or be removed.
+type UserSettingsGovernanceKeysResult struct {
+	// Top-level keys a repository may override through a Claude-compatible repository config.
+	ClaudeRepo []string `json:"claudeRepo"`
+	// Top-level keys an enterprise policy may fix through managed settings.
+	Managed []string `json:"managed"`
+	// Top-level keys a repository may override through `.github/copilot/settings.json` or
+	// `.github/copilot/settings.local.json`.
+	Repo []string `json:"repo"`
+}
+
+// Contents of settings.json as stored, for a caller about to rewrite it.
+// Experimental: UserSettingsLoadForEditResult is part of an experimental API and may change
+// or be removed.
+type UserSettingsLoadForEditResult struct {
+	// Parsed contents, present only when `status` is `ok`.
+	Settings any `json:"settings,omitempty"`
+	// `ok` when the file parsed, `missing` when there is no file yet, `invalid` when the file
+	// exists but will not parse.
+	Status string `json:"status"`
+}
+
+// Settings object whose key names should be canonicalized.
+// Experimental: UserSettingsNormalizeRequest is part of an experimental API and may change
+// or be removed.
+type UserSettingsNormalizeRequest struct {
+	// Free-form settings object, possibly using legacy or snake_case key names.
+	Settings any `json:"settings"`
+}
+
+// Settings object with canonical key names.
+// Experimental: UserSettingsNormalizeResult is part of an experimental API and may change
+// or be removed.
+type UserSettingsNormalizeResult struct {
+	// The same settings with every legacy or snake_case key renamed to its canonical spelling.
+	Settings any `json:"settings"`
+}
+
+// One setting that will not take effect, and why.
+// Experimental: UserSettingsProblem is part of an experimental API and may change or be
+// removed.
+type UserSettingsProblem struct {
+	// Coarse grouping for the problem, for a caller that presents problems in sections.
+	Category string `json:"category"`
+	// Why the setting will not take effect. Never contains the setting's value, which may be a
+	// token or another secret.
+	Explanation string `json:"explanation"`
+	// Stable identifier for this problem within the reported set, so a caller can track a
+	// selection across refreshes.
+	ID string `json:"id"`
+	// What is wrong in machine-readable form, for a caller that wants to branch rather than
+	// display.
+	Kind string `json:"kind"`
+	// The offending key as written in the file, when the problem is attributable to a single
+	// key. Absent when the whole file is at fault.
+	RawKey *string `json:"rawKey,omitempty"`
+	// The settings layer the problem was found in.
+	Source UserSettingsProblemLocation `json:"source"`
+}
+
+// The settings layer a problem was found in.
+// Experimental: UserSettingsProblemLocation is part of an experimental API and may change
+// or be removed.
+type UserSettingsProblemLocation struct {
+	// Absolute path of the file backing this layer.
+	FilePath string `json:"filePath"`
+	// Which layer this is: `user`, `repo`, or `local`.
+	Kind string `json:"kind"`
+	// The caller-supplied display label for the layer.
+	Label string `json:"label"`
+}
+
+// One already-loaded settings layer to diagnose.
+// Experimental: UserSettingsProblemSource is part of an experimental API and may change or
+// be removed.
+type UserSettingsProblemSource struct {
+	// The layer's settings exactly as loaded, unnormalized. Empty when the file is missing or
+	// failed to parse.
+	Config map[string]any `json:"config,omitzero"`
+	// Absolute path of the file backing this layer.
+	FilePath string `json:"filePath"`
+	// True when the file itself failed to parse, so its keys could not be read at all.
+	Invalid *bool `json:"invalid,omitempty"`
+	// Which layer this is: `user`, `repo`, or `local`.
+	Kind string `json:"kind"`
+	// Caller-chosen display label for the layer, echoed back on each problem so a caller can
+	// group by layer without re-deriving its own naming.
+	Label string `json:"label"`
+}
+
+// The settings layers to diagnose.
+// Experimental: UserSettingsProblemsRequest is part of an experimental API and may change
+// or be removed.
+type UserSettingsProblemsRequest struct {
+	// Layers to diagnose, in the precedence order the caller applies them.
+	Sources []UserSettingsProblemSource `json:"sources,omitzero"`
+}
+
+// The settings that will not take effect across the given layers.
+// Experimental: UserSettingsProblemsResult is part of an experimental API and may change or
+// be removed.
+type UserSettingsProblemsResult struct {
+	// Each setting that will not take effect, and why. Empty when every layer is healthy.
+	Problems []UserSettingsProblem `json:"problems,omitzero"`
 }
 
 // Partial user settings to write to settings.json. Each top-level key is written
@@ -21538,6 +22191,86 @@ type UserSettingsSetRequest struct {
 // Experimental: UserSettingsSetResult is part of an experimental API and may change or be
 // removed.
 type UserSettingsSetResult struct {
+}
+
+// Names the user setting to merge into, and the partial object to merge.
+// Experimental: UserSettingsUpdateRequest is part of an experimental API and may change or
+// be removed.
+// Internal: UserSettingsUpdateRequest is an internal SDK API and is not part of the public
+// surface.
+type UserSettingsUpdateRequest struct {
+	// Copilot configuration directory to write the settings document in, taking precedence over
+	// the server's own `COPILOT_HOME` and default home. Omit it, or pass an empty string, to
+	// use the directory the server resolved for itself.
+	ConfigDir *string `json:"configDir,omitempty"`
+	// Top-level user-setting key to merge into, such as `extensions`.
+	Key string `json:"key"`
+	// Single-component name for the settings document at `<configDir>/settings/<subDir>.json`;
+	// path separators, `.` and `..` are rejected. Omit it, or pass an empty string, to use the
+	// main settings document.
+	SubDir *string `json:"subDir,omitempty"`
+	// Value to store for `key`. When both the stored value and this value are objects, their
+	// fields are shallow-merged and fields this object does not name are preserved. Otherwise
+	// this value replaces the stored value.
+	Value any `json:"value"`
+}
+
+// The stored value of the user setting after the merge.
+// Experimental: UserSettingsUpdateResult is part of an experimental API and may change or
+// be removed.
+// Internal: UserSettingsUpdateResult is an internal SDK API and is not part of the public
+// surface.
+type UserSettingsUpdateResult struct {
+	// The key's stored value after the write: the merged object when both the stored value and
+	// the supplied value are objects, otherwise the supplied value.
+	Value any `json:"value"`
+}
+
+// A single top-level setting subtree to validate.
+// Experimental: UserSettingsValidateRequest is part of an experimental API and may change
+// or be removed.
+type UserSettingsValidateRequest struct {
+	// True to validate a removal of this key. The current settings file is not read.
+	Delete *bool `json:"delete,omitempty"`
+	// Top-level setting name to validate.
+	TopKey string `json:"topKey"`
+	// Value to validate. Omitted when `delete` is true.
+	Value any `json:"value,omitempty"`
+}
+
+// Outcome of validating one top-level setting subtree.
+// Experimental: UserSettingsValidateResult is part of an experimental API and may change or
+// be removed.
+type UserSettingsValidateResult struct {
+	// Problems found, empty when `ok` is true.
+	Issues []UserSettingsValidationIssue `json:"issues,omitzero"`
+	// True when the subtree is valid.
+	Ok bool `json:"ok"`
+}
+
+// One problem found while validating a setting value.
+// Experimental: UserSettingsValidationIssue is part of an experimental API and may change
+// or be removed.
+type UserSettingsValidationIssue struct {
+	// Human-readable description of the problem.
+	Message string `json:"message"`
+	// Where in the settings tree the problem sits, as object keys and array indices. The first
+	// element is the top-level key; a whole-value problem is reported as that single key.
+	Path []any `json:"path"`
+}
+
+// The whole content to store in the user settings file.
+// Experimental: UserSettingsWriteAllRequest is part of an experimental API and may change
+// or be removed.
+type UserSettingsWriteAllRequest struct {
+	// The settings object to store. It replaces the file's entire content, so a key absent here
+	// is removed.
+	Settings any `json:"settings"`
+}
+
+// Experimental: UserSettingsWriteAllResult is part of an experimental API and may change or
+// be removed.
+type UserSettingsWriteAllResult struct {
 }
 
 // The approval to add as a session-scoped rule
@@ -24426,6 +25159,32 @@ const (
 	ExternalToolTextResultForLlmContentTypeText         ExternalToolTextResultForLlmContentType = "text"
 )
 
+// The population a feature flag is declared for, before overrides.
+// Experimental: FeatureFlagAvailability is part of an experimental API and may change or be
+// removed.
+type FeatureFlagAvailability string
+
+const (
+	// Enabled only for accounts that opted into experimental features.
+	FeatureFlagAvailabilityExperimental FeatureFlagAvailability = "experimental"
+	// Disabled for everyone, before any override.
+	FeatureFlagAvailabilityOff FeatureFlagAvailability = "off"
+	// Enabled for everyone, before any override.
+	FeatureFlagAvailabilityOn FeatureFlagAvailability = "on"
+	// Enabled for any staff account, GitHub or Microsoft.
+	FeatureFlagAvailabilityStaff FeatureFlagAvailability = "staff"
+	// Enabled only for staff accounts that have also opted into experimental features.
+	FeatureFlagAvailabilityStaffAndExperimental FeatureFlagAvailability = "staff-and-experimental"
+	// Enabled for GitHub staff accounts only.
+	FeatureFlagAvailabilityStaffGitHub FeatureFlagAvailability = "staff-github"
+	// Enabled for Microsoft staff accounts only.
+	FeatureFlagAvailabilityStaffMicrosoft FeatureFlagAvailability = "staff-microsoft"
+	// Enabled for staff accounts and for accounts that opted into experimental features.
+	FeatureFlagAvailabilityStaffOrExperimental FeatureFlagAvailability = "staff-or-experimental"
+	// Enabled only for accounts on the owning team.
+	FeatureFlagAvailabilityTeam FeatureFlagAvailability = "team"
+)
+
 // Why the runtime is requesting a GitHub credential.
 // Experimental: GitHubTokenAcquireReason is part of an experimental API and may change or
 // be removed.
@@ -26698,6 +27457,8 @@ const (
 	// Review or widen the sandbox policy. The blocked path or host is named by the accompanying
 	// message or by the tool result the action arrived with.
 	RemediationActionReviewSandboxPolicy RemediationAction = "review_sandbox_policy"
+	// Discard conversation history back through the blocked request before continuing.
+	RemediationActionRewindConversation RemediationAction = "rewind_conversation"
 	// Inspect which account is currently authenticated before deciding what to change.
 	RemediationActionShowAccount RemediationAction = "show_account"
 	// Authenticate again with the Copilot backend. The current credential is absent, expired,
@@ -27333,6 +28094,36 @@ const (
 	SettableAuthInfoTypeHMAC            SettableAuthInfoType = "hmac"
 	SettableAuthInfoTypeToken           SettableAuthInfoType = "token"
 	SettableAuthInfoTypeUser            SettableAuthInfoType = "user"
+)
+
+// One atomic settings mutation.
+// Experimental: SettingsEditOperation is part of an experimental API and may change or be
+// removed.
+type SettingsEditOperation string
+
+const (
+	// Add one string to a list, unless present.
+	SettingsEditOperationAddItem SettingsEditOperation = "add-item"
+	// Remove the setting without supplying a value.
+	SettingsEditOperationRemove SettingsEditOperation = "remove"
+	// Remove one string from a list, unless absent.
+	SettingsEditOperationRemoveItem SettingsEditOperation = "remove-item"
+	// Set one scalar value.
+	SettingsEditOperationSet SettingsEditOperation = "set"
+)
+
+// Whether one atomic settings edit changed a file.
+// Experimental: SettingsEditStatus is part of an experimental API and may change or be
+// removed.
+type SettingsEditStatus string
+
+const (
+	// The edit changed the setting and was stored.
+	SettingsEditStatusChanged SettingsEditStatus = "changed"
+	// The existing settings file could not be edited safely; nothing was written.
+	SettingsEditStatusInvalid SettingsEditStatus = "invalid"
+	// The setting already had the requested state.
+	SettingsEditStatusUnchanged SettingsEditStatus = "unchanged"
 )
 
 // Controls automatic non-interactive profile loading where supported. Explicit initScripts
@@ -30960,6 +31751,105 @@ type internalServerAPI struct {
 	client *jsonrpc2.Client
 }
 
+// Experimental: InternalServerAccountAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerAccountAPI internalServerAPI
+
+// DescribeAuthInfo renders the sign-in banner and the one-line account description the
+// runtime uses for an authentication identity. The runtime words these in several places
+// for its own callers, so a host that announces a sign-in or an account switch should
+// render them from here rather than composing its own, which would let the two spellings
+// drift apart.
+//
+// RPC method: account.describeAuthInfo.
+//
+// Parameters: The authentication identity whose shared wording should be rendered.
+//
+// Returns: The wording the runtime uses for an authentication identity.
+// Internal: DescribeAuthInfo is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerAccountAPI) DescribeAuthInfo(ctx context.Context, params *AccountDescribeAuthInfoRequest) (*AccountDescribeAuthInfoResult, error) {
+	raw, err := a.client.Request(ctx, "account.describeAuthInfo", params)
+	if err != nil {
+		return nil, err
+	}
+	var result AccountDescribeAuthInfoResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetGistSupport reports whether the supplied identity can create gists. Gists are
+// unavailable on GitHub Enterprise Cloud with data residency, and to Enterprise Managed
+// Users on github.com, so a host that offers gist actions should hide or disable them when
+// this reports no support.
+//
+// RPC method: account.getGistSupport.
+//
+// Parameters: The authentication identity whose gist support should be reported.
+//
+// Returns: Whether the identity can create gists, and why not when it cannot.
+// Internal: GetGistSupport is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerAccountAPI) GetGistSupport(ctx context.Context, params *AccountGetGistSupportRequest) (*AccountGetGistSupportResult, error) {
+	raw, err := a.client.Request(ctx, "account.getGistSupport", params)
+	if err != nil {
+		return nil, err
+	}
+	var result AccountGetGistSupportResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetTokenEnvVar names the environment variable supplying a classic personal access token,
+// if one is set. A classic token cannot be upgraded in place, so a host that finds one
+// should tell the user which variable to unset rather than starting an interactive sign-in
+// that the variable would override.
+//
+// RPC method: account.getTokenEnvVar.
+//
+// Returns: The environment variable supplying a classic personal access token, when one is
+// set.
+// Internal: GetTokenEnvVar is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerAccountAPI) GetTokenEnvVar(ctx context.Context) (*AccountGetTokenEnvVarResult, error) {
+	raw, err := a.client.Request(ctx, "account.getTokenEnvVar", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result AccountGetTokenEnvVarResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetWebUrl resolves a path on the identity's GitHub host into an absolute URL, so a host
+// can link to settings or documentation on the enterprise instance the user is signed in to
+// rather than to github.com. Falls back to the public host when no identity is supplied.
+//
+// RPC method: account.getWebUrl.
+//
+// Parameters: A path to resolve against the GitHub host an identity is signed in to.
+//
+// Returns: An absolute URL on the identity's GitHub host.
+// Internal: GetWebUrl is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerAccountAPI) GetWebUrl(ctx context.Context, params *AccountGetWebURLRequest) (*AccountGetWebURLResult, error) {
+	raw, err := a.client.Request(ctx, "account.getWebUrl", params)
+	if err != nil {
+		return nil, err
+	}
+	var result AccountGetWebURLResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: InternalServerAgentsAPI contains experimental APIs that may change or be
 // removed.
 type InternalServerAgentsAPI internalServerAPI
@@ -31092,6 +31982,64 @@ func (a *InternalServerAgentsAPI) GetBuiltins(ctx context.Context) (*AgentsGetBu
 		return nil, err
 	}
 	var result AgentsGetBuiltinsResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: InternalServerFeatureFlagsAPI contains experimental APIs that may change or
+// be removed.
+type InternalServerFeatureFlagsAPI internalServerAPI
+
+// ListMetadata lists every feature flag this runtime declares, with the population each one
+// is declared for, its experimental description, and the online-experiment flag it maps to.
+// This is the static catalog: it describes how each flag is defined, not whether it is on
+// for anyone. Use `featureFlags.resolve` for static values with caller overrides, not
+// active runtime values or experiment assignments.
+//
+// RPC method: featureFlags.listMetadata.
+//
+// Returns: Every feature flag this runtime declares, with the shape each one was declared
+// with.
+// Internal: ListMetadata is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerFeatureFlagsAPI) ListMetadata(ctx context.Context) (*FeatureFlagsMetadataResult, error) {
+	raw, err := a.client.Request(ctx, "featureFlags.listMetadata", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result FeatureFlagsMetadataResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Resolve computes static feature flags from the supplied population and overrides without
+// changing runtime state or verifying audience membership. Starts from declared
+// availability, then applies direct feature-flag environment values, user settings, and
+// explicit `flagOverrides`. It does not apply `COPILOT_EXP_*` experiment assignments,
+// authenticated startup gates, or active runtime state. Settings include
+// `enabledFeatureFlags`, the legacy `feature_flags.enabled` list, and supported convenience
+// settings. Supply `baseFlags` to use an existing flag set instead of declared
+// availability. Omit `isStaffGitHub` or `isStaffMicrosoft` when membership was never
+// recorded: a legacy staff account then counts as both populations.
+//
+// RPC method: featureFlags.resolve.
+//
+// Parameters: Caller population and overrides for static feature-flag resolution,
+// independent of experiment assignments and active runtime state.
+//
+// Returns: The resolved feature flags, keyed by flag name.
+// Internal: Resolve is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerFeatureFlagsAPI) Resolve(ctx context.Context, params *FeatureFlagsResolveRequest) (*FeatureFlagsResolveResult, error) {
+	raw, err := a.client.Request(ctx, "featureFlags.resolve", params)
+	if err != nil {
+		return nil, err
+	}
+	var result FeatureFlagsResolveResult
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
@@ -31508,9 +32456,113 @@ func (a *InternalServerHostAPI) ReleaseSession(ctx context.Context, params *Host
 	return &result, nil
 }
 
+// Experimental: InternalServerInstructionsAPI contains experimental APIs that may change or
+// be removed.
+type InternalServerInstructionsAPI internalServerAPI
+
+// ClearCache drops the runtime's in-memory cache of discovered custom instructions so the
+// next discovery reads them from disk again. A host calls this after it changes instruction
+// files, or after it trusts a folder whose instructions an earlier discovery skipped, so
+// that a session started afterwards sees the current files instead of a cached earlier
+// answer. The call performs no I/O of its own and removes nothing from disk; it only
+// invalidates, so the cost lands on the next discovery.         Returns once the cache is
+// clear, which is what lets a caller order a session start after it. Marked internal
+// because it exists to carry a CLI call site off the napi boundary onto the SDK contract;
+// it is migration plumbing, not a surface consumers are meant to depend on.
+//
+// RPC method: instructions.clearCache.
+// Internal: ClearCache is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerInstructionsAPI) ClearCache(ctx context.Context) (*InstructionsClearCacheResult, error) {
+	raw, err := a.client.Request(ctx, "instructions.clearCache", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result InstructionsClearCacheResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DiscoverRepoSources discovers the instruction sources for one caller-named location and
+// returns them in the order the runtime applies them. `discover` answers for a set of
+// project paths and derives the rest of its scope itself; this one instead takes every
+// argument from the caller — the extra directories to scan and whether to descend into
+// nested instruction files — and honors them as given. It also includes instruction
+// directories from trusted repository settings, matching native repository discovery. Use
+// it when the caller knows its own scope and no session exists to derive that scope from,
+// such as a host reporting how many instruction files a directory contributes before any
+// session starts. Marked internal because it exists to carry a CLI call site off the napi
+// boundary onto the SDK contract; it is migration plumbing, not a surface consumers are
+// meant to depend on.
+//
+// RPC method: instructions.discoverRepoSources.
+//
+// Parameters: Explicit discovery arguments for one location, supplied by the caller rather
+// than derived from a session.
+//
+// Returns: Instruction sources discovered across user, repository, and plugin sources.
+// Internal: DiscoverRepoSources is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerInstructionsAPI) DiscoverRepoSources(ctx context.Context, params *InstructionsDiscoverRepoSourcesRequest) (*ServerInstructionSourceList, error) {
+	raw, err := a.client.Request(ctx, "instructions.discoverRepoSources", params)
+	if err != nil {
+		return nil, err
+	}
+	var result ServerInstructionSourceList
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetInitPrompt returns the prompt the `init` command runs to author repository
+// instructions. A host offering its own initialize action sends this text so the
+// instructions it produces match the ones the CLI produces. The text is fixed for a build
+// and depends on no configuration, session or repository.
+//
+// RPC method: instructions.getInitPrompt.
+//
+// Returns: The prompt the init command runs.
+// Internal: GetInitPrompt is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerInstructionsAPI) GetInitPrompt(ctx context.Context) (*InstructionsInitPromptResult, error) {
+	raw, err := a.client.Request(ctx, "instructions.getInitPrompt", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result InstructionsInitPromptResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Experimental: InternalServerMCPAPI contains experimental APIs that may change or be
 // removed.
 type InternalServerMCPAPI internalServerAPI
+
+// ListBuiltinServerNames lists the MCP servers the runtime supplies itself, so a host that
+// disables the built-ins wholesale suppresses exactly the set the runtime would otherwise
+// add. The names are fixed for a build and depend on no configuration, session or account.
+//
+// RPC method: mcp.listBuiltinServerNames.
+//
+// Returns: Names of the MCP servers the runtime supplies itself.
+// Internal: ListBuiltinServerNames is part of the SDK's internal handshake/plumbing;
+// external callers should not use it.
+func (a *InternalServerMCPAPI) ListBuiltinServerNames(ctx context.Context) (*MCPListBuiltinServerNamesResult, error) {
+	raw, err := a.client.Request(ctx, "mcp.listBuiltinServerNames", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result MCPListBuiltinServerNamesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
 
 // ShouldExcludeGitHubTools reports whether the gh-replaceable GitHub MCP tools may be
 // clipped for a session, which a host feeds back as the `excludeGhReplaceableTools` build
@@ -31627,6 +32679,87 @@ func (a *InternalServerMCPRegistryAPI) Search(ctx context.Context, params *MCPRe
 // Experimental: Registry returns experimental APIs that may change or be removed.
 func (s *InternalServerMCPAPI) Registry() *InternalServerMCPRegistryAPI {
 	return (*InternalServerMCPRegistryAPI)(s)
+}
+
+// Experimental: InternalServerRepoAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerRepoAPI internalServerAPI
+
+// Experimental: InternalServerRepoSettingsAPI contains experimental APIs that may change or
+// be removed.
+type InternalServerRepoSettingsAPI internalServerAPI
+
+// ReadRaw reads one repository settings file without settings normalization or layering.
+// The existing JSONC parser accepts comments and trailing commas and applies its
+// prototype-safety rules. Missing or blank files return an empty valid config. Invalid
+// files return an empty config with invalid=true; other read failures reject.
+//
+// RPC method: repo.settings.readRaw.
+//
+// Parameters: Which repository settings file to read.
+//
+// Returns: Parsed repository settings without normalization or layering.
+// Internal: ReadRaw is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerRepoSettingsAPI) ReadRaw(ctx context.Context, params *RepoSettingsReadRawRequest) (*RepoSettingsReadRawResult, error) {
+	raw, err := a.client.Request(ctx, "repo.settings.readRaw", params)
+	if err != nil {
+		return nil, err
+	}
+	var result RepoSettingsReadRawResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// WriteAll replaces the repository-overridable settings in one locked write. Allowed keys
+// present in settings are validated and written; allowed keys absent from settings are
+// removed. Other input keys are ignored, and unknown keys already stored in the file remain
+// unchanged. Invalid values or an invalid existing file reject without a partial write.
+//
+// RPC method: repo.settings.writeAll.
+//
+// Parameters: The complete set of repository-overridable settings to store.
+// Internal: WriteAll is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerRepoSettingsAPI) WriteAll(ctx context.Context, params *RepoSettingsWriteAllRequest) (*RepoSettingsWriteAllResult, error) {
+	raw, err := a.client.Request(ctx, "repo.settings.writeAll", params)
+	if err != nil {
+		return nil, err
+	}
+	var result RepoSettingsWriteAllResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// WriteKey writes or removes one allowed top-level repository setting through the existing
+// validator and file lock. Preserves unrelated stored keys. Invalid keys, values, existing
+// documents, and I/O errors reject without replacing the file. Deletion requires
+// delete=true; otherwise value must be present.
+//
+// RPC method: repo.settings.writeKey.
+//
+// Parameters: One key to write or remove in a repository settings file.
+// Internal: WriteKey is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerRepoSettingsAPI) WriteKey(ctx context.Context, params *RepoSettingsWriteKeyRequest) (*RepoSettingsWriteKeyResult, error) {
+	raw, err := a.client.Request(ctx, "repo.settings.writeKey", params)
+	if err != nil {
+		return nil, err
+	}
+	var result RepoSettingsWriteKeyResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Settings returns experimental APIs that may change or be removed.
+func (s *InternalServerRepoAPI) Settings() *InternalServerRepoSettingsAPI {
+	return (*InternalServerRepoSettingsAPI)(s)
 }
 
 // Experimental: InternalServerSessionsAPI contains experimental APIs that may change or be
@@ -31876,20 +33009,304 @@ func (a *InternalServerSessionsAPI) UpdateWorkspaceFields(ctx context.Context, p
 	return &result, nil
 }
 
+// Experimental: InternalServerUserAPI contains experimental APIs that may change or be
+// removed.
+type InternalServerUserAPI internalServerAPI
+
+// Experimental: InternalServerUserSettingsAPI contains experimental APIs that may change or
+// be removed.
+type InternalServerUserSettingsAPI internalServerAPI
+
+// ApplyTopKey validates one top-level setting subtree and writes just that key to
+// settings.json as a single step. Doing both here closes the race a caller cannot close
+// itself: between a separate preflight read and the write, the file may change. Rewriting
+// only the touched key keeps legacy siblings out of settings.json. Answers a status rather
+// than failing, so a validation problem and a write problem stay distinguishable.
+//
+// RPC method: user.settings.applyTopKey.
+//
+// Parameters: A single top-level setting subtree to validate and write.
+//
+// Returns: Outcome of validating and writing one top-level setting subtree.
+// Internal: ApplyTopKey is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) ApplyTopKey(ctx context.Context, params *UserSettingsApplyTopKeyRequest) (*UserSettingsApplyTopKeyResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.applyTopKey", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsApplyTopKeyResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DiagnoseProblems diagnoses a set of already-loaded settings layers, reporting each key
+// that will not take effect and why. Settings load tolerantly so that one bad key does not
+// stop a session from starting; this method surfaces what was dropped so a caller can
+// report it instead of silently ignoring the user's intent. Takes the layers as given
+// rather than reading them, so a caller can diagnose exactly the content it is showing,
+// including unsaved edits. Never echoes a setting's value, because a value may be a token
+// or another secret. Marked internal because it exists to carry a CLI call site off the
+// native addon, not to serve a consumer-facing need; it becomes public once an SDK consumer
+// needs to inspect settings health itself.
+//
+// RPC method: user.settings.diagnoseProblems.
+//
+// Parameters: The settings layers to diagnose.
+//
+// Returns: The settings that will not take effect across the given layers.
+// Internal: DiagnoseProblems is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerUserSettingsAPI) DiagnoseProblems(ctx context.Context, params *UserSettingsProblemsRequest) (*UserSettingsProblemsResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.diagnoseProblems", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsProblemsResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Edit atomically edits one canonical user setting inside its settings-file lock. Reads,
+// canonicalizes touched aliases, applies the edit, validates the resulting top-level
+// setting and writes before releasing the lock. An explicit autoUpdatesChannel set
+// completes the staff migration in the same transaction. Only a malformed existing file
+// returns `invalid`; refused keys, invalid values and I/O errors reject the call.
+//
+// RPC method: user.settings.edit.
+//
+// Parameters: One atomic edit of a canonical setting in settings.json.
+//
+// Returns: Outcome of an atomic user or repository settings edit.
+// Internal: Edit is part of the SDK's internal handshake/plumbing; external callers should
+// not use it.
+func (a *InternalServerUserSettingsAPI) Edit(ctx context.Context, params *UserSettingsEditRequest) (*SettingsEditResult, error) {
+	req := map[string]any{}
+	if params != nil {
+		req["canonicalPath"] = params.CanonicalPath
+		if params.ConfigDir != nil {
+			req["configDir"] = *params.ConfigDir
+		}
+		req["operation"] = params.Operation
+		if params.Value != nil {
+			req["value"] = params.Value
+		}
+		if params.Operation != SettingsEditOperationRemove {
+			if _, ok := req["value"]; !ok {
+				req["value"] = nil
+			}
+		}
+	}
+	raw, err := a.client.Request(ctx, "user.settings.edit", req)
+	if err != nil {
+		return nil, err
+	}
+	var result SettingsEditResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GetPaths resolves the on-disk locations of the settings files this runtime reads, so a
+// consumer can show or open them. The user path is the same file `user.settings.get`,
+// `user.settings.load`, and `user.settings.set` operate on. Supply `repoRoot` to also
+// resolve that repository's checked-in and local settings paths. A path is reported whether
+// or not the file exists.
+//
+// RPC method: user.settings.getPaths.
+//
+// Parameters: Selects which settings file paths to resolve.
+//
+// Returns: On-disk locations of the settings files this runtime reads. A path is reported
+// whether or not the file exists.
+// Internal: GetPaths is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) GetPaths(ctx context.Context, params *UserSettingsGetPathsRequest) (*UserSettingsGetPathsResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.getPaths", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsGetPathsResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListGovernanceKeys lists the top-level user-setting keys by who is allowed to govern
+// them: `repo` keys a repository may override through `.github/copilot/settings.json`,
+// `claudeRepo` keys a repository may override through a Claude-compatible config, and
+// `managed` keys an enterprise policy may fix. The lists are static for a given runtime
+// build and fail closed: a key absent from a list cannot be governed that way.
+//
+// RPC method: user.settings.listGovernanceKeys.
+//
+// Returns: Top-level user-setting keys grouped by who may govern them.
+// Internal: ListGovernanceKeys is part of the SDK's internal handshake/plumbing; external
+// callers should not use it.
+func (a *InternalServerUserSettingsAPI) ListGovernanceKeys(ctx context.Context) (*UserSettingsGovernanceKeysResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.listGovernanceKeys", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsGovernanceKeysResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// LoadForEdit reads settings.json as stored for a caller that is about to edit it. Unlike
+// `user.settings.get`, this returns file values rather than per-key metadata and defaults.
+// Reports `missing` for an absent file and `invalid` when the existing file will not parse.
+// Retired config.json and extensionless files are not read.
+//
+// RPC method: user.settings.loadForEdit.
+//
+// Returns: Contents of settings.json as stored, for a caller about to rewrite it.
+// Internal: LoadForEdit is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) LoadForEdit(ctx context.Context) (*UserSettingsLoadForEditResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.loadForEdit", nil)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsLoadForEditResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Normalize rewrites legacy and snake_case setting names in a settings object to their
+// canonical spelling. A caller editing settings.json must normalize before writing: a
+// legacy key left in place survives the write, is re-normalized on the next load, and
+// silently shadows the canonical value the write just stored.
+//
+// RPC method: user.settings.normalize.
+//
+// Parameters: Settings object whose key names should be canonicalized.
+//
+// Returns: Settings object with canonical key names.
+// Internal: Normalize is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) Normalize(ctx context.Context, params *UserSettingsNormalizeRequest) (*UserSettingsNormalizeResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.normalize", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsNormalizeResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Update merges a partial object into one top-level user setting, re-reading the stored
+// value inside this runtime process's settings.json write lock so that concurrent writers
+// in this process to different sub-fields of the same key do not clobber each other. Unlike
+// `user.settings.set`, which replaces a key's whole value with what the caller last read,
+// this keeps sub-fields the caller did not name when both the stored value and supplied
+// value are objects; otherwise the supplied value replaces the stored value. Use it
+// whenever two independent surfaces own different sub-fields of one setting. Returns the
+// key's stored value after the write, in `value`.
+//
+// RPC method: user.settings.update.
+//
+// Parameters: Names the user setting to merge into, and the partial object to merge.
+//
+// Returns: The stored value of the user setting after the merge.
+// Internal: Update is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) Update(ctx context.Context, params *UserSettingsUpdateRequest) (*UserSettingsUpdateResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.update", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsUpdateResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Validates one top-level setting subtree without writing it, reporting each problem with
+// the path it applies to. Scoped to a single top-level key on purpose: validating the whole
+// file would reject an edit whenever an unrelated pre-existing field is malformed, locking
+// the user out of the very tool that could fix it.
+//
+// RPC method: user.settings.validate.
+//
+// Parameters: A single top-level setting subtree to validate.
+//
+// Returns: Outcome of validating one top-level setting subtree.
+// Internal: Validate is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) Validate(ctx context.Context, params *UserSettingsValidateRequest) (*UserSettingsValidateResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.validate", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsValidateResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// WriteAll replaces the user settings file's entire content in one write. A key absent from
+// `settings` is removed, which is what distinguishes this from `user.settings.set`: that
+// one merges, so it can never clear a key the caller has dropped. For a caller saving the
+// result of a raw edit, a merge would silently resurrect every key the user deleted.
+// Records the same one-time mutation marks a per-key write records, so a setting the user
+// has now chosen explicitly stops being migrated for them.
+//
+// RPC method: user.settings.writeAll.
+//
+// Parameters: The whole content to store in the user settings file.
+// Internal: WriteAll is part of the SDK's internal handshake/plumbing; external callers
+// should not use it.
+func (a *InternalServerUserSettingsAPI) WriteAll(ctx context.Context, params *UserSettingsWriteAllRequest) (*UserSettingsWriteAllResult, error) {
+	raw, err := a.client.Request(ctx, "user.settings.writeAll", params)
+	if err != nil {
+		return nil, err
+	}
+	var result UserSettingsWriteAllResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Experimental: Settings returns experimental APIs that may change or be removed.
+func (s *InternalServerUserAPI) Settings() *InternalServerUserSettingsAPI {
+	return (*InternalServerUserSettingsAPI)(s)
+}
+
 // InternalServerRPC provides internal SDK server-scoped RPC methods (handshake helpers
 // etc.). Not part of the public API.
 type InternalServerRPC struct {
 	// Reuse a single struct instead of allocating one for each service on the heap.
 	common internalServerAPI
 
+	Account          *InternalServerAccountAPI
 	Agents           *InternalServerAgentsAPI
+	FeatureFlags     *InternalServerFeatureFlagsAPI
 	Git              *InternalServerGitAPI
 	GitHubOwners     *InternalServerGitHubOwnersAPI
 	GitHubRepository *InternalServerGitHubRepositoryAPI
 	GlobalState      *InternalServerGlobalStateAPI
 	Host             *InternalServerHostAPI
+	Instructions     *InternalServerInstructionsAPI
 	MCP              *InternalServerMCPAPI
+	Repo             *InternalServerRepoAPI
 	Sessions         *InternalServerSessionsAPI
+	User             *InternalServerUserAPI
 }
 
 // Connect performs the SDK server connection handshake and validates the optional
@@ -31924,14 +33341,19 @@ func (a *InternalServerRPC) Connect(ctx context.Context, params *ConnectRequest)
 func NewInternalServerRPC(client *jsonrpc2.Client) *InternalServerRPC {
 	r := &InternalServerRPC{}
 	r.common = internalServerAPI{client: client}
+	r.Account = (*InternalServerAccountAPI)(&r.common)
 	r.Agents = (*InternalServerAgentsAPI)(&r.common)
+	r.FeatureFlags = (*InternalServerFeatureFlagsAPI)(&r.common)
 	r.Git = (*InternalServerGitAPI)(&r.common)
 	r.GitHubOwners = (*InternalServerGitHubOwnersAPI)(&r.common)
 	r.GitHubRepository = (*InternalServerGitHubRepositoryAPI)(&r.common)
 	r.GlobalState = (*InternalServerGlobalStateAPI)(&r.common)
 	r.Host = (*InternalServerHostAPI)(&r.common)
+	r.Instructions = (*InternalServerInstructionsAPI)(&r.common)
 	r.MCP = (*InternalServerMCPAPI)(&r.common)
+	r.Repo = (*InternalServerRepoAPI)(&r.common)
 	r.Sessions = (*InternalServerSessionsAPI)(&r.common)
+	r.User = (*InternalServerUserAPI)(&r.common)
 	return r
 }
 
@@ -35097,6 +36519,43 @@ func (a *ModelAPI) GetCurrent(ctx context.Context) (*CurrentModel, error) {
 	return &result, nil
 }
 
+// GetReasoningSummaries computes whether the session's current model shows reasoning
+// summaries and how a host should present them: the default Ctrl+T visibility, reasoning
+// headers, the hidden-summaries hint, and whether a persisted `showReasoning` setting is
+// redundant. The runtime folds in the session's model catalog, selection and
+// reasoning-summaries experiment assignment; the host supplies only its own persisted
+// setting and current visibility. This method reads the session's resolved model catalog
+// rather than resolving it, so call `session.model.list` first on a session that has not
+// listed models or run a turn; until then the result is `ready: false`. A session that
+// resolves models without a Copilot catalog, that is a BYOK registry or an alternate
+// provider, never caches one and stays `ready: false`.
+//
+// RPC method: session.model.getReasoningSummaries.
+//
+// Parameters: Host presentation state the reasoning-summaries policy depends on.
+//
+// Returns: Reasoning-summaries presentation policy for the session's current model.
+func (a *ModelAPI) GetReasoningSummaries(ctx context.Context, params *ModelGetReasoningSummariesRequest) (*ModelGetReasoningSummariesResult, error) {
+	req := map[string]any{"sessionId": a.sessionID}
+	if params != nil {
+		if params.PersistedShowReasoning != nil {
+			req["persistedShowReasoning"] = *params.PersistedShowReasoning
+		}
+		if params.SummariesVisible != nil {
+			req["summariesVisible"] = *params.SummariesVisible
+		}
+	}
+	raw, err := a.client.Request(ctx, "session.model.getReasoningSummaries", req)
+	if err != nil {
+		return nil, err
+	}
+	var result ModelGetReasoningSummariesResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // Lists models available to this session using its own auth and integration context.
 // Connected hosts (CLI TUI, GitHub App) should call this through the session client so
 // remote sessions return the remote CLI's available models rather than the caller's.
@@ -35376,6 +36835,9 @@ func (a *OptionsAPI) Update(ctx context.Context, params *SessionUpdateOptionsPar
 		if params.AgentContext != nil {
 			req["agentContext"] = *params.AgentContext
 		}
+		if params.AgentDirectories != nil {
+			req["agentDirectories"] = params.AgentDirectories
+		}
 		if params.AllowAllMCPServerInstructions != nil {
 			req["allowAllMcpServerInstructions"] = *params.AllowAllMCPServerInstructions
 		}
@@ -35454,6 +36916,9 @@ func (a *OptionsAPI) Update(ctx context.Context, params *SessionUpdateOptionsPar
 		if params.FeatureFlags != nil {
 			req["featureFlags"] = params.FeatureFlags
 		}
+		if params.HookDirectories != nil {
+			req["hookDirectories"] = params.HookDirectories
+		}
 		if params.IgnoredSkillsLocations != nil {
 			req["ignoredSkillsLocations"] = params.IgnoredSkillsLocations
 		}
@@ -35465,6 +36930,9 @@ func (a *OptionsAPI) Update(ctx context.Context, params *SessionUpdateOptionsPar
 		}
 		if params.InstalledPlugins != nil {
 			req["installedPlugins"] = params.InstalledPlugins
+		}
+		if params.InstructionDirectories != nil {
+			req["instructionDirectories"] = params.InstructionDirectories
 		}
 		if params.IntegrationID != nil {
 			req["integrationId"] = *params.IntegrationID

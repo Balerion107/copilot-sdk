@@ -2312,7 +2312,7 @@ function emitServerInstanceMethod(
         const opaqueListOptional = naturalType === "IList<JsonElement>?";
         const opaque = opaqueRequired || opaqueOptional || opaqueListRequired || opaqueListOptional;
         const csType = opaqueRequired
-            ? "object"
+            ? "object?"
             : opaqueOptional
                 ? "object?"
                 : opaqueListRequired
@@ -2322,7 +2322,7 @@ function emitServerInstanceMethod(
                         : naturalType;
         sigParams.push(`${csType} ${pName}${isReq ? "" : " = null"}`);
         const assignedValue = opaqueRequired
-            ? `CopilotClient.ToJsonElementForWire(${pName})!.Value`
+            ? `CopilotClient.ToJsonElementForWire(${pName}) ?? JsonElement.Parse("null")`
             : opaqueOptional
                 ? `CopilotClient.ToJsonElementForWire(${pName})`
                 : opaqueListRequired
@@ -2331,7 +2331,7 @@ function emitServerInstanceMethod(
                         ? `${pName}?.Select(static v => CopilotClient.ToJsonElementForWire(v)!.Value).ToList()`
                         : pName;
         bodyAssignments.push(`${csharpName} = ${assignedValue}`);
-        if (opaqueRequired || opaqueListRequired || (!opaque && requiresArgumentNullCheck(csType, isReq))) {
+        if (opaqueListRequired || (!opaque && requiresArgumentNullCheck(csType, isReq))) {
             argumentNullChecks.push(`${indent}    ArgumentNullException.ThrowIfNull(${pName});`);
         }
         if (opaqueListRequired || (!opaque && requiresArgumentNullCheck(csType, isReq))) {
@@ -2364,7 +2364,18 @@ function emitServerInstanceMethod(
     }
     if (requestClassName && bodyAssignments.length > 0) {
         lines.push(`${indent}    var ${localRequestName} = new ${requestClassName} { ${bodyAssignments.join(", ")} };`);
-        if (!isVoidSchema(resultSchema)) {
+        if (
+            method.rpcMethod === "user.settings.applyTopKey" ||
+            method.rpcMethod === "repo.settings.writeKey"
+        ) {
+            lines.push(`${indent}    var payload = JsonSerializer.SerializeToNode(${localRequestName}, RpcJsonContext.Default.${requestClassName})!.AsObject();`);
+            lines.push(`${indent}    if (${localRequestName}.Delete != true && ${localRequestName}.Value is null) payload["value"] = null;`);
+            if (!isVoidSchema(resultSchema)) {
+                lines.push(`${indent}    return await CopilotClient.InvokeRpcAsync<${resultClassName}>(_rpc, "${method.rpcMethod}", [payload], cancellationToken);`);
+            } else {
+                lines.push(`${indent}    await CopilotClient.InvokeRpcAsync(_rpc, "${method.rpcMethod}", [payload], cancellationToken);`);
+            }
+        } else if (!isVoidSchema(resultSchema)) {
             lines.push(`${indent}    return await CopilotClient.InvokeRpcAsync<${resultClassName}>(_rpc, "${method.rpcMethod}", [${localRequestName}], cancellationToken);`);
         } else {
             lines.push(`${indent}    await CopilotClient.InvokeRpcAsync(_rpc, "${method.rpcMethod}", [${localRequestName}], cancellationToken);`);
@@ -2548,7 +2559,7 @@ function emitSessionMethod(key: string, method: RpcMethod, lines: string[], clas
             const opaqueListOptional = naturalType === "IList<JsonElement>?";
             const opaque = opaqueRequired || opaqueOptional || opaqueListRequired || opaqueListOptional;
             const csType = opaqueRequired
-                ? "object"
+                ? "object?"
                 : opaqueOptional
                     ? "object?"
                     : opaqueListRequired
@@ -2558,7 +2569,7 @@ function emitSessionMethod(key: string, method: RpcMethod, lines: string[], clas
                             : naturalType;
             sigParams.push(`${csType} ${pName}${isReq ? "" : " = null"}`);
             const assignedValue = opaqueRequired
-                ? `CopilotClient.ToJsonElementForWire(${pName})!.Value`
+                ? `CopilotClient.ToJsonElementForWire(${pName}) ?? JsonElement.Parse("null")`
                 : opaqueOptional
                     ? `CopilotClient.ToJsonElementForWire(${pName})`
                     : opaqueListRequired
@@ -2567,7 +2578,7 @@ function emitSessionMethod(key: string, method: RpcMethod, lines: string[], clas
                             ? `${pName}?.Select(static v => CopilotClient.ToJsonElementForWire(v)!.Value).ToList()`
                             : pName;
             bodyAssignments.push(`${csharpName} = ${assignedValue}`);
-            if (opaqueRequired || opaqueListRequired || (!opaque && requiresArgumentNullCheck(csType, isReq))) {
+            if (opaqueListRequired || (!opaque && requiresArgumentNullCheck(csType, isReq))) {
                 argumentNullChecks.push(`${indent}    ArgumentNullException.ThrowIfNull(${pName});`);
             }
             if (opaqueListRequired || (!opaque && requiresArgumentNullCheck(csType, isReq))) {
@@ -2599,7 +2610,18 @@ function emitSessionMethod(key: string, method: RpcMethod, lines: string[], clas
     lines.push(`${indent}    _session.ThrowIfDisposed();`);
     lines.push("");
     lines.push(`${indent}    var ${localRequestName} = new ${wireRequestClassName} { ${bodyAssignments.join(", ")} };`);
-    if (!isVoidSchema(resultSchema)) {
+    if (
+        method.rpcMethod === "user.settings.applyTopKey" ||
+        method.rpcMethod === "repo.settings.writeKey"
+    ) {
+        lines.push(`${indent}    var payload = JsonSerializer.SerializeToNode(${localRequestName}, RpcJsonContext.Default.${wireRequestClassName})!.AsObject();`);
+        lines.push(`${indent}    if (${localRequestName}.Delete != true && ${localRequestName}.Value is null) payload["value"] = null;`);
+        if (!isVoidSchema(resultSchema)) {
+            lines.push(`${indent}    return await CopilotClient.InvokeRpcAsync<${resultClassName}>(_session.Rpc, "${method.rpcMethod}", [payload], cancellationToken);`, `${indent}}`);
+        } else {
+            lines.push(`${indent}    await CopilotClient.InvokeRpcAsync(_session.Rpc, "${method.rpcMethod}", [payload], cancellationToken);`, `${indent}}`);
+        }
+    } else if (!isVoidSchema(resultSchema)) {
         lines.push(`${indent}    return await CopilotClient.InvokeRpcAsync<${resultClassName}>(_session.Rpc, "${method.rpcMethod}", [${localRequestName}], cancellationToken);`, `${indent}}`);
     } else {
         lines.push(`${indent}    await CopilotClient.InvokeRpcAsync(_session.Rpc, "${method.rpcMethod}", [${localRequestName}], cancellationToken);`, `${indent}}`);
